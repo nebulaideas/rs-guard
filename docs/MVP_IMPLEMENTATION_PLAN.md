@@ -361,47 +361,48 @@ Extend `src/llm/` to support multiple LLM providers. Add `.reviewer.toml` config
 
 > **Note:** Phase 1 uses enum-based dispatch (`Provider` enum). In Phase 2, introduce the `LlmProvider` async trait and refactor `Provider` to use `Box<dyn LlmProvider>` for dynamic dispatch across multiple providers.
 
-- [ ] `src/llm/kimi.rs` — Kimi/Moonshot AI provider:
+- [x] `src/llm/kimi.rs` — Kimi/Moonshot AI provider:
   - Base URL: `https://api.moonshot.ai/v1`
   - Auth header: `Bearer {KIMI_API_KEY}`
   - OpenAI-compatible schema with `reasoning_content` field support
   - Default model: `kimi-k2.5`
-  - Client struct: `KimiClient { api_key: String, base_url: String }`
+  - Client struct: `KimiClient { base_url: String, model: String, max_tokens: Option<u32>, client: reqwest::Client }`
 
-- [ ] `src/llm/qwen.rs` — Qwen/Alibaba Cloud provider:
+- [x] `src/llm/qwen.rs` — Qwen/Alibaba Cloud provider:
   - Base URL: `https://dashscope-intl.aliyuncs.com/compatible-mode/v1`
   - Auth header: `Bearer {DASHSCOPE_API_KEY}`
   - Requires `result_format: "message"` for some models
   - Default model: `qwen-plus`
-  - Client struct: `QwenClient { api_key: String, base_url: String }`
+  - Client struct: `QwenClient { base_url: String, model: String, max_tokens: Option<u32>, client: reqwest::Client }`
 
-- [ ] `src/llm/openrouter.rs` — OpenRouter gateway:
+- [x] `src/llm/openrouter.rs` — OpenRouter gateway:
   - Base URL: `https://openrouter.ai/api/v1`
   - Auth header: `Bearer {OPENROUTER_API_KEY}`
   - Additional headers: `HTTP-Referer`, `X-Title` for attribution
   - Supports routing to any model via OpenRouter's unified API
-  - Client struct: `OpenRouterClient { api_key: String, base_url: String, http_referer: String }`
+  - Client struct: `OpenRouterClient { base_url: String, model: String, max_tokens: Option<u32>, client: reqwest::Client }`
 
-- [ ] `src/llm/openai.rs` — Generic OpenAI-compatible provider:
+- [x] `src/llm/openai.rs` — Generic OpenAI-compatible provider:
   - Base URL: `https://api.openai.com/v1` (configurable)
   - Auth header: `Bearer {OPENAI_API_KEY}`
   - Default model: `gpt-4o-mini`
   - Catch-all for any OpenAI-compatible endpoint
-  - Client struct: `OpenAiClient { api_key: String, base_url: String }`
+  - Client struct: `OpenAiClient { base_url: String, model: String, max_tokens: Option<u32>, client: reqwest::Client }`
 
 #### Provider Factory
 
-- [ ] `src/llm/factory.rs` — `create_provider(provider_name: &str, api_key: &str) -> Provider`:
-  - Matches provider name to enum variant
-  - Returns `Provider::DeepSeek(...)`, `Provider::Kimi(...)`, etc.
-  - Validates that required API key environment variable is set
+- [x] `src/llm/factory.rs` — `create_provider(provider_name: &str, api_key: &str, config: &ProviderConfig) -> Provider`:
+  - Matches provider name and creates typed client
+  - Applies `ProviderConfig` overrides (base_url, http_referer, max_tokens)
+  - Returns `Box<dyn LlmProvider>` for dynamic dispatch
 
 #### Configuration File Support
 
-- [ ] `src/config.rs` — TOML configuration:
+- [x] `src/config.rs` — TOML configuration:
   - Add `--config` / `-c` CLI flag to `src/cli.rs` (deferred from Phase 1)
   - Parse `.reviewer.toml` from repository root
-  - `Config::apply_args()` already handles CLI overrides; extend to merge TOML values
+  - `Config::apply_args()` uses `Option<T>` CLI fields for reliable override detection
+  - Per-provider TOML settings (`base_url`, `api_key_env`, `http_referer`) wired to provider clients
   - Schema:
     ```toml
     provider = "deepseek"
@@ -435,23 +436,23 @@ Extend `src/llm/` to support multiple LLM providers. Add `.reviewer.toml` config
 
 #### Local Mode (Pre-commit)
 
-- [ ] Detect local execution: `GITHUB_ACTIONS` env var is absent
-- [ ] `src/diff.rs` — Local diff source: execute `git diff --cached` subprocess
-- [ ] Skip GitHub API calls in local mode
-- [ ] Terminal output with `colored` crate:
+- [x] Detect local execution: `GITHUB_ACTIONS` env var is absent
+- [x] `src/diff.rs` — Local diff source: execute `git diff --cached` subprocess
+- [x] Skip GitHub API calls in local mode
+- [x] Terminal output with `colored` crate:
   - Print full LLM review with syntax highlighting
   - Print verdict summary with color-coded state
   - Print metadata block extract
-- [ ] Exit behavior:
+- [x] Exit behavior:
   - `exit(0)` if `ReviewState::Approve` or `ReviewState::Comment`
   - `exit(2)` if `ReviewState::RequestChanges` — aborts the commit
-- [ ] `examples/local-review/pre-commit-hook.sh` — Example git hook script
+- [x] `examples/local-review/pre-commit-hook.sh` — Example git hook script
 
 #### Documentation (Phase 2)
 
-- [ ] `docs/PROVIDERS.md` — Per-provider setup guide with API key acquisition instructions
-- [ ] `docs/CONFIGURATION.md` — Complete `.reviewer.toml` reference
-- [ ] `docs/LOCAL_MODE.md` — Pre-commit hook setup and local usage
+- [x] `docs/PROVIDERS.md` — Per-provider setup guide with API key acquisition instructions
+- [x] `docs/CONFIGURATION.md` — Complete `.reviewer.toml` reference
+- [x] `docs/LOCAL_MODE.md` — Pre-commit hook setup and local usage
 
 ### Changelog Entry — Phase 2
 

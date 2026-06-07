@@ -1,25 +1,30 @@
 #!/bin/sh
-# diffguard-rs pre-commit hook
-# Install: cp pre-commit-hook.sh .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
+# diffguard pre-commit hook
+#
+# Install:
+#   cp examples/local-review/pre-commit-hook.sh .git/hooks/pre-commit
+#   chmod +x .git/hooks/pre-commit
+#
+# This hook analyzes staged changes with diffguard and aborts the commit
+# if the review returns REQUEST_CHANGES.
 
-# Run diffguard on staged changes
-if command -v diffguard >/dev/null 2>&1; then
-    diffguard --prompt-file .github/review-prompt.md
-    EXIT_CODE=$?
-    
-    if [ $EXIT_CODE -eq 2 ]; then
-        echo ""
-        echo "❌ Commit blocked: diffguard review returned REQUEST_CHANGES."
-        echo "   Address the issues above or use git commit --no-verify to bypass."
-        exit 1
-    elif [ $EXIT_CODE -eq 1 ]; then
-        echo ""
-        echo "⚠️  diffguard encountered an error. Check output above."
-        exit 1
-    fi
+# Set your preferred provider and API key here, or rely on env vars.
+# export DIFFGUARD_PROVIDER="deepseek"
+# export DEEPSEEK_API_KEY="your-api-key"
+
+echo "Running diffguard pre-commit review..."
+
+diffguard
+EXIT_CODE=$?
+
+if [ "$EXIT_CODE" -eq 0 ]; then
+    echo "diffguard: Review passed."
+    exit 0
+elif [ "$EXIT_CODE" -eq 2 ]; then
+    echo "diffguard: Review returned REQUEST_CHANGES. Commit aborted."
+    echo "Address the issues above or bypass with: git commit --no-verify"
+    exit 1
 else
-    echo "⚠️  diffguard not found in PATH. Skipping AI review."
-    echo "   Install from: https://github.com/nebulaideas/diffguard-rs/releases"
+    echo "diffguard: Error occurred (exit code $EXIT_CODE)."
+    exit 1
 fi
-
-exit 0

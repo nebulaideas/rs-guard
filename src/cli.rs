@@ -18,30 +18,32 @@ pub struct Args {
     )]
     pub prompt_file: PathBuf,
 
-    /// LLM model identifier.
+    /// LLM model identifier (default: provider-specific).
     #[arg(
         short,
         long,
-        default_value = "deepseek-v4-flash",
-        help = "LLM model identifier"
+        help = "LLM model identifier (default: provider-specific)"
     )]
-    pub model: String,
+    pub model: Option<String>,
 
-    /// Sampling temperature (0.0 - 2.0).
+    /// Sampling temperature (0.0 - 2.0). Default: 0.1.
+    #[arg(short, long, help = "Sampling temperature (0.0 - 2.0) [default: 0.1]")]
+    pub temperature: Option<f32>,
+
+    /// LLM provider to use. Default: deepseek.
+    #[arg(long, help = "LLM provider to use [default: deepseek]")]
+    pub provider: Option<String>,
+
+    /// Path to configuration TOML file.
     #[arg(
         short,
         long,
-        default_value_t = 0.1,
-        help = "Sampling temperature (0.0 - 2.0)"
+        default_value = ".reviewer.toml",
+        help = "Path to configuration TOML file"
     )]
-    pub temperature: f32,
+    pub config: PathBuf,
 
-    /// LLM provider to use.
-    #[arg(
-        long,
-        env = "DIFFGUARD_PROVIDER",
-        default_value = "deepseek",
-        help = "LLM provider to use"
-    )]
-    pub provider: String,
+    /// Maximum tokens for LLM completions.
+    #[arg(long, help = "Maximum tokens for LLM completions")]
+    pub max_tokens: Option<u32>,
 }

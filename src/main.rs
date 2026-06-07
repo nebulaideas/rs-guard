@@ -6,7 +6,7 @@
 use anyhow::Context;
 use clap::Parser;
 use diffguard::cli::Args;
-use diffguard::config::Config;
+use diffguard::config::{load_toml_config, Config};
 use diffguard::diff::{fetch_local_diff, fetch_pr_diff};
 use diffguard::github::{dismiss_previous_reviews, submit_review};
 use diffguard::llm::factory::create_provider;
@@ -104,7 +104,7 @@ pub async fn run_pipeline(config: Config) -> anyhow::Result<()> {
     };
 
     log::info!("Calling {} ({})...", config.provider, config.model);
-    let provider = create_provider(&config.provider, &config.api_key)
+    let provider = create_provider(&config.provider, &config.api_key, &config.provider_config)
         .context("Failed to create LLM provider")?;
 
     let llm_response = provider
@@ -196,7 +196,10 @@ async fn main() -> anyhow::Result<()> {
     env_logger::init();
     let args = Args::parse();
 
-    let mut config = Config::from_env().context("Failed to load configuration")?;
+    let toml_config =
+        load_toml_config(&args.config).context("Failed to load TOML configuration")?;
+
+    let mut config = Config::from_env(toml_config).context("Failed to load configuration")?;
     config
         .apply_args(&args)
         .context("Failed to apply CLI arguments")?;
