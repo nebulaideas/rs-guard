@@ -1,11 +1,36 @@
+//! Retry logic for transient API failures.
+//!
+//! Provides [`with_retry`], a generic async retry wrapper that applies
+//! fixed-delay backoff to operations returning [`DiffguardError`].
+
 use crate::error::DiffguardError;
 use std::future::Future;
 use std::time::Duration;
 use tokio::time::sleep;
 
+/// Maximum number of retry attempts after the initial call.
 const MAX_RETRIES: u32 = 2;
+
+/// Fixed backoff delays for each retry attempt.
 const BACKOFF_DELAYS: [Duration; 2] = [Duration::from_secs(1), Duration::from_secs(2)];
 
+/// Executes an async operation with automatic retry on transient failures.
+///
+/// Retries up to [`MAX_RETRIES`] times with fixed backoff delays when the
+/// operation returns a retryable [`DiffguardError`]. Non-retryable errors
+/// are returned immediately.
+///
+/// # Arguments
+///
+/// * `operation` — A closure returning a `Future` that produces `Result<T, DiffguardError>`.
+///
+/// # Examples
+///
+/// ```ignore
+/// let result = with_retry(|| async {
+///     client.get(&url).send().await.map_err(|e| /* ... */)
+/// }).await?;
+/// ```
 pub async fn with_retry<T, F, Fut>(operation: F) -> Result<T, DiffguardError>
 where
     F: Fn() -> Fut,

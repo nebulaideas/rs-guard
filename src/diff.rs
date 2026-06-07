@@ -1,18 +1,75 @@
+//! Diff fetching from GitHub Pull Requests and local git staging.
+//!
+//! Provides [`fetch_pr_diff`] for retrieving PR diffs via the GitHub REST API
+//! and [`fetch_local_diff`] for reading `git diff --cached` output.
+
 use crate::error::DiffguardError;
 use crate::retry::with_retry;
 use reqwest::header::{self, HeaderMap, HeaderValue};
 
-const MAX_DIFF_BYTES: usize = 100 * 1024; // 100KB
+/// Maximum allowed diff size in bytes (100 KB).
+const MAX_DIFF_BYTES: usize = 100 * 1024;
+
+/// Maximum allowed diff line count.
 const MAX_DIFF_LINES: usize = 1500;
+
+/// HTTP request timeout for diff fetching.
 const REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
+/// Result of a successful diff fetch operation.
 #[derive(Debug, Clone)]
 pub struct DiffResult {
+    /// The raw diff content.
     pub content: String,
+    /// Size of the diff in bytes.
     pub size_bytes: usize,
+    /// Number of lines in the diff.
     pub line_count: usize,
 }
 
+/// Builds default headers for GitHub API requests.
+///
+/// Returns an error if the token contains invalid characters.
+fn github_headers(token: &str) -> Result<HeaderMap, DiffguardError> {
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        header::ACCEPT,
+        HeaderValue::from_static("application/vnd.github.v3.diff"),
+    );
+    headers.insert(
+        header::AUTHORIZATION,
+        HeaderValue::from_str(&format!("Bearer {}", token))
+            .map_err(|e| DiffguardError::Config(format!("Invalid GitHub token format: {}", e)))?,
+    );
+    headers.insert(
+        "X-GitHub-Api-Version",
+        HeaderValue::from_static("2022-11-28"),
+    );
+    headers.insert(
+        header::USER_AGENT,
+        HeaderValue::from_static("diffguard-rs/0.1.0"),
+    );
+    Ok(headers)
+}
+
+/// Fetches the diff for a GitHub Pull Request.
+///
+/// Sends a GET request to the GitHub API with the `application/vnd.github.v3.diff`
+/// accept header. Automatically retries on transient failures (429, 5xx).
+///
+/// # Arguments
+///
+/// * `base_url` — GitHub API base URL (e.g. `"https://api.github.com"`).
+/// * `owner` — Repository owner.
+/// * `repo` — Repository name.
+/// * `pr_number` — Pull request number.
+/// * `token` — GitHub authentication token.
+///
+/// # Errors
+///
+/// Returns [`DiffguardError::GitHubApi`] on HTTP errors,
+/// [`DiffguardError::EmptyDiff`] if the diff is empty,
+/// or [`DiffguardError::DiffTooLarge`] if the diff exceeds size limits.
 pub async fn fetch_pr_diff(
     base_url: &str,
     owner: &str,
@@ -23,30 +80,10 @@ pub async fn fetch_pr_diff(
     let client = reqwest::Client::builder()
         .timeout(REQUEST_TIMEOUT)
         .build()
-        .expect("Failed to build HTTP client");
+        .map_err(|e| DiffguardError::Config(format!("Failed to build HTTP client: {}", e)))?;
 
-    let url = format!(
-        "{}/repos/{}/{}/pulls/{}",
-        base_url, owner, repo, pr_number
-    );
-
-    let mut headers = HeaderMap::new();
-    headers.insert(
-        header::ACCEPT,
-        HeaderValue::from_static("application/vnd.github.v3.diff"),
-    );
-    headers.insert(
-        header::AUTHORIZATION,
-        HeaderValue::from_str(&format!("Bearer {}", token)).unwrap(),
-    );
-    headers.insert(
-        "X-GitHub-Api-Version",
-        HeaderValue::from_static("2022-11-28"),
-    );
-    headers.insert(
-        header::USER_AGENT,
-        HeaderValue::from_static("diffguard-rs/0.1.0"),
-    );
+    let url = format!("{}/repos/{}/{}/pulls/{}", base_url, owner, repo, pr_number);
+    let headers = github_headers(token)?;
 
     let response = with_retry(|| async {
         let resp = client
@@ -101,6 +138,13 @@ pub async fn fetch_pr_diff(
     })
 }
 
+/// Fetches the locally staged diff via `git diff --cached`.
+///
+/// # Errors
+///
+/// Returns [`DiffguardError::Io`] if the git command fails,
+/// [`DiffguardError::EmptyDiff`] if there are no staged changes,
+/// or [`DiffguardError::DiffTooLarge`] if the diff exceeds size limits.
 pub fn fetch_local_diff() -> Result<DiffResult, DiffguardError> {
     let output = std::process::Command::new("git")
         .args(["diff", "--cached"])

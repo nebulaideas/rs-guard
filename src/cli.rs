@@ -1,11 +1,15 @@
+//! CLI argument definitions using `clap` derive macros.
+
 use clap::Parser;
 use std::path::PathBuf;
 
+/// Command-line arguments for the diffguard review tool.
 #[derive(Parser, Debug, Clone)]
 #[command(name = "diffguard")]
 #[command(about = "AI-powered code review CLI for GitHub PRs")]
 #[command(version = env!("CARGO_PKG_VERSION"))]
 pub struct Args {
+    /// Path to system prompt markdown file.
     #[arg(
         short,
         long,
@@ -14,6 +18,7 @@ pub struct Args {
     )]
     pub prompt_file: PathBuf,
 
+    /// LLM model identifier.
     #[arg(
         short,
         long,
@@ -22,6 +27,7 @@ pub struct Args {
     )]
     pub model: String,
 
+    /// Sampling temperature (0.0 - 2.0).
     #[arg(
         short,
         long,
@@ -30,6 +36,7 @@ pub struct Args {
     )]
     pub temperature: f32,
 
+    /// LLM provider to use.
     #[arg(
         long,
         env = "DIFFGUARD_PROVIDER",
@@ -37,12 +44,4 @@ pub struct Args {
         help = "LLM provider to use"
     )]
     pub provider: String,
-
-    #[arg(
-        short,
-        long,
-        default_value = ".reviewer.toml",
-        help = "Path to configuration TOML file"
-    )]
-    pub config: PathBuf,
 }

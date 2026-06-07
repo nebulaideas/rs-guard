@@ -1,6 +1,15 @@
+//! Configuration resolution from environment variables and CLI arguments.
+//!
+//! Handles detection of CI vs local mode, API key resolution, and
+//! validation of required fields for GitHub PR review submission.
+
+use crate::cli::Args;
 use crate::error::DiffguardError;
 use std::path::Path;
 
+/// Default system prompt embedded in the binary.
+///
+/// Used when no `--prompt-file` is specified or the file does not exist.
 pub const DEFAULT_PROMPT: &str = r#"You are a senior software engineer performing a code review on a Pull Request diff.
 
 Review the provided diff carefully. Identify:
@@ -23,41 +32,62 @@ Guidelines:
 - SecurityIssues: count of security vulnerabilities or risks
 "#;
 
+/// Resolved application configuration.
 #[derive(Debug, Clone)]
 pub struct Config {
+    /// LLM provider name (e.g. `"deepseek"`).
     pub provider: String,
+    /// Model identifier for the LLM provider.
     pub model: String,
+    /// Sampling temperature for LLM completions.
     pub temperature: f32,
+    /// API key for the selected LLM provider.
     pub api_key: String,
+    /// GitHub authentication token (required in CI mode).
     pub github_token: Option<String>,
+    /// Pull request number (required in CI mode).
     pub pr_number: Option<u64>,
+    /// Repository owner (required in CI mode).
     pub repo_owner: Option<String>,
+    /// Repository name (required in CI mode).
     pub repo_name: Option<String>,
+    /// System prompt text sent to the LLM.
     pub prompt: String,
+    /// Whether the tool is running in CI mode.
     pub is_ci: bool,
+    /// GitHub API base URL.
+    pub github_base_url: String,
 }
 
 impl Config {
+    /// Builds configuration from environment variables.
+    ///
+    /// Detects CI mode via the `GITHUB_ACTIONS` environment variable and
+    /// resolves the appropriate API key based on the selected provider.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DiffguardError::Config`] if the required API key is not set.
     pub fn from_env() -> Result<Self, DiffguardError> {
         let is_ci = std::env::var("GITHUB_ACTIONS").is_ok();
 
-        let provider = std::env::var("DIFFGUARD_PROVIDER").unwrap_or_else(|_| "deepseek".to_string());
+        let provider =
+            std::env::var("DIFFGUARD_PROVIDER").unwrap_or_else(|_| "deepseek".to_string());
 
-        let api_key = match provider.as_str() {
-            "deepseek" => std::env::var("DEEPSEEK_API_KEY"),
-            _ => std::env::var("DEEPSEEK_API_KEY"),
-        }
-        .map_err(|_| {
+        let api_key_env = match provider.as_str() {
+            "deepseek" => "DEEPSEEK_API_KEY",
+            _ => "DEEPSEEK_API_KEY",
+        };
+
+        let api_key = std::env::var(api_key_env).map_err(|_| {
             DiffguardError::Config(format!(
-                "API key not found. Set DEEPSEEK_API_KEY for provider '{}'",
-                provider
+                "API key not found. Set {} for provider '{}'",
+                api_key_env, provider
             ))
         })?;
 
         let github_token = std::env::var("GITHUB_TOKEN").ok();
-        let pr_number = std::env::var("PR_NUMBER")
-            .ok()
-            .and_then(|s| s.parse().ok());
+        let pr_number = std::env::var("PR_NUMBER").ok().and_then(|s| s.parse().ok());
         let repo_full_name = std::env::var("REPO_FULL_NAME").ok();
 
         let (repo_owner, repo_name) = match repo_full_name {
@@ -87,18 +117,45 @@ impl Config {
             repo_name,
             prompt: DEFAULT_PROMPT.to_string(),
             is_ci,
+            github_base_url: "https://api.github.com".to_string(),
         })
     }
 
+    /// Applies CLI argument overrides to the configuration.
+    ///
+    /// CLI flags take precedence over environment variables for `model`,
+    /// `temperature`, and `provider`.
+    pub fn apply_args(&mut self, args: &Args) {
+        self.model = args.model.clone();
+        self.temperature = args.temperature;
+        self.provider = args.provider.clone();
+    }
+
+    /// Loads the system prompt from a file, falling back to the default.
+    ///
+    /// If the file does not exist, the embedded [`DEFAULT_PROMPT`] is used.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DiffguardError::Config`] if the file exists but cannot be read.
     pub fn load_prompt_file(&mut self, path: &Path) -> Result<(), DiffguardError> {
         if path.exists() {
-            let content = std::fs::read_to_string(path)
-                .map_err(|e| DiffguardError::Config(format!("Failed to read prompt file: {}", e)))?;
+            let content = std::fs::read_to_string(path).map_err(|e| {
+                DiffguardError::Config(format!("Failed to read prompt file: {}", e))
+            })?;
             self.prompt = content;
         }
         Ok(())
     }
 
+    /// Validates that all required fields are present for CI mode.
+    ///
+    /// In local mode, this is a no-op. In CI mode, `GITHUB_TOKEN`,
+    /// `PR_NUMBER`, and `REPO_FULL_NAME` must all be set.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DiffguardError::Config`] if a required CI field is missing.
     pub fn validate_for_ci(&self) -> Result<(), DiffguardError> {
         if self.is_ci {
             if self.github_token.is_none() {

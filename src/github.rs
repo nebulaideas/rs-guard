@@ -1,13 +1,48 @@
+//! GitHub API interaction for submitting reviews and dismissing stale blockers.
+//!
+//! Provides [`submit_review`] with automatic permission-fallback to `COMMENT`,
+//! and [`dismiss_previous_reviews`] for cleaning up outdated bot reviews.
+
 use crate::error::DiffguardError;
 use crate::retry::with_retry;
 use crate::verdict::ReviewState;
 use reqwest::header::{self, HeaderMap, HeaderValue};
 use serde_json::json;
 
+/// HTTP request timeout for GitHub API calls.
 const REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// HTML comment signature used to identify diffguard bot reviews.
 const BOT_SIGNATURE: &str = "<!-- diffguard-bot -->";
 
+/// Builds default headers for GitHub API requests.
+///
+/// Returns an error if the token contains invalid characters.
+fn github_headers(token: &str) -> Result<HeaderMap, DiffguardError> {
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        header::ACCEPT,
+        HeaderValue::from_static("application/vnd.github+json"),
+    );
+    headers.insert(
+        header::AUTHORIZATION,
+        HeaderValue::from_str(&format!("Bearer {}", token))
+            .map_err(|e| DiffguardError::Config(format!("Invalid GitHub token format: {}", e)))?,
+    );
+    headers.insert(
+        "X-GitHub-Api-Version",
+        HeaderValue::from_static("2022-11-28"),
+    );
+    headers.insert(
+        header::USER_AGENT,
+        HeaderValue::from_static("diffguard-rs/0.1.0"),
+    );
+    Ok(headers)
+}
+
+/// Submits a review to a GitHub Pull Request without permission fallback.
 async fn submit_review_inner(
+    base_url: &str,
     owner: &str,
     repo: &str,
     pr_number: u64,
@@ -18,30 +53,14 @@ async fn submit_review_inner(
     let client = reqwest::Client::builder()
         .timeout(REQUEST_TIMEOUT)
         .build()
-        .expect("Failed to build HTTP client");
+        .map_err(|e| DiffguardError::Config(format!("Failed to build HTTP client: {}", e)))?;
 
     let url = format!(
-        "https://api.github.com/repos/{}/{}/pulls/{}/reviews",
-        owner, repo, pr_number
+        "{}/repos/{}/{}/pulls/{}/reviews",
+        base_url, owner, repo, pr_number
     );
 
-    let mut headers = HeaderMap::new();
-    headers.insert(
-        header::ACCEPT,
-        HeaderValue::from_static("application/vnd.github+json"),
-    );
-    headers.insert(
-        header::AUTHORIZATION,
-        HeaderValue::from_str(&format!("Bearer {}", token)).unwrap(),
-    );
-    headers.insert(
-        "X-GitHub-Api-Version",
-        HeaderValue::from_static("2022-11-28"),
-    );
-    headers.insert(
-        header::USER_AGENT,
-        HeaderValue::from_static("diffguard-rs/0.1.0"),
-    );
+    let headers = github_headers(token)?;
 
     let body = json!({
         "body": format!("{}\n\n{}", message, BOT_SIGNATURE),
@@ -77,7 +96,23 @@ async fn submit_review_inner(
     .await
 }
 
+/// Submits a review to a GitHub Pull Request with automatic permission fallback.
+///
+/// If the initial review state (e.g. `APPROVE` or `REQUEST_CHANGES`) fails due
+/// to insufficient permissions (HTTP 403), the function retries with `COMMENT`
+/// and prepends `[Bot fallback from {state}]` to the message.
+///
+/// # Arguments
+///
+/// * `base_url` — GitHub API base URL (e.g. `"https://api.github.com"`).
+/// * `owner` — Repository owner.
+/// * `repo` — Repository name.
+/// * `pr_number` — Pull request number.
+/// * `state` — Desired review state.
+/// * `message` — Review body text.
+/// * `token` — GitHub authentication token.
 pub async fn submit_review(
+    base_url: &str,
     owner: &str,
     repo: &str,
     pr_number: u64,
@@ -85,7 +120,8 @@ pub async fn submit_review(
     message: &str,
     token: &str,
 ) -> Result<(), DiffguardError> {
-    let result = submit_review_inner(owner, repo, pr_number, &state, message, token).await;
+    let result =
+        submit_review_inner(base_url, owner, repo, pr_number, &state, message, token).await;
 
     match result {
         Ok(()) => Ok(()),
@@ -94,18 +130,40 @@ pub async fn submit_review(
                 "Permission denied for {}. Falling back to COMMENT...",
                 state
             );
-            let fallback_msg = format!(
-                "[Bot fallback from {}]\n\n{}",
-                state, message
-            );
-            submit_review_inner(owner, repo, pr_number, &ReviewState::Comment, &fallback_msg, token)
-                .await
+            let fallback_msg = format!("[Bot fallback from {}]\n\n{}", state, message);
+            submit_review_inner(
+                base_url,
+                owner,
+                repo,
+                pr_number,
+                &ReviewState::Comment,
+                &fallback_msg,
+                token,
+            )
+            .await
         }
         Err(err) => Err(err),
     }
 }
 
+/// Dismisses previous diffguard `CHANGES_REQUESTED` reviews on a Pull Request.
+///
+/// Queries all reviews on the PR, identifies those with state `CHANGES_REQUESTED`
+/// that contain the [`BOT_SIGNATURE`] marker, and dismisses each one with the
+/// message "Outdated — new review submitted".
+///
+/// Individual dismissal failures are logged as warnings but do not cause this
+/// function to return an error.
+///
+/// # Arguments
+///
+/// * `base_url` — GitHub API base URL (e.g. `"https://api.github.com"`).
+/// * `owner` — Repository owner.
+/// * `repo` — Repository name.
+/// * `pr_number` — Pull request number.
+/// * `token` — GitHub authentication token.
 pub async fn dismiss_previous_reviews(
+    base_url: &str,
     owner: &str,
     repo: &str,
     pr_number: u64,
@@ -114,30 +172,14 @@ pub async fn dismiss_previous_reviews(
     let client = reqwest::Client::builder()
         .timeout(REQUEST_TIMEOUT)
         .build()
-        .expect("Failed to build HTTP client");
+        .map_err(|e| DiffguardError::Config(format!("Failed to build HTTP client: {}", e)))?;
 
     let url = format!(
-        "https://api.github.com/repos/{}/{}/pulls/{}/reviews",
-        owner, repo, pr_number
+        "{}/repos/{}/{}/pulls/{}/reviews",
+        base_url, owner, repo, pr_number
     );
 
-    let mut headers = HeaderMap::new();
-    headers.insert(
-        header::ACCEPT,
-        HeaderValue::from_static("application/vnd.github+json"),
-    );
-    headers.insert(
-        header::AUTHORIZATION,
-        HeaderValue::from_str(&format!("Bearer {}", token)).unwrap(),
-    );
-    headers.insert(
-        "X-GitHub-Api-Version",
-        HeaderValue::from_static("2022-11-28"),
-    );
-    headers.insert(
-        header::USER_AGENT,
-        HeaderValue::from_static("diffguard-rs/0.1.0"),
-    );
+    let headers = github_headers(token)?;
 
     let reviews: Vec<serde_json::Value> = with_retry(|| async {
         let resp = client
@@ -177,15 +219,15 @@ pub async fn dismiss_previous_reviews(
         if state == "CHANGES_REQUESTED" && body.contains(BOT_SIGNATURE) {
             if let Some(id) = review_id {
                 let dismiss_url = format!(
-                    "https://api.github.com/repos/{}/{}/pulls/{}/reviews/{}/dismissals",
-                    owner, repo, pr_number, id
+                    "{}/repos/{}/{}/pulls/{}/reviews/{}/dismissals",
+                    base_url, owner, repo, pr_number, id
                 );
 
                 let dismiss_body = json!({
                     "message": "Outdated — new review submitted",
                 });
 
-                let _ = with_retry(|| async {
+                if let Err(e) = with_retry(|| async {
                     let resp = client
                         .put(&dismiss_url)
                         .headers(headers.clone())
@@ -211,7 +253,10 @@ pub async fn dismiss_previous_reviews(
 
                     Ok(())
                 })
-                .await;
+                .await
+                {
+                    log::warn!("Failed to dismiss review {}: {}", id, e);
+                }
             }
         }
     }

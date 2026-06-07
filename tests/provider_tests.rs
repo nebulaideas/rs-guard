@@ -1,3 +1,4 @@
+use diffguard::llm::deepseek::DeepSeekClient;
 use diffguard::llm::factory::create_provider;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -18,10 +19,19 @@ async fn test_deepseek_provider_success() {
         .mount(&mock_server)
         .await;
 
-    // Note: We can't easily test with custom base_url through factory in this test
-    // because factory doesn't expose it. This is an integration test pattern
-    // that would need the provider to support configurable base URL.
-    // For now, we verify the provider creation works.
+    let client = DeepSeekClient::new("test-key")
+        .unwrap()
+        .with_base_url(mock_server.uri());
+    let result = client
+        .chat_completion("You are a reviewer.", "diff content", 0.1)
+        .await;
+
+    assert!(result.is_ok());
+    assert!(result.unwrap().contains("POSITIVE"));
+}
+
+#[tokio::test]
+async fn test_deepseek_provider_via_factory() {
     let provider = create_provider("deepseek", "test-key");
     assert!(provider.is_ok());
 }

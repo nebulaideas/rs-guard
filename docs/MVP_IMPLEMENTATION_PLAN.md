@@ -126,10 +126,10 @@ Create a working Rust CLI in a single crate: fetch PR diffs, call DeepSeek, pars
 #### Repository Setup
 
 - [x] Initialize Git repository with proper `.gitignore` for Rust
-- [ ] Create `Cargo.toml` with dependencies for single crate:
-  - `reqwest`, `serde`, `serde_json`, `tokio`, `clap`, `anyhow`, `thiserror`, `regex`, `env_logger`, `colored` (Phase 2), `wiremock` (dev), `toml` (Phase 2)
-- [ ] Create `.rustfmt.toml` with project formatting rules
-- [ ] Create `deny.toml` for `cargo-deny` license + security auditing
+- [x] Create `Cargo.toml` with dependencies for single crate:
+  - `reqwest`, `serde`, `serde_json`, `tokio`, `clap`, `anyhow`, `thiserror`, `regex`, `env_logger`, `colored`, `wiremock` (dev), `toml` (Phase 2)
+- [x] Create `.rustfmt.toml` with project formatting rules
+- [x] Create `deny.toml` for `cargo-deny` license + security auditing (includes `Unicode-3.0` license allowance)
 - [ ] Add root-level docs: `README.md` (skeleton), `LICENSE`, `CODE_OF_CONDUCT.md`, `SECURITY.md`
 
 #### Single Crate Structure
@@ -139,6 +139,7 @@ Create a working Rust CLI in a single crate: fetch PR diffs, call DeepSeek, pars
 - Retry on: HTTP 429, 502, 503, 504, timeout errors
 - Strategy: 2 retries with fixed backoff (1s, 2s)
 - Never retry: 401/403, 404, parse errors, config errors
+- All public items have `///` doc comments
 
 **`src/error.rs`** — Define `DiffguardError` enum with variants:
 - `GitHubApi { status: u16, message: String }`
@@ -146,72 +147,68 @@ Create a working Rust CLI in a single crate: fetch PR diffs, call DeepSeek, pars
 - `VerdictParse(String)`
 - `Config(String)`
 - `Io(std::io::Error)`
+- `DiffTooLarge { size_bytes: usize, line_count: usize }`
+- `EmptyDiff`
+- `PermissionDenied { state: String, message: String }`
+- Helper methods: `is_retryable()`, `is_permission_denied()`
+- All public items have `///` doc comments
 
-**`src/diff.rs`** — Implement `fetch_pr_diff()`:
-- HTTP GET to `https://api.github.com/repos/{owner}/{repo}/pulls/{number}`
-- Header: `Accept: application/vnd.github.v3.diff`
-- Header: `Authorization: Bearer {GITHUB_TOKEN}`
-- Header: `X-GitHub-Api-Version: 2022-11-28`
+**`src/diff.rs`** — Implement `fetch_pr_diff()` and `fetch_local_diff()`:
+- `fetch_pr_diff(base_url, owner, repo, pr_number, token)` — configurable `base_url` for GitHub Enterprise support
+- HTTP GET with `Accept: application/vnd.github.v3.diff`
+- `github_headers(token)` helper validates token format via `HeaderValue::from_str` (returns `Config` error instead of panicking)
 - Return `DiffResult { content: String, size_bytes: usize, line_count: usize }` or `DiffguardError::GitHubApi`
-- Handle empty diff gracefully (warning log + early exit)
-- Size guard: if diff exceeds 100KB or 1,500 lines, return `DiffguardError::DiffTooLarge { size_bytes, line_count }` — no LLM call, submit explanatory comment to PR instead
+- Handle empty diff gracefully (`DiffguardError::EmptyDiff`)
+- Size guard: if diff exceeds 100KB or 1,500 lines, return `DiffguardError::DiffTooLarge`
+- `fetch_local_diff()` — executes `git diff --cached` subprocess for local mode
+- All public items have `///` doc comments
 
 **`src/verdict.rs`** — Implement verdict parsing:
 - `parse_metadata_block(response: &str) -> Option<Verdict>`
-- Regex: `\[DIFFGUARD_VERDICT_METADATA\][\s\S]*?Verdict:\s*(\w+)[\s\S]*?CriticalBugs:\s*(\d+)[\s\S]*?SecurityIssues:\s*(\d+)`
+- Regex compiled once via `std::sync::LazyLock` (avoids recompilation per call)
 - `determine_review_state(verdict: &Verdict) -> ReviewState`
 - Logic: `NEGATIVE || security > 0 || critical > 2` => `REQUEST_CHANGES`
 - Logic: `critical == 0 && security == 0` => `APPROVE`
 - Else => `COMMENT`
 - Fallback: `evaluate_by_tags(response: &str) -> Verdict` — counts `[Critical Bug]` and `[Security]` occurrences
+- All public items have `///` doc comments
 
 **`src/github.rs`** — Implement GitHub review submission:
-- `submit_review(pr_number: u64, state: ReviewState, message: &str)` — uses GitHub REST API via `reqwest`
-- `dismiss_previous_reviews(pr_number: u64)` — queries reviews with `CHANGES_REQUESTED` state and bodies containing `<!-- diffguard-bot -->` signature, then dismisses them
+- `submit_review(base_url, owner, repo, pr_number, state, message, token)` — configurable `base_url` for GitHub Enterprise
+- `dismiss_previous_reviews(base_url, owner, repo, pr_number, token)` — queries reviews with `CHANGES_REQUESTED` state and bodies containing `<!-- diffguard-bot -->` signature, then dismisses them
 - Permission fallback: if `REQUEST_CHANGES` or `APPROVE` fails with permission error, retry with `COMMENT` and prepend `[Bot fallback from {state}]`
+- `github_headers(token)` helper validates token format (returns `Config` error instead of panicking)
+- Individual dismissal failures are logged as warnings (not silently swallowed)
+- All public items have `///` doc comments
 
 **`src/output.rs`** — Artifact + console output:
-- `write_artifact(review: &str, metadata: &Verdict, state: &ReviewState, config: &ReviewConfig)` — writes structured `review-result.txt`:
-  ```
-  diffguard-rs Review Result
-  ==========================
-  PR: #<number>
-  Provider: <provider>
-  Model: <model>
-  Temperature: <temperature>
-  Diff Size: <lines> lines (<bytes> bytes)
-  Review State: <APPROVE|COMMENT|REQUEST_CHANGES>
+- `ARTIFACT_FILENAME` constant (`"review-result.txt"`)
+- `write_artifact(review, verdict, state, config, path)` — writes structured artifact
+- `print_colored_report(review, verdict, state)` — terminal output with verdict metadata included
+- `print_colored_summary(review, verdict, state, config)` — full summary with provider metadata
+- All public items have `///` doc comments
 
-  --- LLM Review ---
-  <full LLM response>
-
-  --- Parsed Metadata ---
-  Verdict: <POSITIVE|NEGATIVE>
-  CriticalBugs: <count>
-  SecurityIssues: <count>
-  ```
-- `print_colored_report(review: &str, state: &ReviewState)` — terminal output for local mode (Phase 2)
-
-**`src/llm/mod.rs`** — LLM provider trait + types:
-```rust
-pub trait LlmProvider: Send + Sync {
-    async fn chat_completion(
-        &self,
-        system_prompt: &str,
-        user_message: &str,
-        temperature: f32,
-    ) -> Result<String, LlmError>;
-}
-```
+**`src/llm/mod.rs`** — LLM provider types + enum dispatch:
+- Phase 1 uses enum-based dispatch (`Provider` enum with match arms) instead of a trait object
+- The `LlmProvider` trait is deferred to Phase 2 when multiple providers require dynamic dispatch
 - Shared types: `ChatMessage`, `ChatRequest`, `ChatResponse`, `LlmError`
+- All public items have `///` doc comments
 
 **`src/llm/deepseek.rs`** — DeepSeek provider implementation:
 - Base URL: `https://api.deepseek.com`
 - Endpoint: `POST /chat/completions`
 - Model default: `deepseek-v4-flash`
 - Temperature default: `0.1`
+- `DeepSeekClient::new(api_key)` returns `Result<Self, DiffguardError>` (validates API key format, no panics)
+- Builder methods: `with_base_url()`, `with_model()`
 - Request body: OpenAI-compatible `messages` array with `system` + `user` roles
 - Response parsing: extract `choices[0].message.content`
+- All public items have `///` doc comments
+
+**`src/llm/factory.rs`** — Provider factory:
+- `create_provider(provider_name, api_key) -> Result<Provider, DiffguardError>`
+- Propagates `DeepSeekClient::new()` errors (invalid API key format)
+- All public items have `///` doc comments
 
 **`src/cli.rs`** — Clap derive struct:
 ```rust
@@ -230,6 +227,8 @@ pub struct Args {
     pub provider: String,
 }
 ```
+- Note: `--config` / `-c` flag deferred to Phase 2 (TOML parsing not yet implemented)
+- All public items have `///` doc comments
 
 **`src/config.rs`** — Environment variable resolution + default prompt:
 - `DEEPSEEK_API_KEY` (required for DeepSeek)
@@ -238,6 +237,12 @@ pub struct Args {
 - `REPO_FULL_NAME` (required for GitHub mode)
 - `GITHUB_ACTIONS` (auto-detected for CI vs local mode)
 - Embedded default prompt: used when `--prompt-file` is not found or not specified
+- `Config::from_env()` — resolves all env vars, returns `Result`
+- `Config::apply_args(&mut self, args: &Args)` — applies CLI flag overrides for `model`, `temperature`, `provider`
+- `Config::load_prompt_file()` — loads prompt from file or keeps default
+- `Config::validate_for_ci()` — validates required CI fields are present
+- `Config::github_base_url` — configurable GitHub API base URL (default: `https://api.github.com`)
+- All public items have `///` doc comments
 
 **Default Prompt Template (embedded in binary):**
 ```markdown
@@ -265,34 +270,41 @@ Guidelines:
 
 **`src/main.rs`** — Entry point:
 - Parse CLI args with Clap
-- Detect CI mode: `std::env::var("GITHUB_ACTIONS").is_ok()`
+- `Config::from_env()` → `config.apply_args(&args)` → `config.load_prompt_file()` → `config.validate_for_ci()`
+- `run_pipeline(config)` — extracted pipeline function for testability
 - CI mode: fetch PR diff → call LLM → parse verdict → submit review → dismiss old blockers → write artifact
 - Error handling: `anyhow::Context` for human-readable error messages
 - Exit codes: `0` for success, `1` for any error, `2` for local mode `REQUEST_CHANGES`
+- Uses `ARTIFACT_FILENAME` constant from `output` module
 
 #### Tests (Phase 1)
 
-- [ ] `tests/verdict_tests.rs` — Unit tests for all verdict parsing scenarios (see test matrix below)
-- [ ] `tests/diff_tests.rs` — Mock HTTP tests for diff fetching (use `wiremock`)
-- [ ] `tests/provider_tests.rs` — Mock DeepSeek API responses
-- [ ] `tests/retry_tests.rs` — Verify retry on 429/5xx, no retry on 4xx
+- [x] `tests/verdict_tests.rs` — 15 integration tests for all verdict parsing scenarios
+- [x] `tests/diff_tests.rs` — 4 mock HTTP tests for diff fetching (use `wiremock`)
+- [x] `tests/provider_tests.rs` — 3 tests: DeepSeek mock API, factory creation, unknown provider
+- [x] `src/retry.rs` inline tests — 3 tests: first-attempt success, eventual success, no retry on non-retryable
+- [x] `src/verdict.rs` inline tests — 7 tests for metadata parsing and tag fallback
+- [x] `src/diff.rs` inline tests — 2 tests for PR diff fetching
+- [x] `src/llm/deepseek.rs` inline tests — 2 tests for chat completion
 - [ ] Integration test: full pipeline with mock GitHub + mock LLM servers
 
 #### CI Setup (Phase 1)
 
-- [ ] `.github/workflows/ci.yml`:
+- [x] `.github/workflows/ci.yml`:
   - Format check: `cargo fmt --all -- --check`
-  - Lint: `cargo clippy --workspace --all-targets --all-features -- -D warnings`
-  - Unit + integration tests: `cargo test --workspace`
-  - Doc tests: `cargo test --doc --workspace`
-  - Coverage: `cargo tarpaulin --workspace --out xml` + upload to Codecov
-  - Doc coverage: `cargo +nightly doc --show-coverage` (parse and enforce 85% threshold)
+  - Lint: `cargo clippy --all-targets --all-features -- -D warnings`
+  - Unit + integration tests: `cargo test`
+  - Doc tests: `cargo test --doc`
   - Release build smoke: `cargo build --release`
-- [ ] `.github/workflows/release.yml`:
+  - `cargo-deny`: license + security audit via `EmbarkStudios/cargo-deny-action@v1`
+  - `cargo-audit`: vulnerability scanning
+  - Coverage: `cargo tarpaulin --workspace --out xml` + upload to Codecov (deferred)
+  - Doc coverage: `cargo +nightly doc --show-coverage` (deferred)
+- [x] `.github/workflows/release.yml`:
   - Trigger: push tags `v*`
   - Build: `cargo build --release --target x86_64-unknown-linux-gnu`
   - Strip binary for size reduction
-  - Create GitHub Release with binary asset
+  - Create GitHub Release with binary asset via `softprops/action-gh-release@v2`
 
 ### Test Matrix for Phase 1
 
@@ -347,6 +359,8 @@ Extend `src/llm/` to support multiple LLM providers. Add `.reviewer.toml` config
 
 #### Provider Implementations
 
+> **Note:** Phase 1 uses enum-based dispatch (`Provider` enum). In Phase 2, introduce the `LlmProvider` async trait and refactor `Provider` to use `Box<dyn LlmProvider>` for dynamic dispatch across multiple providers.
+
 - [ ] `src/llm/kimi.rs` — Kimi/Moonshot AI provider:
   - Base URL: `https://api.moonshot.ai/v1`
   - Auth header: `Bearer {KIMI_API_KEY}`
@@ -385,7 +399,9 @@ Extend `src/llm/` to support multiple LLM providers. Add `.reviewer.toml` config
 #### Configuration File Support
 
 - [ ] `src/config.rs` — TOML configuration:
+  - Add `--config` / `-c` CLI flag to `src/cli.rs` (deferred from Phase 1)
   - Parse `.reviewer.toml` from repository root
+  - `Config::apply_args()` already handles CLI overrides; extend to merge TOML values
   - Schema:
     ```toml
     provider = "deepseek"
@@ -861,7 +877,7 @@ If publishing to crates.io for `cargo install diffguard`:
 | `--model` | `-m` | (provider-specific) | LLM model identifier |
 | `--temperature` | `-t` | `0.1` | Sampling temperature (0.0 - 2.0) |
 | `--provider` | | `deepseek` | LLM provider to use |
-| `--config` | `-c` | `.reviewer.toml` | Path to configuration TOML file |
+| `--config` | `-c` | `.reviewer.toml` | Path to configuration TOML file (Phase 2) |
 | `--no-cache` | | | Bypass response cache (Phase 3) |
 | `--help` | `-h` | | Display help |
 | `--version` | `-V` | | Display version |

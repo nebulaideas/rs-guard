@@ -11,35 +11,40 @@ fn test_parse_valid_positive_clean() {
 
 #[test]
 fn test_parse_negative_verdict() {
-    let response = "[DIFFGUARD_VERDICT_METADATA]\nVerdict: NEGATIVE\nCriticalBugs: 0\nSecurityIssues: 0";
+    let response =
+        "[DIFFGUARD_VERDICT_METADATA]\nVerdict: NEGATIVE\nCriticalBugs: 0\nSecurityIssues: 0";
     let (_verdict, state) = parse_verdict(response).unwrap();
     assert_eq!(state, ReviewState::RequestChanges);
 }
 
 #[test]
 fn test_parse_critical_bugs_gt_2() {
-    let response = "[DIFFGUARD_VERDICT_METADATA]\nVerdict: POSITIVE\nCriticalBugs: 5\nSecurityIssues: 0";
+    let response =
+        "[DIFFGUARD_VERDICT_METADATA]\nVerdict: POSITIVE\nCriticalBugs: 5\nSecurityIssues: 0";
     let (_verdict, state) = parse_verdict(response).unwrap();
     assert_eq!(state, ReviewState::RequestChanges);
 }
 
 #[test]
 fn test_parse_security_issues_gt_0() {
-    let response = "[DIFFGUARD_VERDICT_METADATA]\nVerdict: POSITIVE\nCriticalBugs: 0\nSecurityIssues: 3";
+    let response =
+        "[DIFFGUARD_VERDICT_METADATA]\nVerdict: POSITIVE\nCriticalBugs: 0\nSecurityIssues: 3";
     let (_verdict, state) = parse_verdict(response).unwrap();
     assert_eq!(state, ReviewState::RequestChanges);
 }
 
 #[test]
 fn test_parse_positive_with_minor_bugs_yields_comment() {
-    let response = "[DIFFGUARD_VERDICT_METADATA]\nVerdict: POSITIVE\nCriticalBugs: 2\nSecurityIssues: 0";
+    let response =
+        "[DIFFGUARD_VERDICT_METADATA]\nVerdict: POSITIVE\nCriticalBugs: 2\nSecurityIssues: 0";
     let (_verdict, state) = parse_verdict(response).unwrap();
     assert_eq!(state, ReviewState::Comment);
 }
 
 #[test]
 fn test_parse_positive_with_1_critical_bug_yields_comment() {
-    let response = "[DIFFGUARD_VERDICT_METADATA]\nVerdict: POSITIVE\nCriticalBugs: 1\nSecurityIssues: 0";
+    let response =
+        "[DIFFGUARD_VERDICT_METADATA]\nVerdict: POSITIVE\nCriticalBugs: 1\nSecurityIssues: 0";
     let (_verdict, state) = parse_verdict(response).unwrap();
     assert_eq!(state, ReviewState::Comment);
 }
@@ -64,10 +69,14 @@ fn test_clean_response_no_tags_yields_approve() {
 
 #[test]
 fn test_invalid_verdict_value() {
-    let response = "[DIFFGUARD_VERDICT_METADATA]\nVerdict: MAYBE\nCriticalBugs: 0\nSecurityIssues: 0";
+    let response =
+        "[DIFFGUARD_VERDICT_METADATA]\nVerdict: MAYBE\nCriticalBugs: 0\nSecurityIssues: 0";
     let result = parse_verdict(response);
     assert!(result.is_err());
-    assert!(result.unwrap_err().to_string().contains("Invalid verdict value"));
+    assert!(result
+        .unwrap_err()
+        .to_string()
+        .contains("Invalid verdict value"));
 }
 
 #[test]
@@ -103,7 +112,10 @@ fn test_determine_review_state_negative_always_requests_changes() {
         critical_bugs: 0,
         security_issues: 0,
     };
-    assert_eq!(determine_review_state(&verdict), ReviewState::RequestChanges);
+    assert_eq!(
+        determine_review_state(&verdict),
+        ReviewState::RequestChanges
+    );
 }
 
 #[test]
@@ -124,7 +136,10 @@ fn test_determine_review_state_asymmetric_safety() {
         critical_bugs: 3,
         security_issues: 0,
     };
-    assert_eq!(determine_review_state(&verdict), ReviewState::RequestChanges);
+    assert_eq!(
+        determine_review_state(&verdict),
+        ReviewState::RequestChanges
+    );
 
     // Negative verdict but 0 bugs -> REQUEST_CHANGES (verdict overrides)
     let verdict = Verdict {
@@ -132,5 +147,8 @@ fn test_determine_review_state_asymmetric_safety() {
         critical_bugs: 0,
         security_issues: 0,
     };
-    assert_eq!(determine_review_state(&verdict), ReviewState::RequestChanges);
+    assert_eq!(
+        determine_review_state(&verdict),
+        ReviewState::RequestChanges
+    );
 }
