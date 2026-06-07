@@ -50,4 +50,17 @@ pub struct Args {
     /// Maximum tokens for LLM completions.
     #[arg(long, help = "Maximum tokens for LLM completions")]
     pub max_tokens: Option<u32>,
+
+    /// Path to a pre-existing diff file to review instead of fetching from GitHub.
+    ///
+    /// When set, diffguard reads the diff content from this file path
+    /// instead of calling the GitHub API. Useful in CI when the diff has
+    /// already been generated (e.g. by `git diff` or a prior workflow step).
+    /// If the file does not exist, an error is returned.
+    #[arg(
+        long,
+        env = "DIFFGUARD_DIFF_FILE",
+        help = "Path to a pre-existing diff file to review"
+    )]
+    pub diff_file: Option<String>,
 }

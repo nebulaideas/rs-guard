@@ -32,7 +32,8 @@ pub struct OpenRouterClient {
 impl OpenRouterClient {
     /// Creates a new OpenRouter client with the given API key.
     pub fn new(api_key: impl Into<String>) -> Result<Self, DiffguardError> {
-        let client = Self::build_client(&api_key.into(), DEFAULT_HTTP_REFERER)?;
+        let api_key = api_key.into();
+        let client = Self::build_client(&api_key, DEFAULT_HTTP_REFERER)?;
         Ok(Self {
             base_url: DEFAULT_BASE_URL.to_string(),
             model: DEFAULT_MODEL.to_string(),

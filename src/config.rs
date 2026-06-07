@@ -8,6 +8,7 @@
 use crate::cli::Args;
 use crate::error::DiffguardError;
 use crate::http::{validate_github_base_url, validate_provider_base_url};
+use crate::llm::providers::{self, find_provider};
 use crate::llm::ProviderConfig;
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -97,27 +98,22 @@ pub fn load_toml_config(path: &Path) -> Result<Option<TomlConfig>, DiffguardErro
     Ok(Some(config))
 }
 
-/// Known provider identifiers.
-const KNOWN_PROVIDERS: &[&str] = &["deepseek", "kimi", "qwen", "openrouter", "openai"];
-
 /// Returns the standard environment variable name for the API key of the given provider.
 ///
 /// # Errors
 ///
 /// Returns [`DiffguardError::Config`] if the provider name is not recognized.
 fn standard_api_key_env_var(provider: &str) -> Result<&'static str, DiffguardError> {
-    match provider {
-        "deepseek" => Ok("DEEPSEEK_API_KEY"),
-        "kimi" => Ok("KIMI_API_KEY"),
-        "qwen" => Ok("DASHSCOPE_API_KEY"),
-        "openrouter" => Ok("OPENROUTER_API_KEY"),
-        "openai" => Ok("OPENAI_API_KEY"),
-        _ => Err(DiffguardError::Config(format!(
-            "Unknown provider: '{}'. Supported: {}",
-            provider,
-            KNOWN_PROVIDERS.join(", ")
-        ))),
-    }
+    find_provider(provider)
+        .map(|m| m.api_key_env)
+        .ok_or_else(|| {
+            let names: Vec<&str> = crate::llm::providers::known_provider_names();
+            DiffguardError::Config(format!(
+                "Unknown provider: '{}'. Supported: {}",
+                provider,
+                names.join(", ")
+            ))
+        })
 }
 
 /// Returns the default model for the given known provider.
@@ -126,18 +122,74 @@ fn standard_api_key_env_var(provider: &str) -> Result<&'static str, DiffguardErr
 ///
 /// Returns [`DiffguardError::Config`] if the provider name is not recognized.
 fn default_model(provider: &str) -> Result<&'static str, DiffguardError> {
-    match provider {
-        "deepseek" => Ok("deepseek-v4-flash"),
-        "kimi" => Ok("kimi-k2.5"),
-        "qwen" => Ok("qwen-plus"),
-        "openrouter" => Ok("openai/gpt-4o-mini"),
-        "openai" => Ok("gpt-4o-mini"),
-        _ => Err(DiffguardError::Config(format!(
-            "Unknown provider: '{}'. Supported: {}",
-            provider,
-            KNOWN_PROVIDERS.join(", ")
-        ))),
+    find_provider(provider)
+        .map(|m| m.default_model)
+        .ok_or_else(|| {
+            let names: Vec<&str> = crate::llm::providers::known_provider_names();
+            DiffguardError::Config(format!(
+                "Unknown provider: '{}'. Supported: {}",
+                provider,
+                names.join(", ")
+            ))
+        })
+}
+
+/// Validates a provider base URL in local mode with guardrails.
+///
+/// Unlike CI mode (which rejects non-allowlisted hosts), local mode only
+/// **warns** about potentially dangerous configurations that could lead to
+/// accidental token exfiltration. The URL is still accepted, because the
+/// user controls their own machine — but the warning ensures they are
+/// aware of the risk.
+///
+/// Guardrails:
+/// - Non-HTTPS URLs: warn about plaintext token transmission.
+/// - Loopback addresses: warn about tokens being sent to local servers
+///   (common with Ollama/LM Studio, but risky if unintentional).
+/// - Non-allowlisted hosts: warn that the API key will be sent to an
+///   unrecognized endpoint.
+///
+/// # Errors
+///
+/// Returns [`DiffguardError::Config`] if the URL is malformed.
+fn validate_local_provider_base_url(base_url: &str) -> Result<(), DiffguardError> {
+    let parsed = url::Url::parse(base_url).map_err(|_| {
+        DiffguardError::Config(format!(
+            "Provider base URL is malformed: '{}'. Expected format: https://host/path",
+            base_url
+        ))
+    })?;
+
+    let host = parsed.host_str().unwrap_or("");
+
+    if parsed.scheme() != "https" {
+        log::warn!(
+            "Provider base URL '{}' uses {} (not HTTPS). API keys will be transmitted in plaintext. \
+             This is risky if the traffic leaves your machine.",
+            base_url,
+            parsed.scheme()
+        );
+    } else if host == "127.0.0.1" || host == "localhost" || host == "[::1]" {
+        log::warn!(
+            "Provider base URL '{}' points to a loopback address. \
+             Your API key will be sent to a local server. \
+             Ensure this is intentional (e.g. Ollama, LM Studio).",
+            base_url
+        );
+    } else if !providers::all_ci_allowed_hosts()
+        .iter()
+        .any(|&(s, h)| parsed.scheme() == s && host == h)
+    {
+        log::warn!(
+            "Provider base URL '{}' (host: {}) is not a recognized LLM provider endpoint. \
+             Your API key will be sent to a third-party server. \
+             Verify this is intentional.",
+            base_url,
+            host
+        );
     }
+
+    Ok(())
 }
 
 /// Resolves the API key environment variable for a provider, checking
@@ -273,12 +325,15 @@ impl Config {
             .or(toml.as_ref().and_then(|t| t.max_tokens));
 
         // Provider config from TOML — validate base_url against SSRF allowlist in CI
+        // In local mode, warn about potentially dangerous URLs to prevent accidental token exfiltration
         let toml_provider = toml_providers.get(&provider);
         let base_url = toml_provider.and_then(|p| p.base_url.clone());
         if is_ci {
             if let Some(ref url) = base_url {
                 validate_provider_base_url(url)?;
             }
+        } else if let Some(ref url) = base_url {
+            validate_local_provider_base_url(url)?;
         }
 
         let provider_config = ProviderConfig {
@@ -338,6 +393,8 @@ impl Config {
                     if let Some(ref url) = new_base_url {
                         validate_provider_base_url(url)?;
                     }
+                } else if let Some(ref url) = new_base_url {
+                    validate_local_provider_base_url(url)?;
                 }
                 self.provider_config.base_url = new_base_url;
                 self.provider_config.http_referer =
@@ -348,8 +405,12 @@ impl Config {
                     self.model = default_model(provider)
                         .unwrap_or("deepseek-v4-flash")
                         .to_string();
-                    self.provider_config.model = self.model.clone();
                 }
+
+                // Always sync provider_config.model with self.model after provider change.
+                // This prevents provider_config.model from becoming stale when
+                // model_set_via_cli is true and no --model flag is passed.
+                self.provider_config.model = self.model.clone();
             }
         }
 

@@ -152,6 +152,45 @@ pub async fn fetch_pr_diff(
     })
 }
 
+/// Fetches diff content from a pre-existing file on disk.
+///
+/// Reads the file, validates that it looks like a diff, and checks size
+/// limits. Used when `--diff-file` is specified to skip the GitHub API call.
+///
+/// # Errors
+///
+/// Returns [`DiffguardError::Config`] if the file does not exist or cannot
+/// be read, [`DiffguardError::EmptyDiff`] if the file is empty,
+/// [`DiffguardError::InvalidDiffContent`] if the content does not look
+/// like a diff, or [`DiffguardError::DiffTooLarge`] if it exceeds size limits.
+pub fn fetch_file_diff(path: &str) -> Result<DiffResult, DiffguardError> {
+    let content = std::fs::read_to_string(path).map_err(|e| {
+        DiffguardError::Config(format!("Failed to read diff file '{}': {}", path, e))
+    })?;
+
+    if content.is_empty() {
+        return Err(DiffguardError::EmptyDiff);
+    }
+
+    validate_diff_content(&content)?;
+
+    let size_bytes = content.len();
+    let line_count = content.lines().count();
+
+    if size_bytes > MAX_DIFF_BYTES || line_count > MAX_DIFF_LINES {
+        return Err(DiffguardError::DiffTooLarge {
+            size_bytes,
+            line_count,
+        });
+    }
+
+    Ok(DiffResult {
+        content,
+        size_bytes,
+        line_count,
+    })
+}
+
 /// Fetches the locally staged diff via `git diff --cached`.
 ///
 /// # Errors

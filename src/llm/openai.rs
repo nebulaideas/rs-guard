@@ -29,7 +29,8 @@ pub struct OpenAiClient {
 impl OpenAiClient {
     /// Creates a new OpenAI-compatible client with the given API key.
     pub fn new(api_key: impl Into<String>) -> Result<Self, DiffguardError> {
-        let client = Self::build_client(&api_key.into())?;
+        let api_key = api_key.into();
+        let client = Self::build_client(&api_key)?;
         Ok(Self {
             base_url: DEFAULT_BASE_URL.to_string(),
             model: DEFAULT_MODEL.to_string(),

@@ -13,6 +13,7 @@ pub mod factory;
 pub mod kimi;
 pub mod openai;
 pub mod openrouter;
+pub mod providers;
 pub mod qwen;
 
 /// A single message in a chat conversation.
@@ -131,6 +132,12 @@ pub(crate) async fn send_chat_request<B: Serialize + Send>(
     request: &B,
     provider_name: &str,
 ) -> Result<String, DiffguardError> {
+    log::debug!(
+        "[{}] POST {} (effective params logged at debug level)",
+        provider_name,
+        url
+    );
+
     let response = client.post(url).json(request).send().await.map_err(|e| {
         let status = e.status().map(|s| s.as_u16()).unwrap_or(0);
         LlmError {
@@ -141,6 +148,41 @@ pub(crate) async fn send_chat_request<B: Serialize + Send>(
     })?;
 
     let status = response.status();
+
+    // Log sanitized response headers at debug level for observability.
+    // Only safe, non-sensitive headers are logged.
+    if log::log_enabled!(log::Level::Debug) {
+        let headers = response.headers();
+        let safe_headers: Vec<String> = headers
+            .iter()
+            .filter_map(|(name, value)| {
+                let name_str = name.as_str();
+                // Skip potentially sensitive headers
+                if name_str == "authorization"
+                    || name_str == "set-cookie"
+                    || name_str.contains("token")
+                    || name_str.contains("key")
+                {
+                    return None;
+                }
+                let val = value.to_str().unwrap_or("<binary>");
+                // Truncate long values
+                let val_display = if val.len() > 80 {
+                    format!("{}...", &val[..80])
+                } else {
+                    val.to_string()
+                };
+                Some(format!("{}: {}", name_str, val_display))
+            })
+            .collect();
+        log::debug!(
+            "[{}] Response status: {} — headers: [{}]",
+            provider_name,
+            status.as_u16(),
+            safe_headers.join(", ")
+        );
+    }
+
     if !status.is_success() {
         let body = response.text().await.unwrap_or_default();
         return Err(LlmError {

@@ -5,7 +5,9 @@
 //! strict allowlisting of GitHub API endpoints.
 
 use crate::error::DiffguardError;
+use crate::llm::providers;
 use reqwest::header::{self, HeaderMap, HeaderValue};
+use url::Url;
 
 /// User-Agent string derived from package metadata at compile time.
 const USER_AGENT: &str = concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION"));
@@ -15,34 +17,6 @@ const USER_AGENT: &str = concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VE
 /// Only HTTPS URLs matching these patterns are permitted. This prevents
 /// accidentally sending `Authorization` headers to arbitrary hosts.
 const ALLOWED_BASE_URLS: &[&str] = &["https://api.github.com"];
-
-/// Allowed LLM provider API hosts for CI mode.
-///
-/// In CI mode, TOML `base_url` overrides are restricted to these exact
-/// (scheme, host) pairs to prevent SSRF attacks where a malicious
-/// `.reviewer.toml` could redirect API calls (and auth headers) to an
-/// attacker-controlled server.
-const ALLOWED_PROVIDER_HOSTS: &[(&str, &str)] = &[
-    ("https", "api.deepseek.com"),
-    ("https", "api.moonshot.ai"),
-    ("https", "dashscope-intl.aliyuncs.com"),
-    ("https", "dashscope.aliyuncs.com"),
-    ("https", "openrouter.ai"),
-    ("https", "api.openai.com"),
-];
-
-/// Extracts the scheme and host from a URL string.
-///
-/// Returns `None` if the URL is malformed (missing scheme, empty host, etc.).
-fn parse_scheme_and_host(url: &str) -> Option<(&str, &str)> {
-    let (scheme, rest) = url.split_once("://")?;
-    let host_with_path = rest.split('/').next().unwrap_or(rest);
-    let host = host_with_path.split(':').next().unwrap_or(host_with_path);
-    if host.is_empty() {
-        return None;
-    }
-    Some((scheme, host))
-}
 
 /// Validates that a GitHub API base URL is on the allowlist.
 ///
@@ -103,19 +77,26 @@ pub fn validate_github_base_url(base_url: &str) -> Result<(), DiffguardError> {
 ///
 /// Returns [`DiffguardError::Config`] if the URL is not allowed.
 pub fn validate_provider_base_url(base_url: &str) -> Result<(), DiffguardError> {
-    let (scheme, host) = parse_scheme_and_host(base_url).ok_or_else(|| {
+    let parsed = Url::parse(base_url).map_err(|_| {
         DiffguardError::Config(format!(
             "Provider base URL is malformed: '{}'. Expected format: https://host/path",
             base_url
         ))
     })?;
 
-    if scheme != "https" {
+    if parsed.scheme() != "https" {
         return Err(DiffguardError::Config(format!(
             "Provider base URL must use HTTPS in CI mode: '{}'. HTTP is not allowed.",
             base_url
         )));
     }
+
+    let host = parsed.host_str().ok_or_else(|| {
+        DiffguardError::Config(format!(
+            "Provider base URL is malformed: '{}'. No host found.",
+            base_url
+        ))
+    })?;
 
     if host == "127.0.0.1" || host == "localhost" || host == "[::1]" {
         return Err(DiffguardError::Config(format!(
@@ -125,13 +106,14 @@ pub fn validate_provider_base_url(base_url: &str) -> Result<(), DiffguardError> 
         )));
     }
 
-    for &(allowed_scheme, allowed_host) in ALLOWED_PROVIDER_HOSTS {
-        if scheme == allowed_scheme && host == allowed_host {
+    let ci_hosts = providers::all_ci_allowed_hosts();
+    for &(allowed_scheme, allowed_host) in ci_hosts {
+        if parsed.scheme() == allowed_scheme && host == allowed_host {
             return Ok(());
         }
     }
 
-    let allowed_display: Vec<String> = ALLOWED_PROVIDER_HOSTS
+    let allowed_display: Vec<String> = ci_hosts
         .iter()
         .map(|(s, h)| format!("{}://{}", s, h))
         .collect();

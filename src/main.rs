@@ -7,7 +7,7 @@ use anyhow::Context;
 use clap::Parser;
 use diffguard::cli::Args;
 use diffguard::config::{load_toml_config, Config};
-use diffguard::diff::{fetch_local_diff, fetch_pr_diff};
+use diffguard::diff::{fetch_file_diff, fetch_local_diff, fetch_pr_diff};
 use diffguard::github::{dismiss_previous_reviews, submit_review};
 use diffguard::llm::factory::create_provider;
 use diffguard::output::{print_colored_summary, write_artifact, ReviewConfig, ARTIFACT_FILENAME};
@@ -18,10 +18,47 @@ use diffguard::verdict::{parse_verdict, ReviewState};
 ///
 /// This function is separated from `main` to enable integration testing
 /// without spawning a subprocess.
-pub async fn run_pipeline(config: Config) -> anyhow::Result<()> {
+///
+/// # Arguments
+///
+/// * `config` — Resolved application configuration.
+/// * `diff_file` — Optional path to a pre-existing diff file. When provided,
+///   the GitHub API diff fetch is skipped entirely.
+pub async fn run_pipeline(config: Config, diff_file: Option<&str>) -> anyhow::Result<()> {
     let base_url = config.github_base_url.clone();
 
-    let diff_result = if config.is_ci {
+    let diff_result = if let Some(path) = diff_file {
+        log::info!("Reading diff from file: {}", path);
+        match fetch_file_diff(path) {
+            Ok(diff) => {
+                log::info!(
+                    "Read diff from file: {} lines ({} bytes)",
+                    diff.line_count,
+                    diff.size_bytes
+                );
+                log_redacted("Diff content", &diff.content);
+                diff
+            }
+            Err(e) => {
+                if let diffguard::error::DiffguardError::DiffTooLarge {
+                    size_bytes,
+                    line_count,
+                } = &e
+                {
+                    eprintln!(
+                        "⚠️  Diff too large: {} bytes ({} lines). Cannot review.",
+                        size_bytes, line_count
+                    );
+                    return Ok(());
+                }
+                if let diffguard::error::DiffguardError::EmptyDiff = &e {
+                    eprintln!("ℹ️  Diff file is empty: {}", path);
+                    return Ok(());
+                }
+                return Err(e).context("Failed to read diff file");
+            }
+        }
+    } else if config.is_ci {
         log::info!("CI mode detected. Fetching PR diff...");
         let owner = config.repo_owner.as_ref().unwrap();
         let repo = config.repo_name.as_ref().unwrap();
@@ -206,6 +243,8 @@ async fn main() -> anyhow::Result<()> {
     config
         .load_prompt_file(&args.prompt_file)
         .context("Failed to load prompt file")?;
+    let diff_file = args.diff_file.as_deref();
+
     config
         .validate_for_ci()
         .context("Configuration validation failed")?;
@@ -216,5 +255,5 @@ async fn main() -> anyhow::Result<()> {
         config.model
     );
 
-    run_pipeline(config).await
+    run_pipeline(config, diff_file).await
 }
