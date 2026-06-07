@@ -12,7 +12,7 @@ use crate::llm::{
 ///
 /// * `provider_name` — Provider identifier (e.g. `"deepseek"`).
 /// * `api_key` — API key for authenticating with the provider.
-/// * `config` — Optional provider configuration overrides from `.reviewer.toml`.
+/// * `config` — Provider configuration overrides from `.reviewer.toml` and CLI.
 ///
 /// # Errors
 ///
@@ -29,7 +29,9 @@ pub fn create_provider(
             if let Some(ref url) = config.base_url {
                 client = client.with_base_url(url.clone());
             }
-            client = client.with_max_tokens(config.max_tokens);
+            client = client
+                .with_model(config.model.clone())
+                .with_max_tokens(config.max_tokens);
             Ok(Box::new(client))
         }
         "kimi" => {
@@ -37,7 +39,9 @@ pub fn create_provider(
             if let Some(ref url) = config.base_url {
                 client = client.with_base_url(url.clone());
             }
-            client = client.with_max_tokens(config.max_tokens);
+            client = client
+                .with_model(config.model.clone())
+                .with_max_tokens(config.max_tokens);
             Ok(Box::new(client))
         }
         "qwen" => {
@@ -45,7 +49,9 @@ pub fn create_provider(
             if let Some(ref url) = config.base_url {
                 client = client.with_base_url(url.clone());
             }
-            client = client.with_max_tokens(config.max_tokens);
+            client = client
+                .with_model(config.model.clone())
+                .with_max_tokens(config.max_tokens);
             Ok(Box::new(client))
         }
         "openrouter" => {
@@ -56,7 +62,9 @@ pub fn create_provider(
             if let Some(ref referer) = config.http_referer {
                 client = client.with_http_referer(referer, api_key)?;
             }
-            client = client.with_max_tokens(config.max_tokens);
+            client = client
+                .with_model(config.model.clone())
+                .with_max_tokens(config.max_tokens);
             Ok(Box::new(client))
         }
         "openai" => {
@@ -64,7 +72,9 @@ pub fn create_provider(
             if let Some(ref url) = config.base_url {
                 client = client.with_base_url(url.clone());
             }
-            client = client.with_max_tokens(config.max_tokens);
+            client = client
+                .with_model(config.model.clone())
+                .with_max_tokens(config.max_tokens);
             Ok(Box::new(client))
         }
         other => Err(DiffguardError::Config(format!(

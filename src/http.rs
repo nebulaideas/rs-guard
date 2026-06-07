@@ -16,19 +16,33 @@ const USER_AGENT: &str = concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VE
 /// accidentally sending `Authorization` headers to arbitrary hosts.
 const ALLOWED_BASE_URLS: &[&str] = &["https://api.github.com"];
 
-/// Allowed LLM provider API base URLs for CI mode.
+/// Allowed LLM provider API hosts for CI mode.
 ///
-/// In CI mode, TOML `base_url` overrides are restricted to these hosts
-/// to prevent SSRF attacks where a malicious `.reviewer.toml` could
-/// redirect API calls (and auth headers) to an attacker-controlled server.
-const ALLOWED_PROVIDER_HOSTS: &[&str] = &[
-    "https://api.deepseek.com",
-    "https://api.moonshot.ai",
-    "https://dashscope-intl.aliyuncs.com",
-    "https://dashscope.aliyuncs.com",
-    "https://openrouter.ai",
-    "https://api.openai.com",
+/// In CI mode, TOML `base_url` overrides are restricted to these exact
+/// (scheme, host) pairs to prevent SSRF attacks where a malicious
+/// `.reviewer.toml` could redirect API calls (and auth headers) to an
+/// attacker-controlled server.
+const ALLOWED_PROVIDER_HOSTS: &[(&str, &str)] = &[
+    ("https", "api.deepseek.com"),
+    ("https", "api.moonshot.ai"),
+    ("https", "dashscope-intl.aliyuncs.com"),
+    ("https", "dashscope.aliyuncs.com"),
+    ("https", "openrouter.ai"),
+    ("https", "api.openai.com"),
 ];
+
+/// Extracts the scheme and host from a URL string.
+///
+/// Returns `None` if the URL is malformed (missing scheme, empty host, etc.).
+fn parse_scheme_and_host(url: &str) -> Option<(&str, &str)> {
+    let (scheme, rest) = url.split_once("://")?;
+    let host_with_path = rest.split('/').next().unwrap_or(rest);
+    let host = host_with_path.split(':').next().unwrap_or(host_with_path);
+    if host.is_empty() {
+        return None;
+    }
+    Some((scheme, host))
+}
 
 /// Validates that a GitHub API base URL is on the allowlist.
 ///
@@ -75,46 +89,60 @@ pub fn validate_github_base_url(base_url: &str) -> Result<(), DiffguardError> {
 
 /// Validates that a provider API base URL is safe for use in CI mode.
 ///
-/// In CI mode, TOML `base_url` overrides are restricted to an allowlist of
-/// known LLM provider hosts to prevent SSRF attacks where a malicious
-/// `.reviewer.toml` could redirect API calls (and auth headers) to an
-/// attacker-controlled server.
+/// In CI mode, TOML `base_url` overrides are restricted to an exact allowlist
+/// of known LLM provider (scheme, host) pairs to prevent SSRF attacks where a
+/// malicious `.reviewer.toml` could redirect API calls (and auth headers) to
+/// an attacker-controlled server.
 ///
-/// Accepts:
-/// - Exact prefix match against [`ALLOWED_PROVIDER_HOSTS`]
-/// - Loopback addresses (`http://127.0.0.1`, `http://localhost`) for testing
+/// Loopback addresses (`127.0.0.1`, `localhost`) are **rejected** in CI mode
+/// to prevent token exfiltration to attacker-controlled local servers.
 ///
-/// All non-loopback URLs must use HTTPS.
+/// All URLs must use HTTPS.
 ///
 /// # Errors
 ///
 /// Returns [`DiffguardError::Config`] if the URL is not allowed.
 pub fn validate_provider_base_url(base_url: &str) -> Result<(), DiffguardError> {
-    let trimmed = base_url.trim_end_matches('/');
+    let (scheme, host) = parse_scheme_and_host(base_url).ok_or_else(|| {
+        DiffguardError::Config(format!(
+            "Provider base URL is malformed: '{}'. Expected format: https://host/path",
+            base_url
+        ))
+    })?;
 
-    if trimmed.starts_with("http://127.0.0.1") || trimmed.starts_with("http://localhost") {
-        return Ok(());
-    }
-
-    if !trimmed.starts_with("https://") {
+    if scheme != "https" {
         return Err(DiffguardError::Config(format!(
             "Provider base URL must use HTTPS in CI mode: '{}'. HTTP is not allowed.",
             base_url
         )));
     }
 
-    for allowed in ALLOWED_PROVIDER_HOSTS {
-        if trimmed.starts_with(allowed) {
+    if host == "127.0.0.1" || host == "localhost" || host == "[::1]" {
+        return Err(DiffguardError::Config(format!(
+            "Provider base URL '{}' uses loopback address, which is not allowed in CI mode \
+             to prevent token exfiltration. Use a known provider endpoint or run in local mode.",
+            base_url
+        )));
+    }
+
+    for &(allowed_scheme, allowed_host) in ALLOWED_PROVIDER_HOSTS {
+        if scheme == allowed_scheme && host == allowed_host {
             return Ok(());
         }
     }
 
+    let allowed_display: Vec<String> = ALLOWED_PROVIDER_HOSTS
+        .iter()
+        .map(|(s, h)| format!("{}://{}", s, h))
+        .collect();
+
     Err(DiffguardError::Config(format!(
-        "Provider base URL '{}' is not in the CI allowlist. \
+        "Provider base URL '{}' (host: {}) is not in the CI allowlist. \
          Allowed hosts: {}. \
          To use a custom endpoint, run in local mode (unset GITHUB_ACTIONS).",
         base_url,
-        ALLOWED_PROVIDER_HOSTS.join(", ")
+        host,
+        allowed_display.join(", ")
     )))
 }
 
@@ -249,9 +277,24 @@ mod tests {
     }
 
     #[test]
-    fn test_provider_base_url_allows_loopback() {
-        assert!(validate_provider_base_url("http://127.0.0.1:11434/v1").is_ok());
-        assert!(validate_provider_base_url("http://localhost:8080").is_ok());
+    fn test_provider_base_url_rejects_loopback() {
+        let result = validate_provider_base_url("http://127.0.0.1:11434/v1");
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("loopback") || err.contains("HTTPS"));
+
+        let result = validate_provider_base_url("https://localhost:8080");
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("loopback"));
+    }
+
+    #[test]
+    fn test_provider_base_url_rejects_subdomain_spoof() {
+        let result = validate_provider_base_url("https://api.deepseek.com.evil.com/v1");
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("not in the CI allowlist"));
     }
 
     #[test]
@@ -268,5 +311,13 @@ mod tests {
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(err.contains("HTTPS"));
+    }
+
+    #[test]
+    fn test_provider_base_url_rejects_malformed() {
+        let result = validate_provider_base_url("not-a-url");
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("malformed"));
     }
 }

@@ -10,14 +10,19 @@ concurrency:
 
 jobs:
   diffguard-review:
-    name: diffguard-rs Review
+    name: diffguard Review
     runs-on: ubuntu-latest
+    # Skip fork PRs: they cannot access secrets and running untrusted code
+    # with write permissions is a security risk.
+    if: github.event.pull_request.head.repo.full_name == github.repository
     permissions:
       contents: read
       pull-requests: write
     steps:
-      - name: Checkout repository
+      - name: Checkout base branch (trusted code)
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.ref }}
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -31,6 +36,16 @@ jobs:
             target
           key: ${{ runner.os }}-cargo-ai-review-${{ hashFiles('**/Cargo.lock') }}
 
+      - name: Build diffguard from base branch
+        run: cargo build --release
+
+      - name: Fetch PR diff
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh pr diff ${{ github.event.pull_request.number }} > /tmp/pr-diff.patch
+        id: fetch-diff
+
       - name: Run diffguard review
         env:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
@@ -38,7 +53,7 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           REPO_FULL_NAME: ${{ github.repository }}
           GITHUB_ACTIONS: "true"
-        run: cargo run --release
+        run: ./target/release/diffguard
 
       - name: Upload review artifact
         if: always()

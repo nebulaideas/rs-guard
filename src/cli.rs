@@ -31,7 +31,11 @@ pub struct Args {
     pub temperature: Option<f32>,
 
     /// LLM provider to use. Default: deepseek.
-    #[arg(long, help = "LLM provider to use [default: deepseek]")]
+    #[arg(
+        long,
+        env = "DIFFGUARD_PROVIDER",
+        help = "LLM provider to use [default: deepseek]"
+    )]
     pub provider: Option<String>,
 
     /// Path to configuration TOML file.

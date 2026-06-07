@@ -211,7 +211,7 @@ api_key_env = "MY_CUSTOM_KEY"
     assert_eq!(config.provider, "kimi");
     assert_eq!(config.model, "kimi-k2.5");
 
-    // --- Scenario 9: Model preserved when explicitly set and provider changes ---
+    // --- Scenario 9: TOML model NOT carried across provider change ---
     let toml = Some(TomlConfig {
         provider: Some("deepseek".to_string()),
         model: Some("my-custom-model".to_string()),
@@ -227,7 +227,29 @@ api_key_env = "MY_CUSTOM_KEY"
     config.apply_args(&args).unwrap();
 
     assert_eq!(config.provider, "kimi");
-    assert_eq!(config.model, "my-custom-model");
+    assert_eq!(config.model, "kimi-k2.5");
+
+    // --- Scenario 9b: CLI --model IS preserved across provider change ---
+    let toml = Some(TomlConfig {
+        provider: Some("deepseek".to_string()),
+        model: None,
+        temperature: None,
+        max_tokens: None,
+        providers: None,
+    });
+
+    let mut config = Config::from_env(toml).unwrap();
+    let args = diffguard::cli::Args::parse_from([
+        "diffguard",
+        "--provider",
+        "kimi",
+        "--model",
+        "cli-model",
+    ]);
+    config.apply_args(&args).unwrap();
+
+    assert_eq!(config.provider, "kimi");
+    assert_eq!(config.model, "cli-model");
 
     // --- Scenario 10: apply_args respects TOML api_key_env on provider switch ---
     std::env::set_var("MY_KIMI_KEY", "custom-kimi-key");

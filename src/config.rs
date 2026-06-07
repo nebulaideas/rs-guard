@@ -185,9 +185,10 @@ pub struct Config {
     pub provider_config: ProviderConfig,
     /// TOML per-provider sections (retained for `apply_args` provider switching).
     toml_providers: HashMap<String, ProviderTomlConfig>,
-    /// Whether the model was explicitly set (via env, TOML, or CLI).
+    /// Whether the model was explicitly set via CLI `--model` flag.
     /// When `false` and the provider changes, the model resets to the new provider's default.
-    model_explicitly_set: bool,
+    /// Env/TOML model values are NOT carried across provider changes.
+    model_set_via_cli: bool,
 }
 
 impl Config {
@@ -252,7 +253,6 @@ impl Config {
         // Model: env > toml > provider default
         let env_model = std::env::var("DIFFGUARD_MODEL").ok();
         let toml_model = toml.as_ref().and_then(|t| t.model.clone());
-        let model_explicitly_set = env_model.is_some() || toml_model.is_some();
         let model = env_model.or(toml_model).unwrap_or_else(|| {
             default_model(&provider)
                 .unwrap_or("deepseek-v4-flash")
@@ -285,6 +285,7 @@ impl Config {
             base_url,
             http_referer: toml_provider.and_then(|p| p.http_referer.clone()),
             max_tokens,
+            model: model.clone(),
         };
 
         Ok(Config {
@@ -301,7 +302,7 @@ impl Config {
             github_base_url,
             provider_config,
             toml_providers,
-            model_explicitly_set,
+            model_set_via_cli: false,
         })
     }
 
@@ -310,7 +311,8 @@ impl Config {
     /// CLI flags take precedence over environment variables and TOML for `model`,
     /// `temperature`, `provider`, and `max_tokens`. If the provider changes, the
     /// API key is re-resolved (respecting TOML `api_key_env` overrides) and the
-    /// model is reset to the new provider's default unless explicitly overridden.
+    /// model is reset to the new provider's default unless explicitly set via
+    /// the CLI `--model` flag.
     ///
     /// # Errors
     ///
@@ -341,18 +343,20 @@ impl Config {
                 self.provider_config.http_referer =
                     toml_provider.and_then(|p| p.http_referer.clone());
 
-                // Reset model to new provider's default unless explicitly overridden
-                if !self.model_explicitly_set && args.model.is_none() {
+                // Reset model to new provider's default unless CLI --model was used
+                if !self.model_set_via_cli && args.model.is_none() {
                     self.model = default_model(provider)
                         .unwrap_or("deepseek-v4-flash")
                         .to_string();
+                    self.provider_config.model = self.model.clone();
                 }
             }
         }
 
         if let Some(ref model) = args.model {
             self.model = model.clone();
-            self.model_explicitly_set = true;
+            self.provider_config.model = model.clone();
+            self.model_set_via_cli = true;
         }
         if let Some(temp) = args.temperature {
             self.temperature = temp;

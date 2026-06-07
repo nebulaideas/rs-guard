@@ -96,7 +96,7 @@ pub type Provider = Box<dyn LlmProvider>;
 /// Provider-specific configuration overrides from `.reviewer.toml`.
 ///
 /// These are resolved by [`crate::config::Config`] and passed to the
-/// provider factory to customise base URLs, attribution headers, etc.
+/// provider factory to customise base URLs, model, attribution headers, etc.
 #[derive(Debug, Clone, Default)]
 pub struct ProviderConfig {
     /// Custom API base URL override.
@@ -105,6 +105,8 @@ pub struct ProviderConfig {
     pub http_referer: Option<String>,
     /// Maximum tokens for LLM completions.
     pub max_tokens: Option<u32>,
+    /// Model identifier to use (overrides provider default).
+    pub model: String,
 }
 
 /// Sends a chat completion HTTP request and parses the response.
@@ -164,6 +166,14 @@ pub(crate) async fn send_chat_request<B: Serialize + Send>(
             status: 0,
             message: "Empty response from LLM".to_string(),
         })?;
+
+    if let Some(ref reasoning) = choice.message.reasoning_content {
+        log::debug!(
+            "[{}] reasoning_content present ({} chars, content not logged)",
+            provider_name,
+            reasoning.len()
+        );
+    }
 
     Ok(choice.message.content)
 }

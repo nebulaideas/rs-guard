@@ -9,7 +9,12 @@ use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 fn default_config() -> ProviderConfig {
-    ProviderConfig::default()
+    ProviderConfig {
+        base_url: None,
+        http_referer: None,
+        max_tokens: None,
+        model: "test-model".to_string(),
+    }
 }
 
 #[tokio::test]
@@ -260,6 +265,7 @@ async fn test_factory_applies_base_url_override() {
         base_url: Some(mock_server.uri()),
         http_referer: None,
         max_tokens: None,
+        model: "gpt-4o-mini".to_string(),
     };
 
     let provider = create_provider("openai", "test-key", &config).unwrap();
@@ -289,6 +295,7 @@ async fn test_factory_applies_max_tokens() {
         base_url: Some(mock_server.uri()),
         http_referer: None,
         max_tokens: Some(4096),
+        model: "deepseek-v4-flash".to_string(),
     };
 
     let provider = create_provider("deepseek", "test-key", &config).unwrap();
