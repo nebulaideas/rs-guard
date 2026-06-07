@@ -79,19 +79,16 @@ pub fn known_provider_names() -> Vec<&'static str> {
 
 /// Aggregates all CI-allowed hosts across every provider into a single list.
 ///
+/// Dynamically derived from [`all_providers`] so that adding a new provider
+/// automatically includes its hosts in the SSRF allowlist.
+///
 /// Used by [`crate::http::validate_provider_base_url`] to build the SSRF
-/// allowlist without maintaining a separate hardcoded list.
-pub fn all_ci_allowed_hosts() -> &'static [(&'static str, &'static str)] {
-    // The list is small enough to be constructed at compile time via a const
-    // slice.  We flatten all per-provider lists into one.
-    &[
-        ("https", "api.deepseek.com"),
-        ("https", "api.moonshot.ai"),
-        ("https", "dashscope-intl.aliyuncs.com"),
-        ("https", "dashscope.aliyuncs.com"),
-        ("https", "openrouter.ai"),
-        ("https", "api.openai.com"),
-    ]
+/// allowlist.
+pub fn all_ci_allowed_hosts() -> Vec<(&'static str, &'static str)> {
+    all_providers()
+        .iter()
+        .flat_map(|p| p.ci_allowed_hosts.iter().copied())
+        .collect()
 }
 
 #[cfg(test)]

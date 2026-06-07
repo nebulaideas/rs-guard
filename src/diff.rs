@@ -18,6 +18,7 @@ const REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// Result of a successful diff fetch operation.
 #[derive(Debug, Clone)]
+#[must_use = "DiffResult should be used for review processing"]
 pub struct DiffResult {
     /// The raw diff content.
     pub content: String,

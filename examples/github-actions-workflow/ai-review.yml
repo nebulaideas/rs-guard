@@ -21,6 +21,11 @@ jobs:
             https://github.com/nebulaideas/diffguard-rs/releases/latest/download/diffguard
           chmod +x diffguard
 
+      # diffguard fetches the PR diff internally via the GitHub API using
+      # GITHUB_TOKEN, PR_NUMBER, and REPO_FULL_NAME.  No separate `gh pr diff`
+      # step is needed.  Alternatively, if you already have a diff file
+      # (e.g. from `git diff`), pass --diff-file /path/to/diff.patch to
+      # skip the API call entirely.
       - name: Run diffguard review
         env:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}

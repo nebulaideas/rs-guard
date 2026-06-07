@@ -29,7 +29,7 @@ static SECURITY_RE: LazyLock<Regex> = LazyLock::new(|| {
 });
 
 /// GitHub Pull Request review states.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ReviewState {
     /// Approve the PR — code is ready to merge.
     Approve,
@@ -61,7 +61,8 @@ impl ReviewState {
 }
 
 /// Parsed verdict metadata from an LLM response.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[must_use = "Verdict should be used to determine a ReviewState"]
 pub struct Verdict {
     /// The verdict string: `"POSITIVE"` or `"NEGATIVE"`.
     pub verdict: String,
@@ -69,6 +70,16 @@ pub struct Verdict {
     pub critical_bugs: u32,
     /// Count of security issues identified.
     pub security_issues: u32,
+}
+
+impl std::fmt::Display for Verdict {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Verdict: {}, CriticalBugs: {}, SecurityIssues: {}",
+            self.verdict, self.critical_bugs, self.security_issues
+        )
+    }
 }
 
 /// Attempts to extract a `[DIFFGUARD_VERDICT_METADATA]` block from the response.

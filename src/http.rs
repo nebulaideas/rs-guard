@@ -98,7 +98,12 @@ pub fn validate_provider_base_url(base_url: &str) -> Result<(), DiffguardError> 
         ))
     })?;
 
-    if host == "127.0.0.1" || host == "localhost" || host == "[::1]" {
+    if host == "127.0.0.1"
+        || host == "localhost"
+        || host == "[::1]"
+        || host == "0.0.0.0"
+        || host == "[::]"
+    {
         return Err(DiffguardError::Config(format!(
             "Provider base URL '{}' uses loopback address, which is not allowed in CI mode \
              to prevent token exfiltration. Use a known provider endpoint or run in local mode.",
@@ -107,7 +112,7 @@ pub fn validate_provider_base_url(base_url: &str) -> Result<(), DiffguardError> 
     }
 
     let ci_hosts = providers::all_ci_allowed_hosts();
-    for &(allowed_scheme, allowed_host) in ci_hosts {
+    for &(allowed_scheme, allowed_host) in &ci_hosts {
         if parsed.scheme() == allowed_scheme && host == allowed_host {
             return Ok(());
         }
@@ -301,5 +306,26 @@ mod tests {
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(err.contains("malformed"));
+    }
+
+    #[test]
+    fn test_provider_base_url_rejects_ipv6_loopback() {
+        let result = validate_provider_base_url("https://[::1]:11434/v1");
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("loopback"));
+    }
+
+    #[test]
+    fn test_provider_base_url_rejects_bind_all() {
+        let result = validate_provider_base_url("https://0.0.0.0:8080/v1");
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("loopback"));
+
+        let result = validate_provider_base_url("https://[::]:8080/v1");
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("loopback"));
     }
 }

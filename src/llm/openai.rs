@@ -4,18 +4,14 @@
 //! and model identifier.
 
 use crate::error::DiffguardError;
-use crate::llm::{send_chat_request, ChatMessage, ChatRequest, LlmProvider};
+use crate::llm::{build_llm_client, chat_messages, send_chat_request, ChatRequest, LlmProvider};
 use async_trait::async_trait;
-use reqwest::header::{self, HeaderMap, HeaderValue};
 
 /// Default OpenAI API base URL.
 const DEFAULT_BASE_URL: &str = "https://api.openai.com/v1";
 
 /// Default model identifier for OpenAI.
 const DEFAULT_MODEL: &str = "gpt-4o-mini";
-
-/// HTTP request timeout for LLM API calls.
-const REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 
 /// Client for generic OpenAI-compatible chat completions APIs.
 #[derive(Debug, Clone)]
@@ -29,34 +25,13 @@ pub struct OpenAiClient {
 impl OpenAiClient {
     /// Creates a new OpenAI-compatible client with the given API key.
     pub fn new(api_key: impl Into<String>) -> Result<Self, DiffguardError> {
-        let api_key = api_key.into();
-        let client = Self::build_client(&api_key)?;
+        let client = build_llm_client("openai", &api_key.into(), &[])?;
         Ok(Self {
             base_url: DEFAULT_BASE_URL.to_string(),
             model: DEFAULT_MODEL.to_string(),
             max_tokens: None,
             client,
         })
-    }
-
-    fn build_client(api_key: &str) -> Result<reqwest::Client, DiffguardError> {
-        let mut headers = HeaderMap::new();
-        headers.insert(
-            header::AUTHORIZATION,
-            HeaderValue::from_str(&format!("Bearer {}", api_key)).map_err(|e| {
-                DiffguardError::Config(format!("Invalid OpenAI API key format: {}", e))
-            })?,
-        );
-        headers.insert(
-            header::CONTENT_TYPE,
-            HeaderValue::from_static("application/json"),
-        );
-
-        reqwest::Client::builder()
-            .default_headers(headers)
-            .timeout(REQUEST_TIMEOUT)
-            .build()
-            .map_err(|e| DiffguardError::Config(format!("Failed to build HTTP client: {}", e)))
     }
 
     /// Sets a custom base URL for the API endpoint.
@@ -92,16 +67,7 @@ impl LlmProvider for OpenAiClient {
     ) -> Result<String, DiffguardError> {
         let request = ChatRequest {
             model: self.model.clone(),
-            messages: vec![
-                ChatMessage {
-                    role: "system".to_string(),
-                    content: system_prompt.to_string(),
-                },
-                ChatMessage {
-                    role: "user".to_string(),
-                    content: user_message.to_string(),
-                },
-            ],
+            messages: chat_messages(system_prompt, user_message),
             temperature,
             max_tokens: self.max_tokens,
         };

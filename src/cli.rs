@@ -27,7 +27,12 @@ pub struct Args {
     pub model: Option<String>,
 
     /// Sampling temperature (0.0 - 2.0). Default: 0.1.
-    #[arg(short, long, help = "Sampling temperature (0.0 - 2.0) [default: 0.1]")]
+    #[arg(
+        short,
+        long,
+        help = "Sampling temperature (0.0 - 2.0) [default: 0.1]",
+        value_parser = parse_temperature
+    )]
     pub temperature: Option<f32>,
 
     /// LLM provider to use. Default: deepseek.
@@ -63,4 +68,44 @@ pub struct Args {
         help = "Path to a pre-existing diff file to review"
     )]
     pub diff_file: Option<String>,
+}
+
+/// Validates that a temperature value is within the OpenAI-compatible range (0.0 - 2.0).
+fn parse_temperature(s: &str) -> Result<f32, String> {
+    let v: f32 = s
+        .parse()
+        .map_err(|e| format!("Invalid temperature '{}': {}", s, e))?;
+    if !(0.0..=2.0).contains(&v) {
+        return Err(format!(
+            "Temperature must be between 0.0 and 2.0, got: {}",
+            v
+        ));
+    }
+    Ok(v)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_temperature_valid() {
+        assert_eq!(parse_temperature("0.0").unwrap(), 0.0);
+        assert_eq!(parse_temperature("0.1").unwrap(), 0.1);
+        assert_eq!(parse_temperature("1.0").unwrap(), 1.0);
+        assert_eq!(parse_temperature("2.0").unwrap(), 2.0);
+    }
+
+    #[test]
+    fn test_parse_temperature_out_of_range() {
+        assert!(parse_temperature("-0.1").is_err());
+        assert!(parse_temperature("2.1").is_err());
+        assert!(parse_temperature("5.0").is_err());
+    }
+
+    #[test]
+    fn test_parse_temperature_invalid_string() {
+        assert!(parse_temperature("not-a-number").is_err());
+        assert!(parse_temperature("").is_err());
+    }
 }

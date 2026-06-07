@@ -378,7 +378,164 @@ api_key_env = "MY_CUSTOM_KEY"
         Some("https://my-local-llm.example.com/v1".to_string())
     );
 
+    // --- Scenario 14: CI SSRF rejection on apply_args provider switch ---
+    // Switching to a provider whose TOML has an evil base_url must be rejected.
+    std::env::set_var("GITHUB_ACTIONS", "true");
+    std::env::set_var("GITHUB_TOKEN", "test-token");
+    std::env::set_var("PR_NUMBER", "42");
+    std::env::set_var("REPO_FULL_NAME", "owner/repo");
+    std::env::set_var("DEEPSEEK_API_KEY", "test-deepseek-ssrf");
+    std::env::set_var("KIMI_API_KEY", "test-kimi-ssrf-switch");
+
+    let toml = Some(TomlConfig {
+        provider: Some("deepseek".to_string()),
+        model: None,
+        temperature: None,
+        max_tokens: None,
+        providers: Some({
+            let mut m = HashMap::new();
+            m.insert(
+                "deepseek".to_string(),
+                ProviderTomlConfig {
+                    api_key_env: None,
+                    base_url: None,
+                    http_referer: None,
+                },
+            );
+            m.insert(
+                "kimi".to_string(),
+                ProviderTomlConfig {
+                    api_key_env: None,
+                    base_url: Some("https://evil.example.com/v1".to_string()),
+                    http_referer: None,
+                },
+            );
+            m
+        }),
+    });
+
+    // Ensure GITHUB_ACTIONS is still set (it was set in Scenario 11 and not removed)
+    // so is_ci == true for from_env.
+    let mut config = Config::from_env(toml).unwrap();
+    assert_eq!(config.provider, "deepseek");
+
+    let args = diffguard::cli::Args::parse_from(["diffguard", "--provider", "kimi"]);
+    let result = config.apply_args(&args);
+    assert!(result.is_err());
+    let err = result.unwrap_err().to_string();
+    assert!(err.contains("not in the CI allowlist"));
+
+    // --- Scenario 15: provider_config.base_url cleared on switch without TOML entry ---
+    // Switch from provider WITH a TOML base_url to one WITHOUT — base_url must be None.
+    std::env::set_var("KIMI_API_KEY", "test-kimi-clear-url");
+
+    let toml = Some(TomlConfig {
+        provider: Some("deepseek".to_string()),
+        model: None,
+        temperature: None,
+        max_tokens: None,
+        providers: Some({
+            let mut m = HashMap::new();
+            m.insert(
+                "deepseek".to_string(),
+                ProviderTomlConfig {
+                    api_key_env: None,
+                    base_url: Some("https://api.deepseek.com".to_string()),
+                    http_referer: None,
+                },
+            );
+            // kimi has no TOML entry — base_url should be None after switch
+            m
+        }),
+    });
+
+    let mut config = Config::from_env(toml).unwrap();
+    assert_eq!(
+        config.provider_config.base_url,
+        Some("https://api.deepseek.com".to_string())
+    );
+
+    let args = diffguard::cli::Args::parse_from(["diffguard", "--provider", "kimi"]);
+    config.apply_args(&args).unwrap();
+    assert_eq!(config.provider, "kimi");
+    assert_eq!(config.provider_config.base_url, None);
+
+    // --- Scenario 16: provider_config.base_url preserved on switch to provider WITH TOML base_url ---
+    // Clear CI mode so HTTP URLs are allowed (testing base_url passthrough, not SSRF).
+    std::env::remove_var("GITHUB_ACTIONS");
+    std::env::remove_var("GITHUB_TOKEN");
+    std::env::remove_var("PR_NUMBER");
+    std::env::remove_var("REPO_FULL_NAME");
+    std::env::set_var("KIMI_API_KEY", "test-kimi-preserve-url");
+
+    let toml = Some(TomlConfig {
+        provider: Some("deepseek".to_string()),
+        model: None,
+        temperature: None,
+        max_tokens: None,
+        providers: Some({
+            let mut m = HashMap::new();
+            m.insert(
+                "deepseek".to_string(),
+                ProviderTomlConfig {
+                    api_key_env: None,
+                    base_url: Some("https://api.deepseek.com".to_string()),
+                    http_referer: None,
+                },
+            );
+            m.insert(
+                "kimi".to_string(),
+                ProviderTomlConfig {
+                    api_key_env: None,
+                    base_url: Some("http://localhost:8080/v1".to_string()),
+                    http_referer: None,
+                },
+            );
+            m
+        }),
+    });
+
+    let mut config = Config::from_env(toml).unwrap();
+    let args = diffguard::cli::Args::parse_from(["diffguard", "--provider", "kimi"]);
+    config.apply_args(&args).unwrap();
+
+    assert_eq!(
+        config.provider_config.base_url,
+        Some("http://localhost:8080/v1".to_string())
+    );
+
+    // --- Scenario 17: provider_config.model synced after switch with CLI --model ---
+    std::env::set_var("KIMI_API_KEY", "test-kimi-model-sync");
+
+    let toml = Some(TomlConfig {
+        provider: Some("deepseek".to_string()),
+        model: None,
+        temperature: None,
+        max_tokens: None,
+        providers: None,
+    });
+
+    let mut config = Config::from_env(toml).unwrap();
+    assert_eq!(config.provider_config.model, "deepseek-v4-flash");
+
+    let args = diffguard::cli::Args::parse_from([
+        "diffguard",
+        "--provider",
+        "kimi",
+        "--model",
+        "my-custom-model",
+    ]);
+    config.apply_args(&args).unwrap();
+
+    assert_eq!(config.model, "my-custom-model");
+    assert_eq!(config.provider_config.model, "my-custom-model");
+
     // Final cleanup
     std::env::remove_var("DIFFGUARD_PROVIDER");
     std::env::remove_var("DEEPSEEK_API_KEY");
+    std::env::remove_var("KIMI_API_KEY");
+    std::env::remove_var("GITHUB_ACTIONS");
+    std::env::remove_var("GITHUB_TOKEN");
+    std::env::remove_var("PR_NUMBER");
+    std::env::remove_var("REPO_FULL_NAME");
 }

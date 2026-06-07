@@ -169,7 +169,12 @@ fn validate_local_provider_base_url(base_url: &str) -> Result<(), DiffguardError
             base_url,
             parsed.scheme()
         );
-    } else if host == "127.0.0.1" || host == "localhost" || host == "[::1]" {
+    } else if host == "127.0.0.1"
+        || host == "localhost"
+        || host == "[::1]"
+        || host == "0.0.0.0"
+        || host == "[::]"
+    {
         log::warn!(
             "Provider base URL '{}' points to a loopback address. \
              Your API key will be sent to a local server. \
@@ -289,11 +294,14 @@ impl Config {
 
         let (repo_owner, repo_name) = match repo_full_name {
             Some(full) => {
-                let parts: Vec<&str> = full.split('/').collect();
-                if parts.len() == 2 {
+                let parts: Vec<&str> = full.splitn(2, '/').collect();
+                if parts.len() == 2 && !parts[0].is_empty() && !parts[1].is_empty() {
                     (Some(parts[0].to_string()), Some(parts[1].to_string()))
                 } else {
-                    (None, None)
+                    return Err(DiffguardError::Config(format!(
+                        "REPO_FULL_NAME must be in 'owner/repo' format, got: '{}'",
+                        full
+                    )));
                 }
             }
             None => (None, None),
@@ -383,6 +391,7 @@ impl Config {
                         new_env, provider
                     ))
                 })?;
+                let old_provider = self.provider.clone();
                 self.api_key = new_key;
                 self.provider = provider.clone();
 
@@ -396,6 +405,13 @@ impl Config {
                 } else if let Some(ref url) = new_base_url {
                     validate_local_provider_base_url(url)?;
                 }
+                log::debug!(
+                    "Provider switch '{} -> '{}': base_url={:?}, http_referer={:?}",
+                    old_provider,
+                    provider,
+                    new_base_url,
+                    toml_provider.and_then(|p| p.http_referer.as_deref())
+                );
                 self.provider_config.base_url = new_base_url;
                 self.provider_config.http_referer =
                     toml_provider.and_then(|p| p.http_referer.clone());

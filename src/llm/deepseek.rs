@@ -4,18 +4,14 @@
 //! OpenAI-compatible request format.
 
 use crate::error::DiffguardError;
-use crate::llm::{send_chat_request, ChatMessage, ChatRequest, LlmProvider};
+use crate::llm::{build_llm_client, chat_messages, send_chat_request, ChatRequest, LlmProvider};
 use async_trait::async_trait;
-use reqwest::header::{self, HeaderMap, HeaderValue};
 
 /// Default DeepSeek API base URL.
 const DEFAULT_BASE_URL: &str = "https://api.deepseek.com";
 
 /// Default model identifier for DeepSeek.
 const DEFAULT_MODEL: &str = "deepseek-v4-flash";
-
-/// HTTP request timeout for LLM API calls.
-const REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 
 /// Client for the DeepSeek chat completions API.
 #[derive(Debug, Clone)]
@@ -34,34 +30,13 @@ impl DeepSeekClient {
     /// Returns an error if the API key contains invalid header characters
     /// or if the HTTP client cannot be built.
     pub fn new(api_key: impl Into<String>) -> Result<Self, DiffguardError> {
-        let api_key = api_key.into();
-        let client = Self::build_client(&api_key)?;
+        let client = build_llm_client("deepseek", &api_key.into(), &[])?;
         Ok(Self {
             base_url: DEFAULT_BASE_URL.to_string(),
             model: DEFAULT_MODEL.to_string(),
             max_tokens: None,
             client,
         })
-    }
-
-    fn build_client(api_key: &str) -> Result<reqwest::Client, DiffguardError> {
-        let mut headers = HeaderMap::new();
-        headers.insert(
-            header::AUTHORIZATION,
-            HeaderValue::from_str(&format!("Bearer {}", api_key)).map_err(|e| {
-                DiffguardError::Config(format!("Invalid DeepSeek API key format: {}", e))
-            })?,
-        );
-        headers.insert(
-            header::CONTENT_TYPE,
-            HeaderValue::from_static("application/json"),
-        );
-
-        reqwest::Client::builder()
-            .default_headers(headers)
-            .timeout(REQUEST_TIMEOUT)
-            .build()
-            .map_err(|e| DiffguardError::Config(format!("Failed to build HTTP client: {}", e)))
     }
 
     /// Sets a custom base URL for the API endpoint.
@@ -81,43 +56,6 @@ impl DeepSeekClient {
         self.max_tokens = max_tokens;
         self
     }
-
-    /// Sends a chat completion request to the DeepSeek API.
-    ///
-    /// # Arguments
-    ///
-    /// * `system_prompt` — The system instruction for the model.
-    /// * `user_message` — The user message (typically the diff content).
-    /// * `temperature` — Sampling temperature (0.0 to 2.0).
-    ///
-    /// # Errors
-    ///
-    /// Returns [`DiffguardError::LlmApi`] on API errors or response parsing failures.
-    pub async fn chat_completion(
-        &self,
-        system_prompt: &str,
-        user_message: &str,
-        temperature: f32,
-    ) -> Result<String, DiffguardError> {
-        let request = ChatRequest {
-            model: self.model.clone(),
-            messages: vec![
-                ChatMessage {
-                    role: "system".to_string(),
-                    content: system_prompt.to_string(),
-                },
-                ChatMessage {
-                    role: "user".to_string(),
-                    content: user_message.to_string(),
-                },
-            ],
-            temperature,
-            max_tokens: self.max_tokens,
-        };
-
-        let url = format!("{}/chat/completions", self.base_url);
-        send_chat_request(&self.client, &url, &request, "deepseek").await
-    }
 }
 
 #[async_trait]
@@ -132,8 +70,15 @@ impl LlmProvider for DeepSeekClient {
         user_message: &str,
         temperature: f32,
     ) -> Result<String, DiffguardError> {
-        self.chat_completion(system_prompt, user_message, temperature)
-            .await
+        let request = ChatRequest {
+            model: self.model.clone(),
+            messages: chat_messages(system_prompt, user_message),
+            temperature,
+            max_tokens: self.max_tokens,
+        };
+
+        let url = format!("{}/chat/completions", self.base_url);
+        send_chat_request(&self.client, &url, &request, "deepseek").await
     }
 }
 

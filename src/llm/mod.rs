@@ -6,7 +6,11 @@
 
 use crate::error::DiffguardError;
 use async_trait::async_trait;
+use reqwest::header::{self, HeaderMap, HeaderValue};
 use serde::{Deserialize, Serialize};
+
+/// HTTP request timeout for LLM API calls.
+const LLM_REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 
 pub mod deepseek;
 pub mod factory;
@@ -166,9 +170,10 @@ pub(crate) async fn send_chat_request<B: Serialize + Send>(
                     return None;
                 }
                 let val = value.to_str().unwrap_or("<binary>");
-                // Truncate long values
+                // Truncate long values (use char-aware truncation to avoid panics on multi-byte UTF-8)
                 let val_display = if val.len() > 80 {
-                    format!("{}...", &val[..80])
+                    let truncated: String = val.chars().take(80).collect();
+                    format!("{}...", truncated)
                 } else {
                     val.to_string()
                 };
@@ -239,4 +244,76 @@ impl From<LlmError> for DiffguardError {
             message: err.message,
         }
     }
+}
+
+/// Creates a system + user message pair for a chat completion request.
+///
+/// Shared helper to avoid duplicating message construction across providers.
+pub(crate) fn chat_messages(system_prompt: &str, user_message: &str) -> Vec<ChatMessage> {
+    vec![
+        ChatMessage {
+            role: "system".to_string(),
+            content: system_prompt.to_string(),
+        },
+        ChatMessage {
+            role: "user".to_string(),
+            content: user_message.to_string(),
+        },
+    ]
+}
+
+/// Builds a [`reqwest::Client`] with standard LLM provider headers.
+///
+/// Sets `Authorization: Bearer {api_key}`, `Content-Type: application/json`,
+/// and any additional headers. Uses [`LLM_REQUEST_TIMEOUT`].
+///
+/// # Arguments
+///
+/// * `provider_name` — Provider name for error messages.
+/// * `api_key` — API key for Bearer authentication.
+/// * `extra_headers` — Additional headers to include (e.g. `HTTP-Referer`).
+///
+/// # Errors
+///
+/// Returns [`DiffguardError::Config`] if the API key or extra header values
+/// contain invalid HTTP header characters.
+pub(crate) fn build_llm_client(
+    provider_name: &str,
+    api_key: &str,
+    extra_headers: &[(&str, &str)],
+) -> Result<reqwest::Client, DiffguardError> {
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        header::AUTHORIZATION,
+        HeaderValue::from_str(&format!("Bearer {}", api_key)).map_err(|e| {
+            DiffguardError::Config(format!("Invalid {} API key format: {}", provider_name, e))
+        })?,
+    );
+    headers.insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("application/json"),
+    );
+    for &(name, value) in extra_headers {
+        let h_name = header::HeaderName::from_bytes(name.as_bytes()).map_err(|e| {
+            DiffguardError::Config(format!(
+                "Invalid header name '{}' for {}: {}",
+                name, provider_name, e
+            ))
+        })?;
+        headers.insert(
+            h_name,
+            HeaderValue::from_str(value).map_err(|e| {
+                DiffguardError::Config(format!(
+                    "Invalid header '{}' value for {}: {}",
+                    name, provider_name, e
+                ))
+            })?,
+        );
+    }
+
+    reqwest::Client::builder()
+        .default_headers(headers)
+        .timeout(LLM_REQUEST_TIMEOUT)
+        .build()
+        .map_err(|e| DiffguardError::Config(format!("Failed to build HTTP client: {}", e)))
 }
