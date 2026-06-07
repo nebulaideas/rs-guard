@@ -28,6 +28,7 @@ toml = "0.8"
 url = "2.5"
 
 [dev-dependencies]
+serial_test = "3.5.0"
 tempfile = "3.14"
 wiremock = "0.6"
 
