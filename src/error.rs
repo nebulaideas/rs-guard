@@ -12,7 +12,7 @@ pub enum DiffguardError {
     /// GitHub REST API returned an error response.
     #[error("GitHub API error: {status} - {message}")]
     GitHubApi {
-        /// HTTP status code returned by GitHub.
+        /// HTTP status code returned by GitHub (0 for connection/timeout failures).
         status: u16,
         /// Response body or description of the failure.
         message: String,
@@ -23,7 +23,7 @@ pub enum DiffguardError {
     LlmApi {
         /// Name of the LLM provider (e.g. "deepseek").
         provider: String,
-        /// HTTP status code returned by the provider.
+        /// HTTP status code returned by the provider (0 for connection/timeout failures).
         status: u16,
         /// Response body or description of the failure.
         message: String,
@@ -62,6 +62,10 @@ pub enum DiffguardError {
     #[error("No diff content found")]
     EmptyDiff,
 
+    /// The diff response did not contain valid diff content (e.g. received JSON error body).
+    #[error("Invalid diff content: response does not appear to be a diff")]
+    InvalidDiffContent,
+
     /// The GitHub token lacks permission to perform the requested review action.
     #[error("Permission denied for review state {state}: {message}")]
     PermissionDenied {
@@ -75,15 +79,17 @@ pub enum DiffguardError {
 impl DiffguardError {
     /// Returns `true` if this error is transient and the operation should be retried.
     ///
-    /// Retryable conditions: HTTP 429 (rate limited), 502, 503, or 504.
+    /// Retryable conditions:
+    /// - HTTP 429 (rate limited), 502, 503, or 504
+    /// - Status 0 (connection error, timeout, DNS failure)
     pub fn is_retryable(&self) -> bool {
         matches!(
             self,
             DiffguardError::GitHubApi {
-                status: 429 | 502 | 503 | 504,
+                status: 0 | 429 | 502 | 503 | 504,
                 ..
             } | DiffguardError::LlmApi {
-                status: 429 | 502 | 503 | 504,
+                status: 0 | 429 | 502 | 503 | 504,
                 ..
             }
         )

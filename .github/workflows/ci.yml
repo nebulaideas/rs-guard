@@ -59,7 +59,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: EmbarkStudios/cargo-deny-action@v1
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo install cargo-deny --locked
+      - run: cargo deny --config deny.toml check
 
   audit:
     name: cargo-audit

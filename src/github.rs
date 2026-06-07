@@ -4,9 +4,9 @@
 //! and [`dismiss_previous_reviews`] for cleaning up outdated bot reviews.
 
 use crate::error::DiffguardError;
+use crate::http::{github_headers, validate_github_base_url};
 use crate::retry::with_retry;
 use crate::verdict::ReviewState;
-use reqwest::header::{self, HeaderMap, HeaderValue};
 use serde_json::json;
 
 /// HTTP request timeout for GitHub API calls.
@@ -14,31 +14,6 @@ const REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// HTML comment signature used to identify diffguard bot reviews.
 const BOT_SIGNATURE: &str = "<!-- diffguard-bot -->";
-
-/// Builds default headers for GitHub API requests.
-///
-/// Returns an error if the token contains invalid characters.
-fn github_headers(token: &str) -> Result<HeaderMap, DiffguardError> {
-    let mut headers = HeaderMap::new();
-    headers.insert(
-        header::ACCEPT,
-        HeaderValue::from_static("application/vnd.github+json"),
-    );
-    headers.insert(
-        header::AUTHORIZATION,
-        HeaderValue::from_str(&format!("Bearer {}", token))
-            .map_err(|e| DiffguardError::Config(format!("Invalid GitHub token format: {}", e)))?,
-    );
-    headers.insert(
-        "X-GitHub-Api-Version",
-        HeaderValue::from_static("2022-11-28"),
-    );
-    headers.insert(
-        header::USER_AGENT,
-        HeaderValue::from_static("diffguard-rs/0.1.0"),
-    );
-    Ok(headers)
-}
 
 /// Submits a review to a GitHub Pull Request without permission fallback.
 async fn submit_review_inner(
@@ -102,6 +77,8 @@ async fn submit_review_inner(
 /// to insufficient permissions (HTTP 403), the function retries with `COMMENT`
 /// and prepends `[Bot fallback from {state}]` to the message.
 ///
+/// The `base_url` is validated against an allowlist before any request is made.
+///
 /// # Arguments
 ///
 /// * `base_url` — GitHub API base URL (e.g. `"https://api.github.com"`).
@@ -120,6 +97,8 @@ pub async fn submit_review(
     message: &str,
     token: &str,
 ) -> Result<(), DiffguardError> {
+    validate_github_base_url(base_url)?;
+
     let result =
         submit_review_inner(base_url, owner, repo, pr_number, &state, message, token).await;
 
@@ -155,6 +134,8 @@ pub async fn submit_review(
 /// Individual dismissal failures are logged as warnings but do not cause this
 /// function to return an error.
 ///
+/// The `base_url` is validated against an allowlist before any request is made.
+///
 /// # Arguments
 ///
 /// * `base_url` — GitHub API base URL (e.g. `"https://api.github.com"`).
@@ -169,6 +150,8 @@ pub async fn dismiss_previous_reviews(
     pr_number: u64,
     token: &str,
 ) -> Result<(), DiffguardError> {
+    validate_github_base_url(base_url)?;
+
     let client = reqwest::Client::builder()
         .timeout(REQUEST_TIMEOUT)
         .build()

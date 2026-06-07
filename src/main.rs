@@ -11,6 +11,7 @@ use diffguard::diff::{fetch_local_diff, fetch_pr_diff};
 use diffguard::github::{dismiss_previous_reviews, submit_review};
 use diffguard::llm::factory::create_provider;
 use diffguard::output::{print_colored_summary, write_artifact, ReviewConfig, ARTIFACT_FILENAME};
+use diffguard::redact::{log_redacted, redact_secrets};
 use diffguard::verdict::{parse_verdict, ReviewState};
 
 /// Runs the full review pipeline with the given configuration.
@@ -34,6 +35,7 @@ pub async fn run_pipeline(config: Config) -> anyhow::Result<()> {
                     diff.line_count,
                     diff.size_bytes
                 );
+                log_redacted("Diff content", &diff.content);
                 diff
             }
             Err(e) => {
@@ -77,6 +79,7 @@ pub async fn run_pipeline(config: Config) -> anyhow::Result<()> {
                     diff.line_count,
                     diff.size_bytes
                 );
+                log_redacted("Diff content", &diff.content);
                 diff
             }
             Err(e) => {
@@ -110,6 +113,7 @@ pub async fn run_pipeline(config: Config) -> anyhow::Result<()> {
         .context("LLM API call failed")?;
 
     log::info!("Received LLM response ({} chars)", llm_response.len());
+    log_redacted("LLM response", &llm_response);
 
     let (verdict, state) =
         parse_verdict(&llm_response).context("Failed to parse verdict from LLM response")?;
@@ -131,8 +135,10 @@ pub async fn run_pipeline(config: Config) -> anyhow::Result<()> {
         diff_line_count: diff_result.line_count,
     };
 
+    let sanitized_response = redact_secrets(&llm_response);
+
     write_artifact(
-        &llm_response,
+        &sanitized_response,
         &verdict,
         &state,
         &review_config,
@@ -152,7 +158,7 @@ pub async fn run_pipeline(config: Config) -> anyhow::Result<()> {
             repo,
             pr,
             state.clone(),
-            &llm_response,
+            &sanitized_response,
             token,
         )
         .await
@@ -175,7 +181,7 @@ pub async fn run_pipeline(config: Config) -> anyhow::Result<()> {
         println!("Verdict:     {}", verdict.verdict);
         println!("State:       {}", state);
     } else {
-        print_colored_summary(&llm_response, &verdict, &state, &review_config);
+        print_colored_summary(&sanitized_response, &verdict, &state, &review_config);
 
         if state == ReviewState::RequestChanges {
             std::process::exit(2);
@@ -191,7 +197,9 @@ async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
 
     let mut config = Config::from_env().context("Failed to load configuration")?;
-    config.apply_args(&args);
+    config
+        .apply_args(&args)
+        .context("Failed to apply CLI arguments")?;
     config
         .load_prompt_file(&args.prompt_file)
         .context("Failed to load prompt file")?;

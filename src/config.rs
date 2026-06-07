@@ -5,6 +5,7 @@
 
 use crate::cli::Args;
 use crate::error::DiffguardError;
+use crate::http::validate_github_base_url;
 use std::path::Path;
 
 /// Default system prompt embedded in the binary.
@@ -31,6 +32,14 @@ Guidelines:
 - CriticalBugs: count of bugs that would cause incorrect behavior in production
 - SecurityIssues: count of security vulnerabilities or risks
 "#;
+
+/// Returns the environment variable name for the API key of the given provider.
+fn api_key_env_var(provider: &str) -> &'static str {
+    match provider {
+        "deepseek" => "DEEPSEEK_API_KEY",
+        _ => "DEEPSEEK_API_KEY",
+    }
+}
 
 /// Resolved application configuration.
 #[derive(Debug, Clone)]
@@ -74,10 +83,7 @@ impl Config {
         let provider =
             std::env::var("DIFFGUARD_PROVIDER").unwrap_or_else(|_| "deepseek".to_string());
 
-        let api_key_env = match provider.as_str() {
-            "deepseek" => "DEEPSEEK_API_KEY",
-            _ => "DEEPSEEK_API_KEY",
-        };
+        let api_key_env = api_key_env_var(&provider);
 
         let api_key = std::env::var(api_key_env).map_err(|_| {
             DiffguardError::Config(format!(
@@ -102,6 +108,9 @@ impl Config {
             None => (None, None),
         };
 
+        let github_base_url = std::env::var("GITHUB_API_URL")
+            .unwrap_or_else(|_| "https://api.github.com".to_string());
+
         Ok(Config {
             provider,
             model: std::env::var("DIFFGUARD_MODEL")
@@ -117,18 +126,37 @@ impl Config {
             repo_name,
             prompt: DEFAULT_PROMPT.to_string(),
             is_ci,
-            github_base_url: "https://api.github.com".to_string(),
+            github_base_url,
         })
     }
 
     /// Applies CLI argument overrides to the configuration.
     ///
     /// CLI flags take precedence over environment variables for `model`,
-    /// `temperature`, and `provider`.
-    pub fn apply_args(&mut self, args: &Args) {
+    /// `temperature`, and `provider`. If the provider changes, the API key
+    /// is re-resolved from the corresponding environment variable.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DiffguardError::Config`] if the provider changes and the
+    /// new provider's API key environment variable is not set.
+    pub fn apply_args(&mut self, args: &Args) -> Result<(), DiffguardError> {
         self.model = args.model.clone();
         self.temperature = args.temperature;
-        self.provider = args.provider.clone();
+
+        if args.provider != self.provider {
+            let new_env = api_key_env_var(&args.provider);
+            let new_key = std::env::var(new_env).map_err(|_| {
+                DiffguardError::Config(format!(
+                    "API key not found. Set {} for provider '{}'",
+                    new_env, args.provider
+                ))
+            })?;
+            self.api_key = new_key;
+            self.provider = args.provider.clone();
+        }
+
+        Ok(())
     }
 
     /// Loads the system prompt from a file, falling back to the default.
@@ -150,13 +178,16 @@ impl Config {
 
     /// Validates that all required fields are present for CI mode.
     ///
-    /// In local mode, this is a no-op. In CI mode, `GITHUB_TOKEN`,
-    /// `PR_NUMBER`, and `REPO_FULL_NAME` must all be set.
+    /// In local mode, validates the GitHub base URL only. In CI mode,
+    /// additionally requires `GITHUB_TOKEN`, `PR_NUMBER`, and `REPO_FULL_NAME`.
+    /// The `github_base_url` is always validated against the allowlist.
     ///
     /// # Errors
     ///
-    /// Returns [`DiffguardError::Config`] if a required CI field is missing.
+    /// Returns [`DiffguardError::Config`] if validation fails.
     pub fn validate_for_ci(&self) -> Result<(), DiffguardError> {
+        validate_github_base_url(&self.github_base_url)?;
+
         if self.is_ci {
             if self.github_token.is_none() {
                 return Err(DiffguardError::Config(

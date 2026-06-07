@@ -110,4 +110,43 @@ mod tests {
         assert!(result.is_err());
         assert_eq!(counter.load(Ordering::SeqCst), 1);
     }
+
+    #[tokio::test]
+    async fn test_retry_on_timeout_status_zero() {
+        let counter = AtomicUsize::new(0);
+        let result = with_retry(|| async {
+            let count = counter.fetch_add(1, Ordering::SeqCst);
+            if count < 1 {
+                Err(DiffguardError::GitHubApi {
+                    status: 0,
+                    message: "connection timed out".to_string(),
+                })
+            } else {
+                Ok("success")
+            }
+        })
+        .await;
+        assert!(result.is_ok());
+        assert_eq!(counter.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn test_retry_on_llm_timeout_status_zero() {
+        let counter = AtomicUsize::new(0);
+        let result = with_retry(|| async {
+            let count = counter.fetch_add(1, Ordering::SeqCst);
+            if count < 1 {
+                Err(DiffguardError::LlmApi {
+                    provider: "deepseek".to_string(),
+                    status: 0,
+                    message: "request timed out".to_string(),
+                })
+            } else {
+                Ok("ok")
+            }
+        })
+        .await;
+        assert!(result.is_ok());
+        assert_eq!(counter.load(Ordering::SeqCst), 2);
+    }
 }

@@ -4,8 +4,8 @@
 //! and [`fetch_local_diff`] for reading `git diff --cached` output.
 
 use crate::error::DiffguardError;
+use crate::http::{github_diff_headers, validate_github_base_url};
 use crate::retry::with_retry;
-use reqwest::header::{self, HeaderMap, HeaderValue};
 
 /// Maximum allowed diff size in bytes (100 KB).
 const MAX_DIFF_BYTES: usize = 100 * 1024;
@@ -27,35 +27,43 @@ pub struct DiffResult {
     pub line_count: usize,
 }
 
-/// Builds default headers for GitHub API requests.
+/// Validates that the response body looks like a diff and not a JSON error.
 ///
-/// Returns an error if the token contains invalid characters.
-fn github_headers(token: &str) -> Result<HeaderMap, DiffguardError> {
-    let mut headers = HeaderMap::new();
-    headers.insert(
-        header::ACCEPT,
-        HeaderValue::from_static("application/vnd.github.v3.diff"),
-    );
-    headers.insert(
-        header::AUTHORIZATION,
-        HeaderValue::from_str(&format!("Bearer {}", token))
-            .map_err(|e| DiffguardError::Config(format!("Invalid GitHub token format: {}", e)))?,
-    );
-    headers.insert(
-        "X-GitHub-Api-Version",
-        HeaderValue::from_static("2022-11-28"),
-    );
-    headers.insert(
-        header::USER_AGENT,
-        HeaderValue::from_static("diffguard-rs/0.1.0"),
-    );
-    Ok(headers)
+/// Checks for common diff markers (`diff --git`, `@@`, `---`, `+++`) and
+/// rejects responses that appear to be JSON error bodies from the API.
+///
+/// # Errors
+///
+/// Returns [`DiffguardError::InvalidDiffContent`] if the content does not
+/// appear to be a valid diff.
+fn validate_diff_content(content: &str) -> Result<(), DiffguardError> {
+    let trimmed = content.trim_start();
+
+    if trimmed.starts_with('{') || trimmed.starts_with('[') {
+        return Err(DiffguardError::InvalidDiffContent);
+    }
+
+    let has_diff_markers = content.contains("diff --git")
+        || content.contains("@@ ")
+        || content.contains("--- a/")
+        || content.contains("+++ b/")
+        || content.starts_with("diff ")
+        || content.starts_with("index ");
+
+    if !has_diff_markers {
+        return Err(DiffguardError::InvalidDiffContent);
+    }
+
+    Ok(())
 }
 
 /// Fetches the diff for a GitHub Pull Request.
 ///
 /// Sends a GET request to the GitHub API with the `application/vnd.github.v3.diff`
-/// accept header. Automatically retries on transient failures (429, 5xx).
+/// accept header. Automatically retries on transient failures (429, 5xx, timeouts).
+///
+/// The `base_url` is validated against an allowlist before any request is made,
+/// preventing `Authorization` headers from being sent to untrusted hosts.
 ///
 /// # Arguments
 ///
@@ -67,8 +75,10 @@ fn github_headers(token: &str) -> Result<HeaderMap, DiffguardError> {
 ///
 /// # Errors
 ///
-/// Returns [`DiffguardError::GitHubApi`] on HTTP errors,
+/// Returns [`DiffguardError::Config`] if `base_url` is not allowlisted,
+/// [`DiffguardError::GitHubApi`] on HTTP errors,
 /// [`DiffguardError::EmptyDiff`] if the diff is empty,
+/// [`DiffguardError::InvalidDiffContent`] if the response is not a valid diff,
 /// or [`DiffguardError::DiffTooLarge`] if the diff exceeds size limits.
 pub async fn fetch_pr_diff(
     base_url: &str,
@@ -77,13 +87,15 @@ pub async fn fetch_pr_diff(
     pr_number: u64,
     token: &str,
 ) -> Result<DiffResult, DiffguardError> {
+    validate_github_base_url(base_url)?;
+
     let client = reqwest::Client::builder()
         .timeout(REQUEST_TIMEOUT)
         .build()
         .map_err(|e| DiffguardError::Config(format!("Failed to build HTTP client: {}", e)))?;
 
     let url = format!("{}/repos/{}/{}/pulls/{}", base_url, owner, repo, pr_number);
-    let headers = github_headers(token)?;
+    let headers = github_diff_headers(token)?;
 
     let response = with_retry(|| async {
         let resp = client
@@ -120,6 +132,8 @@ pub async fn fetch_pr_diff(
     if response.is_empty() {
         return Err(DiffguardError::EmptyDiff);
     }
+
+    validate_diff_content(&response)?;
 
     let size_bytes = response.len();
     let line_count = response.lines().count();
@@ -195,7 +209,9 @@ mod tests {
         Mock::given(method("GET"))
             .and(path("/repos/test-owner/test-repo/pulls/42"))
             .and(header("Accept", "application/vnd.github.v3.diff"))
-            .respond_with(ResponseTemplate::new(200).set_body_string("diff content\nline 2"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(
+                "diff --git a/file.rs b/file.rs\n--- a/file.rs\n+++ b/file.rs\n@@ -1,2 +1,3 @@\n+line",
+            ))
             .mount(&mock_server)
             .await;
 
@@ -210,8 +226,8 @@ mod tests {
 
         assert!(result.is_ok());
         let diff = result.unwrap();
-        assert_eq!(diff.content, "diff content\nline 2");
-        assert_eq!(diff.line_count, 2);
+        assert!(diff.content.contains("diff --git"));
+        assert!(diff.line_count > 0);
     }
 
     #[tokio::test]
@@ -235,5 +251,53 @@ mod tests {
 
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("404"));
+    }
+
+    #[tokio::test]
+    async fn test_fetch_pr_diff_rejects_json_response() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/repos/test-owner/test-repo/pulls/42"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_string(r#"{"message": "Not Found", "documentation_url": "..." }"#),
+            )
+            .mount(&mock_server)
+            .await;
+
+        let result = fetch_pr_diff(
+            &mock_server.uri(),
+            "test-owner",
+            "test-repo",
+            42,
+            "test-token",
+        )
+        .await;
+
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("not appear to be a diff"));
+    }
+
+    #[test]
+    fn test_validate_diff_content_valid() {
+        assert!(validate_diff_content("diff --git a/f.rs b/f.rs\n").is_ok());
+        assert!(validate_diff_content("@@ -1,3 +1,4 @@\n").is_ok());
+        assert!(validate_diff_content("--- a/f.rs\n+++ b/f.rs\n").is_ok());
+        assert!(validate_diff_content("index abc123..def456 100644\n").is_ok());
+    }
+
+    #[test]
+    fn test_validate_diff_content_json() {
+        assert!(validate_diff_content(r#"{"message": "error"}"#).is_err());
+        assert!(validate_diff_content(r#"[{"error": true}]"#).is_err());
+    }
+
+    #[test]
+    fn test_validate_diff_content_no_markers() {
+        assert!(validate_diff_content("just some random text\nwith no diff markers").is_err());
     }
 }
