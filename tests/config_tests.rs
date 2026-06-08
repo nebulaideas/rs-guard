@@ -95,7 +95,7 @@ base_url = "https://api.moonshot.ai/v1"
 
 #[test]
 fn test_toml_missing_file_ok() {
-    let path = std::env::temp_dir().join("nonexistent_diffguard_reviewer.toml");
+    let path = std::env::temp_dir().join("nonexistent_rs_guard_reviewer.toml");
     let config = load_toml_config(&path).unwrap();
     assert!(config.is_none());
 }
