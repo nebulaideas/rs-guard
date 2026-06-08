@@ -38,6 +38,7 @@ jobs:
 
       - name: Build rs-guard from base branch
         run: cargo build --release
+        id: build
 
       - name: Fetch PR diff
         env:
@@ -53,7 +54,7 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           REPO_FULL_NAME: ${{ github.repository }}
           GITHUB_ACTIONS: "true"
-        run: ./target/release/rs-guard
+        run: cargo run --release --quiet
 
       - name: Upload review artifact
         if: always()
