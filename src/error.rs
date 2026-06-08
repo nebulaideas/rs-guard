@@ -97,9 +97,13 @@ impl DiffguardError {
 
     /// Returns `true` if this error indicates insufficient GitHub permissions.
     pub fn is_permission_denied(&self) -> bool {
-        matches!(
-            self,
-            DiffguardError::GitHubApi { status: 403, .. } | DiffguardError::PermissionDenied { .. }
-        )
+        match self {
+            DiffguardError::GitHubApi { status: 403, .. } => true,
+            DiffguardError::GitHubApi { status: 422, message } => {
+                message.to_lowercase().contains("not permitted")
+            }
+            DiffguardError::PermissionDenied { .. } => true,
+            _ => false,
+        }
     }
 }

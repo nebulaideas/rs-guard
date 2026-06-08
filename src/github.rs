@@ -339,6 +339,42 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_submit_review_422_not_permitted_fallback_to_comment() {
+        let mock_server = MockServer::start().await;
+
+        // First call: APPROVE fails with 422 "not permitted" (GitHub Actions restriction)
+        Mock::given(method("POST"))
+            .and(path_regex(r"/repos/owner/repo/pulls/\d+/reviews"))
+            .respond_with(
+                ResponseTemplate::new(422)
+                    .set_body_string(r#"{"message":"Unprocessable Entity","errors":["GitHub Actions is not permitted to approve pull requests."]}"#),
+            )
+            .up_to_n_times(1)
+            .mount(&mock_server)
+            .await;
+
+        // Second call: should be COMMENT fallback
+        Mock::given(method("POST"))
+            .and(path_regex(r"/repos/owner/repo/pulls/\d+/reviews"))
+            .respond_with(ResponseTemplate::new(200))
+            .mount(&mock_server)
+            .await;
+
+        let result = submit_review(
+            &mock_server.uri(),
+            "owner",
+            "repo",
+            1,
+            ReviewState::Approve,
+            "my review",
+            "token",
+        )
+        .await;
+
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
     async fn test_submit_review_no_fallback_on_permission_denied_for_comment() {
         let mock_server = MockServer::start().await;
 

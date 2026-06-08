@@ -660,6 +660,9 @@ Add production-hardening features: diff chunking for large PRs, response caching
 6. **src/output.rs**:
    - Metrics are written to fixed filename `diffguard-metrics.json` - could conflict in parallel runs. Consider timestamp-based naming.
 
+7. **src/error.rs**:
+   - ~~`is_permission_denied()` only matched HTTP 403, missing GitHub Actions' 422 "not permitted" error for APPROVE reviews.~~ **FIXED**: Now matches 422 responses containing `"not permitted"`, enabling automatic fallback to COMMENT in GitHub Actions.
+
 7. **src/config.rs**:
    - Lines 329-335: Model resolution logic is complex with multiple fallback paths.
    - The `model_set_via_cli` flag is a workaround for tracking model changes - consider a cleaner approach.
@@ -673,6 +676,7 @@ Add production-hardening features: diff chunking for large PRs, response caching
 4. Dismissal Batching: Investigate GitHub API for batch dismissal support.
 5. Metrics Filename: Use unique filenames (e.g., with timestamp) to avoid conflicts in parallel runs.
 6. Jitter Randomness: Use `rand` crate for better jitter distribution instead of deterministic modulo.
+7. ~~**Permission Fallback Coverage**: `is_permission_denied()` did not cover GitHub Actions' 422 policy restriction.~~ **COMPLETED**: 422 + `"not permitted"` now triggers fallback to COMMENT.
 7. ~~**Line Ending Simplification**: Refactor `chunk_diff` line ending logic for clarity.~~ **COMPLETED**: Simplified to detect line ending style once.
 8. ~~**Gitignore Matching**: Use exact line matching instead of `contains()` for cache directory detection.~~ **COMPLETED**: Now uses exact line matching.
 
@@ -684,6 +688,7 @@ Add production-hardening features: diff chunking for large PRs, response caching
 ~~4. `src/github.rs`: Test for permission fallback message format~~ **COMPLETED**
 ~~5. `src/config.rs`: Test for local provider URL validation warnings~~ **COMPLETED**
 ~~6. `src/retry.rs`: Test for circuit breaker auto-reset after cooldown~~ **COMPLETED**
+~~7. `src/github.rs`: Test for 422 "not permitted" fallback to COMMENT~~ **COMPLETED**
 
 #### Additional Improvements Completed
 
@@ -1131,3 +1136,4 @@ Record of architectural and design decisions made during implementation.
 | 2026-06-07 | Code Review: Chunking warning consistency | Show warning in both CI and local modes | Consistent user experience; users should know when diff is truncated |
 | 2026-06-07 | Code Review: CI dependency caching | `Swatinem/rust-cache@v2` | Significantly speeds up CI builds by caching dependencies |
 | 2026-06-07 | P0.6: DRY diff-fetch handling | **Deferred** | Three diff sources have different behavior (CI submits GitHub comment); extraction would add complexity |
+| 2026-06-08 | CI: GitHub Actions APPROVE restriction | 422 fallback to COMMENT | GitHub Actions `GITHUB_TOKEN` returns HTTP 422 (not 403) for APPROVE reviews; `is_permission_denied()` now matches 422 + `"not permitted"` message |
