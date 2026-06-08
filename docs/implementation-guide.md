@@ -195,7 +195,7 @@ This section walks through adding a provider end-to-end. We will use **Groq** as
 
 ### Step 1: Create the Provider Module
 
-Create `src/llm/groq.rs`:
+Create `src/llm/groq.rs`. The provider uses the `async_trait` crate (already in `Cargo.toml`) to implement the async `LlmProvider` trait:
 
 ```rust
 //! Groq LLM provider implementation.
@@ -468,7 +468,7 @@ flowchart TD
 | Diff fetch (local) | `DiffguardError::EmptyDiff` | Print info + exit 0 |
 | Diff fetch (any) | `DiffguardError::DiffTooLarge` | CI: post explanatory `COMMENT` + exit 0; Local: print warning + exit 0 |
 | LLM call | `DiffguardError::LlmApi` | Retried by `with_retry_simple()` (3 attempts with exponential backoff) |
-| LLM call | Circuit breaker open | Infrastructure exists (`retry.rs`) but not yet wired to LLM calls in the pipeline |
+| LLM call | Circuit breaker open | Infrastructure exists (`retry.rs`) but circuit breaker is not enabled for LLM calls — only retry with exponential backoff is wired |
 | Verdict parse | `DiffguardError::VerdictParse` | Propagate with context |
 | GitHub submission | `DiffguardError::PermissionDenied` | Fallback to `COMMENT` state |
 | Artifact write | `io::Error` | Log warning, do not fail the pipeline |
@@ -553,13 +553,13 @@ Integration tests live in the `tests/` directory and use `wiremock` to mock both
 // 1. Full pipeline — CI APPROVE
 // 2. Full pipeline — CI REQUEST_CHANGES
 // 3. Full pipeline — CI dismiss previous blockers
-// 4. Full pipeline — CI chunked diff
-// 5. Full pipeline — CI circuit breaker opens on repeated failures
-// 6. Full pipeline — local mode APPROVE
-// 7. Full pipeline — local mode REQUEST_CHANGES (exit 2)
-// 8. Full pipeline — empty diff (exit 0)
-// 9. Full pipeline — cache hit
-// 10. Full pipeline — metrics file created
+// 4. Full pipeline — local mode APPROVE
+// 5. Full pipeline — empty diff (exit 0)
+// 6. Full pipeline — cache hit
+// 7. Full pipeline — chunked diff
+// 8. Full pipeline — metrics file created
+// 9. Full pipeline — local mode REQUEST_CHANGES (exit 2)
+// 10. Full pipeline — LLM retries exhausted on repeated failures
 ```
 
 These tests create both a mock LLM server and a mock GitHub server, wire up a `Config` with `Config::empty()` (a `#[doc(hidden)]` test-only constructor), and assert the full pipeline result.

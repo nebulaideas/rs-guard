@@ -1,13 +1,15 @@
 [package]
 name = "diffguard"
-version = "0.1.0"
+version = "0.6.0"
 edition = "2021"
 authors = ["Nebula Ideas <hello@nebulaideas.dev>"]
 license = "MIT"
 description = "AI-powered code review CLI for GitHub PRs"
 repository = "https://github.com/nebulaideas/diffguard-rs"
 homepage = "https://github.com/nebulaideas/diffguard-rs"
-keywords = ["ai", "code-review", "github", "llm", "cli"]
+documentation = "https://docs.rs/diffguard"
+readme = "README.md"
+keywords = ["ai", "code-review", "github", "llm", "cli", "devops"]
 categories = ["development-tools", "command-line-utilities"]
 rust-version = "1.82"
 

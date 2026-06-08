@@ -404,7 +404,7 @@ async fn test_full_pipeline_local_blocked() {
 }
 
 #[tokio::test]
-async fn test_full_pipeline_circuit_breaker_opens_on_repeated_failures() {
+async fn test_full_pipeline_llm_retries_exhausted() {
     let github = MockServer::start().await;
     let llm = MockServer::start().await;
 
@@ -414,7 +414,7 @@ async fn test_full_pipeline_circuit_breaker_opens_on_repeated_failures() {
         .mount(&github)
         .await;
 
-    // LLM server returns 500 errors - this will trigger retries and eventually fail
+    // LLM server returns 500 errors - this will trigger retries with exponential backoff and eventually fail
     Mock::given(method("POST"))
         .and(path_regex(r"/chat/completions"))
         .respond_with(ResponseTemplate::new(500).set_body_string("Internal Server Error"))

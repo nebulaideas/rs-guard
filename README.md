@@ -81,6 +81,8 @@ Requires Rust 1.82+.
 cargo install diffguard
 ```
 
+After installation, the `diffguard` binary will be available in your `~/.cargo/bin` directory.
+
 ---
 
 ## Usage

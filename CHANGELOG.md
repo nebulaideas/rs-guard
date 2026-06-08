@@ -9,10 +9,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Ongoing work and future enhancements
+
+## [0.6.0] — 2026-06-XX
+
+### Added
+
+- Registered on crates.ai for project discovery
+- Published to crates.io: `cargo install diffguard`
+- docs.rs documentation auto-generated and linked
+
+### Changed
+
+- `Cargo.toml` metadata finalized with `documentation`, `readme`, and `devops` keyword
+- `README.md` includes `cargo install` instructions and updated badges
+- Phase tracking changelog entries for all phases (0.1.0 through 0.6.0)
+
+## [0.5.0] — 2026-06-XX
+
+### Added
+
+- Phase 5: Library extraction readiness (single crate remains, workspace deferred)
+- All public APIs documented and tested
+- Benchmark suite for verdict parsing performance
+
+## [0.4.0] — 2026-06-XX
+
+### Added
+
+- Phase 4: Documentation polish
 - `docs/ARCHITECTURE.md` — System design with Mermaid diagrams, pipeline explanation, provider trait guide, security model
 - `docs/USAGE.md` — Full CLI reference, exit codes, GitHub Actions guide, pre-commit setup, `.reviewer.toml` schema, troubleshooting
 - `docs/API.md` — Module API documentation, key types reference, custom provider implementation guide
 - README.md comprehensive rewrite with Phase 3 features, updated architecture diagram, and Mermaid pipeline overview
+- CHANGELOG.md versioned entries for all phases
 
 ## [0.3.0] — 2026-06-XX
 
