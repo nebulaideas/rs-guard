@@ -99,9 +99,10 @@ impl DiffguardError {
     pub fn is_permission_denied(&self) -> bool {
         match self {
             DiffguardError::GitHubApi { status: 403, .. } => true,
-            DiffguardError::GitHubApi { status: 422, message } => {
-                message.to_lowercase().contains("not permitted")
-            }
+            DiffguardError::GitHubApi {
+                status: 422,
+                message,
+            } => message.to_lowercase().contains("not permitted"),
             DiffguardError::PermissionDenied { .. } => true,
             _ => false,
         }
