@@ -1,12 +1,12 @@
-//! diffguard CLI entry point.
+//! rs-guard CLI entry point.
 //!
 //! Parses CLI args, loads configuration, runs the pipeline, and maps
 //! [`PipelineResult`] to process exit codes.
 
 use clap::Parser;
-use diffguard::cli::Args;
-use diffguard::config::{load_toml_config, Config};
-use diffguard::pipeline::{run_pipeline, PipelineResult};
+use rs_guard::cli::Args;
+use rs_guard::config::{load_toml_config, Config};
+use rs_guard::pipeline::{run_pipeline, PipelineResult};
 use std::process;
 
 #[tokio::main]
@@ -44,7 +44,7 @@ async fn main() {
     });
 
     log::info!(
-        "diffguard-rs starting (provider: {}, model: {})",
+        "rs-guard starting (provider: {}, model: {})",
         config.provider,
         config.model
     );

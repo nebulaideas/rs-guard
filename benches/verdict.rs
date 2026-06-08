@@ -4,7 +4,7 @@
 //! and review state determination — the hottest path in the pipeline.
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use diffguard::verdict::{determine_review_state, evaluate_by_tags, parse_metadata_block, Verdict};
+use rs_guard::verdict::{determine_review_state, evaluate_by_tags, parse_metadata_block, Verdict};
 
 fn bench_parse_metadata_block(c: &mut Criterion) {
     let response = "Some review text with reasonable length.\n\n[DIFFGUARD_VERDICT_METADATA]\nVerdict: POSITIVE\nCriticalBugs: 0\nSecurityIssues: 0";

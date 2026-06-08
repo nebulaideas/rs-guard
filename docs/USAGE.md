@@ -1,6 +1,6 @@
-# diffguard-rs — Usage Guide
+# rs-guard — Usage Guide
 
-Complete reference for running diffguard-rs in all modes.
+Complete reference for running rs-guard in all modes.
 
 ---
 
@@ -20,7 +20,7 @@ Complete reference for running diffguard-rs in all modes.
 ## CLI Reference
 
 ```bash
-diffguard [OPTIONS]
+rs-guard [OPTIONS]
 ```
 
 ### Options
@@ -40,7 +40,7 @@ diffguard [OPTIONS]
 
 ### Mode Detection
 
-diffguard detects the execution mode:
+rs-guard detects the execution mode:
 
 - **CI mode:** `GITHUB_ACTIONS` env var is set. Fetches PR diff and submits GitHub review.
 - **Local mode:** `GITHUB_ACTIONS` absent. Runs `git diff --cached`, prints colored summary, exits code `2` if `REQUEST_CHANGES`.
@@ -50,16 +50,16 @@ diffguard detects the execution mode:
 
 ```bash
 # CI mode reviews the PR from env vars
-diffguard --provider deepseek --model deepseek-v4-flash
+rs-guard --provider deepseek --model deepseek-v4-flash
 
 # Local mode with Kimi
-diffguard --provider kimi --model kimi-k2.5
+rs-guard --provider kimi --model kimi-k2.5
 
 # Review a pre-existing diff file
-diffguard --diff-file pr-diff.diff
+rs-guard --diff-file pr-diff.diff
 
 # Bypass cache and use custom prompt
-diffguard --no-cache --prompt-file .github/review-prompt.md
+rs-guard --no-cache --prompt-file .github/review-prompt.md
 ```
 
 ---
@@ -82,7 +82,7 @@ diffguard --no-cache --prompt-file .github/review-prompt.md
 | `DIFFGUARD_TEMPERATURE` | Optional | Override default temperature via environment variable |
 | `DIFFGUARD_MAX_TOKENS` | Optional | Override max tokens via environment variable |
 | `DIFFGUARD_DIFF_FILE` | Optional | Alias for `--diff-file` |
-| `DIFFGUARD_METRICS_PATH` | Optional | Custom path for `diffguard-metrics.json` artifact |
+| `DIFFGUARD_METRICS_PATH` | Optional | Custom path for `rs-guard-metrics.json` artifact |
 | `GITHUB_API_URL` | Optional | Custom GitHub API base URL (e.g. GitHub Enterprise); default: `https://api.github.com` |
 
 ---
@@ -139,14 +139,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Download diffguard
+      - name: Download rs-guard
         run: |
-          curl -L -o diffguard \
-            https://github.com/nebulaideas/diffguard-rs/releases/latest/download/diffguard
-          chmod +x diffguard
+          curl -L -o rs-guard \
+            https://github.com/nebulaideas/rs-guard/releases/latest/download/rs-guard
+          chmod +x rs-guard
 
       - name: AI Code Review
-        run: ./diffguard
+        run: ./rs-guard
         env:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -173,14 +173,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Download diffguard
+      - name: Download rs-guard
         run: |
-          curl -L -o diffguard \
-            https://github.com/nebulaideas/diffguard-rs/releases/latest/download/diffguard
-          chmod +x diffguard
+          curl -L -o rs-guard \
+            https://github.com/nebulaideas/rs-guard/releases/latest/download/rs-guard
+          chmod +x rs-guard
 
       - name: AI Code Review
-        run: ./diffguard --config .reviewer.toml
+        run: ./rs-guard --config .reviewer.toml
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -193,14 +193,14 @@ jobs:
           name: review-result
           path: |
             review-result.txt
-            diffguard-metrics.json
+            rs-guard-metrics.json
 ```
 
 ### Workflow Notes
 
 - **Fork safety:** `if: !github.event.pull_request.head.repo.fork` prevents running on forks where secrets are not available.
 - **Token scope:** `GITHUB_TOKEN` has `pull-requests: write` scope by default. Request explicitly if needed.
-- **Artifacts:** `review-result.txt` and `diffguard-metrics.json` are written by diffguard and can be uploaded as workflow artifacts.
+- **Artifacts:** `review-result.txt` and `rs-guard-metrics.json` are written by rs-guard and can be uploaded as workflow artifacts.
 
 ---
 
@@ -222,10 +222,10 @@ Create `.git/hooks/pre-commit`:
 ```bash
 #!/bin/sh
 set -e
-git diff --cached --quiet || ./diffguard
+git diff --cached --quiet || ./rs-guard
 
 if [ $? -eq 2 ]; then
-  echo "Commit blocked: diffguard requested changes."
+  echo "Commit blocked: rs-guard requested changes."
   echo "Skip this check with:"
   echo "  git commit --no-verify"
   exit 1
@@ -321,7 +321,7 @@ The token may lack `pull-requests: write` scope. See [Permission Fallback](#perm
 There may be no staged changes. Run `git add .` first.
 
 ### `Failed to read config file '.reviewer.toml'`
-Check file permissions and TOML syntax. See `diffguard --help` for the expected config path.
+Check file permissions and TOML syntax. See `rs-guard --help` for the expected config path.
 
 ---
 

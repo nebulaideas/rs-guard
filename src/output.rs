@@ -12,7 +12,7 @@ use std::io::Write;
 pub const ARTIFACT_FILENAME: &str = "review-result.txt";
 
 /// Default filename for the metrics JSON artifact.
-pub const METRICS_FILENAME: &str = "diffguard-metrics.json";
+pub const METRICS_FILENAME: &str = "rs-guard-metrics.json";
 
 /// Per-run metrics for observability and cost tracking.
 #[derive(Debug, Clone, Serialize)]
@@ -70,7 +70,7 @@ pub fn write_artifact(
     path: &str,
 ) -> std::io::Result<()> {
     let content = format!(
-        "diffguard-rs Review Result
+        "rs-guard Review Result
 ==========================
 Provider: {}
 Model: {}
@@ -124,7 +124,7 @@ pub fn print_colored_report(
     state: &ReviewState,
     writer: &mut impl Write,
 ) -> std::io::Result<()> {
-    writeln!(writer, "{}", "diffguard-rs Review".bold().underline())?;
+    writeln!(writer, "{}", "rs-guard Review".bold().underline())?;
     writeln!(writer)?;
 
     match state {

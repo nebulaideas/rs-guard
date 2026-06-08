@@ -33,10 +33,10 @@ jobs:
           <!DOCTYPE html>
           <html>
           <head>
-            <meta http-equiv="refresh" content="0; url=diffguard/index.html">
+            <meta http-equiv="refresh" content="0; url=rs-guard/index.html">
           </head>
           <body>
-            <p>Redirecting to <a href="diffguard/index.html">documentation</a>...</p>
+            <p>Redirecting to <a href="rs-guard/index.html">documentation</a>...</p>
           </body>
           </html>
           EOF

@@ -1,20 +1,20 @@
-# diffguard-rs — Agent Guide
+# rs-guard — Agent Guide
 
-> Current state of the `diffguard-rs` repository for AI coding agents.
+> Current state of the `rs-guard` repository for AI coding agents.
 
 ---
 
 ## Project Overview
 
-**diffguard-rs** is a Rust-based AI code review CLI tool. It fetches Pull Request diffs from GitHub, sends them to an LLM provider for review, parses a structured verdict from the response, and submits the review state (`APPROVE`, `REQUEST_CHANGES`, or `COMMENT`) back to GitHub — all in a single execution.
+**rs-guard** is a Rust-based AI code review CLI tool. It fetches Pull Request diffs from GitHub, sends them to an LLM provider for review, parses a structured verdict from the response, and submits the review state (`APPROVE`, `REQUEST_CHANGES`, or `COMMENT`) back to GitHub — all in a single execution.
 
 **Current Status:** Phases 1–6 are complete. The crate is published on crates.io and registered on crates.ai.
 
-- **Repository:** `git@github.com:nebulaideas/diffguard-rs.git`
+- **Repository:** `git@github.com:nebulaideas/rs-guard.git`
 - **Current Branch:** `main`
 - **License:** MIT License (Copyright 2026 Nebula Ideas)
 - **Language:** Rust (edition 2021, toolchain 1.82+)
-- **Crate:** [diffguard on crates.io](https://crates.io/crates/diffguard) | [docs.rs](https://docs.rs/diffguard)
+- **Crate:** [rs-guard on crates.io](https://crates.io/crates/rs-guard) | [docs.rs](https://docs.rs/rs-guard)
 
 ---
 
@@ -50,7 +50,7 @@
 ## Repository Structure
 
 ```
-diffguard-rs/
+rs-guard/
 ├── src/                           # Single crate source (16 modules)
 │   ├── main.rs                    # CLI entry point (thin)
 │   ├── lib.rs                     # Library root
@@ -200,8 +200,8 @@ cargo audit
 
 | Task | Status |
 |---|---|
-| 3.1 — Response caching (`src/cache.rs`, `.diffguard/cache/`) | ✅ Done — 13 inline tests, SHA-256 keyed, TTL+size limit, atomic writes |
-| 3.2 — Metrics export (`diffguard-metrics.json`) | ✅ Done — `ReviewMetrics` struct, `write_metrics()`, per-run JSON artifact |
+| 3.1 — Response caching (`src/cache.rs`, `.rs-guard/cache/`) | ✅ Done — 13 inline tests, SHA-256 keyed, TTL+size limit, atomic writes |
+| 3.2 — Metrics export (`rs-guard-metrics.json`) | ✅ Done — `ReviewMetrics` struct, `write_metrics()`, per-run JSON artifact |
 | 3.3 — Error recovery (exp backoff + circuit breaker) | ✅ Done — `with_retry`, `CircuitBreaker`, 20 inline tests, thread-safe |
 | 3.4 — Diff chunking (50/50 head/tail, `Cow<str>`) | ✅ Done — integrated in pipeline, warning shown in both CI and local modes |
 | 3.5 — Enhanced CI pipeline (deny, audit, bench, docs-deploy) | ✅ Done — `ci.yml` + `docs-deploy.yml`, `benches/verdict.rs` |
@@ -261,7 +261,7 @@ cargo audit
 - **`Config::empty()`** is a `#[doc(hidden)]` constructor for tests — not for production use.
 - **New modules** added since the original plan: `pipeline.rs`, `http.rs`, `redact.rs`, `cache.rs`, `llm/providers.rs`.
 - **Decision Log** in Appendix F of the plan tracks all architectural decisions.
-- **Cache directory** (`.diffguard/cache/`) is auto-gitignored on first use — do not commit it.
+- **Cache directory** (`.rs-guard/cache/`) is auto-gitignored on first use — do not commit it.
 - **`--no-cache` flag** bypasses the LLM response cache for a fresh API call.
 
 ---
@@ -314,15 +314,15 @@ cargo publish
 ```
 
 After publishing:
-- Verify the crate appears at <https://crates.io/crates/diffguard>
-- Verify docs.rs auto-generates documentation at <https://docs.rs/diffguard>
+- Verify the crate appears at <https://crates.io/crates/rs-guard>
+- Verify docs.rs auto-generates documentation at <https://docs.rs/rs-guard>
 
 ### 8.4 — Register on crates.ai
 
 **Manual web-based process:**
 
 1. Visit <https://crates.ai> and sign in with GitHub OAuth
-2. Submit the repository URL: `https://github.com/nebulaideas/diffguard-rs`
+2. Submit the repository URL: `https://github.com/nebulaideas/rs-guard`
 3. Add project metadata:
    - **Description:** "AI-powered code review CLI for GitHub PRs. Multi-provider LLM support with in-memory verdict parsing."
    - **Tags:** `ai`, `code-review`, `github`, `llm`, `cli`, `devops`, `ci-cd`
@@ -338,14 +338,14 @@ After publication, verify from a clean environment:
 
 ```bash
 # Test cargo install
-cargo install diffguard --force
-diffguard --version
+cargo install rs-guard --force
+rs-guard --version
 
 # Verify docs.rs
-# Visit: https://docs.rs/diffguard/latest/diffguard/
+# Visit: https://docs.rs/rs-guard/latest/rs-guard/
 
 # Verify crates.ai listing
-# Visit: https://crates.ai/crates/diffguard (after registration)
+# Visit: https://crates.ai/crates/rs-guard (after registration)
 ```
 
 ### 8.6 — Update AGENTS.md After Publication
@@ -354,8 +354,8 @@ Once published, update the Phase 6 status table in this file:
 
 | Task | Status |
 |---|---|
-| 6.5 — Publish to crates.io | ✅ Done — [crates.io/crates/diffguard](https://crates.io/crates/diffguard) |
-| 6.6 — Register on crates.ai | ✅ Done — [crates.ai/crates/diffguard](https://crates.ai/crates/diffguard) |
+| 6.5 — Publish to crates.io | ✅ Done — [crates.io/crates/rs-guard](https://crates.io/crates/rs-guard) |
+| 6.6 — Register on crates.ai | ✅ Done — [crates.ai/crates/rs-guard](https://crates.ai/crates/rs-guard) |
 | 6.7 — Post-publish verification | ✅ Done |
 
 ---

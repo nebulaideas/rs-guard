@@ -1,6 +1,6 @@
 # Installation Guide
 
-Complete guide for installing and running diffguard-rs locally or in GitHub Actions.
+Complete guide for installing and running rs-guard locally or in GitHub Actions.
 
 ---
 
@@ -28,15 +28,15 @@ Complete guide for installing and running diffguard-rs locally or in GitHub Acti
 
 ```bash
 # Download the latest binary
-curl -L -o diffguard \
-  https://github.com/nebulaideas/diffguard-rs/releases/latest/download/diffguard
-chmod +x diffguard
+curl -L -o rs-guard \
+  https://github.com/nebulaideas/rs-guard/releases/latest/download/rs-guard
+chmod +x rs-guard
 
 # Set your API key
 export DEEPSEEK_API_KEY="your-api-key"
 
 # Test locally
-./diffguard --help
+./rs-guard --help
 ```
 
 ---
@@ -50,58 +50,58 @@ Fastest method — no compilation required. Downloads a ready-to-run binary.
 #### Linux (x86_64)
 
 ```bash
-curl -L -o diffguard \
-  https://github.com/nebulaideas/diffguard-rs/releases/latest/download/diffguard-x86_64-unknown-linux-gnu
-chmod +x diffguard
-sudo mv diffguard /usr/local/bin/
+curl -L -o rs-guard \
+  https://github.com/nebulaideas/rs-guard/releases/latest/download/rs-guard-x86_64-unknown-linux-gnu
+chmod +x rs-guard
+sudo mv rs-guard /usr/local/bin/
 
 # Verify
-diffguard --version
+rs-guard --version
 ```
 
 #### Linux (ARM64)
 
 ```bash
-curl -L -o diffguard \
-  https://github.com/nebulaideas/diffguard-rs/releases/latest/download/diffguard-aarch64-unknown-linux-gnu
-chmod +x diffguard
-sudo mv diffguard /usr/local/bin/
+curl -L -o rs-guard \
+  https://github.com/nebulaideas/rs-guard/releases/latest/download/rs-guard-aarch64-unknown-linux-gnu
+chmod +x rs-guard
+sudo mv rs-guard /usr/local/bin/
 ```
 
 #### macOS (Intel x86_64)
 
 ```bash
-curl -L -o diffguard \
-  https://github.com/nebulaideas/diffguard-rs/releases/latest/download/diffguard-x86_64-apple-darwin
-chmod +x diffguard
-sudo mv diffguard /usr/local/bin/
+curl -L -o rs-guard \
+  https://github.com/nebulaideas/rs-guard/releases/latest/download/rs-guard-x86_64-apple-darwin
+chmod +x rs-guard
+sudo mv rs-guard /usr/local/bin/
 ```
 
 #### macOS (Apple Silicon M1/M2/M3)
 
 ```bash
-curl -L -o diffguard \
-  https://github.com/nebulaideas/diffguard-rs/releases/latest/download/diffguard-aarch64-apple-darwin
-chmod +x diffguard
-sudo mv diffguard /usr/local/bin/
+curl -L -o rs-guard \
+  https://github.com/nebulaideas/rs-guard/releases/latest/download/rs-guard-aarch64-apple-darwin
+chmod +x rs-guard
+sudo mv rs-guard /usr/local/bin/
 ```
 
 #### Windows (x86_64)
 
 **PowerShell:**
 ```powershell
-Invoke-WebRequest -Uri "https://github.com/nebulaideas/diffguard-rs/releases/latest/download/diffguard-x86_64-pc-windows-msvc.exe" -OutFile "diffguard.exe"
-Move-Item "diffguard.exe" "C:\Program Files\diffguard\"
+Invoke-WebRequest -Uri "https://github.com/nebulaideas/rs-guard/releases/latest/download/rs-guard-x86_64-pc-windows-msvc.exe" -OutFile "rs-guard.exe"
+Move-Item "rs-guard.exe" "C:\Program Files\rs-guard\"
 
 # Add to PATH if needed
-$env:Path += ";C:\Program Files\diffguard"
+$env:Path += ";C:\Program Files\rs-guard"
 ```
 
 **Command Prompt:**
 ```cmd
-curl -L -o diffguard.exe ^
-  https://github.com/nebulaideas/diffguard-rs/releases/latest/download/diffguard-x86_64-pc-windows-msvc.exe
-move diffguard.exe "C:\Program Files\diffguard\"
+curl -L -o rs-guard.exe ^
+  https://github.com/nebulaideas/rs-guard/releases/latest/download/rs-guard-x86_64-pc-windows-msvc.exe
+move rs-guard.exe "C:\Program Files\rs-guard\"
 ```
 
 ---
@@ -128,8 +128,8 @@ cargo --version
 
 ```bash
 # Clone the repository
-git clone https://github.com/nebulaideas/diffguard-rs.git
-cd diffguard-rs
+git clone https://github.com/nebulaideas/rs-guard.git
+cd rs-guard
 
 # Checkout the desired branch/tag
 git checkout main  # or specific version tag
@@ -138,8 +138,8 @@ git checkout main  # or specific version tag
 cargo build --release
 
 # Binary location:
-# Linux/macOS: ./target/release/diffguard
-# Windows: .\target\release\diffguard.exe
+# Linux/macOS: ./target/release/rs-guard
+# Windows: .\target\release\rs-guard.exe
 
 # Optional: Install to system path
 cargo install --path .
@@ -159,9 +159,9 @@ Simplest method if you already have Rust installed. Downloads and builds from cr
 
 ```bash
 # Install latest published version
-cargo install diffguard
+cargo install rs-guard
 
-# Binary will be installed to ~/.cargo/bin/diffguard
+# Binary will be installed to ~/.cargo/bin/rs-guard
 # Ensure ~/.cargo/bin is in your PATH
 ```
 
@@ -191,14 +191,14 @@ No additional dependencies required. The binary is statically linked.
 
 #### Gatekeeper Warning
 
-If you see "diffguard cannot be opened because the developer cannot be verified":
+If you see "rs-guard cannot be opened because the developer cannot be verified":
 
 ```bash
 # Option 1: Remove quarantine attribute
-xattr -d com.apple.quarantine /usr/local/bin/diffguard
+xattr -d com.apple.quarantine /usr/local/bin/rs-guard
 
 # Option 2: Use sudo to move to a trusted location
-sudo mv ~/Downloads/diffguard /usr/local/bin/
+sudo mv ~/Downloads/rs-guard /usr/local/bin/
 ```
 
 #### Apple Silicon Performance
@@ -233,21 +233,21 @@ After installation, verify the binary works:
 
 ```bash
 # Check version
-diffguard --version
+rs-guard --version
 
 # Display help
-diffguard --help
+rs-guard --help
 
 # Test with a simple command (should show help, not error)
-diffguard
+rs-guard
 ```
 
 Expected output:
 ```
-diffguard 0.6.0
+rs-guard 0.6.0
 AI-powered code review CLI for GitHub PRs
 
-Usage: diffguard [OPTIONS]
+Usage: rs-guard [OPTIONS]
 ...
 ```
 
@@ -278,14 +278,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Download diffguard
+      - name: Download rs-guard
         run: |
-          curl -L -o diffguard \
-            https://github.com/nebulaideas/diffguard-rs/releases/latest/download/diffguard-x86_64-unknown-linux-gnu
-          chmod +x diffguard
+          curl -L -o rs-guard \
+            https://github.com/nebulaideas/rs-guard/releases/latest/download/rs-guard-x86_64-unknown-linux-gnu
+          chmod +x rs-guard
 
       - name: AI Code Review
-        run: ./diffguard
+        run: ./rs-guard
         env:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -299,7 +299,7 @@ If using `.reviewer.toml`:
 
 ```yaml
 - name: AI Code Review
-  run: ./diffguard --config .reviewer.toml
+  run: ./rs-guard --config .reviewer.toml
   env:
     GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -316,7 +316,7 @@ If using `.reviewer.toml`:
     name: review-result
     path: |
       review-result.txt
-      diffguard-metrics.json
+      rs-guard-metrics.json
 ```
 
 ### Required Secrets
@@ -364,11 +364,11 @@ cd /path/to/your/project
 # Stage some changes
 git add .
 
-# Run diffguard
-diffguard
+# Run rs-guard
+rs-guard
 
 # Or with explicit provider
-diffguard --provider deepseek --model deepseek-v4-flash
+rs-guard --provider deepseek --model deepseek-v4-flash
 ```
 
 ### Step 4: Set Up Pre-commit Hook (Optional)
@@ -394,26 +394,26 @@ git commit --no-verify -m "quick fix"
 git diff > my-changes.diff
 
 # Review the diff file
-diffguard --diff-file my-changes.diff
+rs-guard --diff-file my-changes.diff
 ```
 
 ---
 
 ## Troubleshooting Installation
 
-### "Command not found: diffguard"
+### "Command not found: rs-guard"
 
 **Cause:** Binary not in PATH.
 
 **Solution:**
 ```bash
-# Find where diffguard was installed
-which diffguard  # Linux/macOS
-where diffguard  # Windows
+# Find where rs-guard was installed
+which rs-guard  # Linux/macOS
+where rs-guard  # Windows
 
 # If not found, check default locations:
-ls ~/.cargo/bin/diffguard
-ls /usr/local/bin/diffguard
+ls ~/.cargo/bin/rs-guard
+ls /usr/local/bin/rs-guard
 
 # Add to PATH
 export PATH="$HOME/.cargo/bin:$PATH"
@@ -425,7 +425,7 @@ export PATH="$HOME/.cargo/bin:$PATH"
 
 **Solution:**
 ```bash
-chmod +x diffguard
+chmod +x rs-guard
 ```
 
 ### "Binary incompatible" or wrong architecture
@@ -465,7 +465,7 @@ sudo apt-get update && sudo apt-get install --reinstall ca-certificates  # Debia
 sudo yum reinstall ca-certificates  # RHEL/CentOS
 
 # Or use --insecure flag (not recommended for production)
-curl -k -L -o diffguard <URL>
+curl -k -L -o rs-guard <URL>
 ```
 
 ### Windows: "The system cannot find the file specified"
@@ -474,14 +474,14 @@ curl -k -L -o diffguard <URL>
 
 **Solution:**
 1. Close and reopen your terminal/PowerShell
-2. Verify PATH: `$env:Path -split ';' | Select-String diffguard`
+2. Verify PATH: `$env:Path -split ';' | Select-String rs-guard`
 3. Re-add to PATH if needed (see Windows section above)
 
 ### macOS: "Cannot be opened because the developer cannot be verified"
 
 **Solution:**
 ```bash
-xattr -d com.apple.quarantine $(which diffguard)
+xattr -d com.apple.quarantine $(which rs-guard)
 ```
 
 Or go to **System Preferences** → **Security & Privacy** → Click **Open Anyway**.
@@ -501,5 +501,5 @@ Or go to **System Preferences** → **Security & Privacy** → Click **Open Anyw
 ## Getting Help
 
 - **Documentation:** See [docs/](docs/) directory
-- **Issues:** https://github.com/nebulaideas/diffguard-rs/issues
-- **Discussions:** https://github.com/nebulaideas/diffguard-rs/discussions
+- **Issues:** https://github.com/nebulaideas/rs-guard/issues
+- **Discussions:** https://github.com/nebulaideas/rs-guard/discussions

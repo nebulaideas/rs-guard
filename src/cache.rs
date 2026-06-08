@@ -1,7 +1,7 @@
 //! Response caching for LLM results.
 //!
 //! Caches LLM responses by SHA-256 diff hash to avoid redundant API calls.
-//! Cache location: `.diffguard/cache/` (project-local).
+//! Cache location: `.rs-guard/cache/` (project-local).
 //!
 //! # Cache Format
 //!
@@ -27,7 +27,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 /// Default cache directory relative to project root.
-const DEFAULT_CACHE_DIR: &str = ".diffguard/cache";
+const DEFAULT_CACHE_DIR: &str = ".rs-guard/cache";
 
 /// Default cache TTL: 24 hours.
 const DEFAULT_TTL_SECS: u64 = 86400;
@@ -123,7 +123,7 @@ fn hash_content(content: &str) -> String {
 /// # Examples
 ///
 /// ```
-/// use diffguard::cache::diff_hash;
+/// use rs_guard::cache::diff_hash;
 /// let hash = diff_hash("diff --git a/f.rs b/f.rs");
 /// assert_eq!(hash.len(), 64);
 /// ```
@@ -580,7 +580,7 @@ mod tests {
         let gitignore_path = dir.path().join(".gitignore");
         assert!(gitignore_path.exists());
         let content = std::fs::read_to_string(&gitignore_path).unwrap();
-        assert!(content.contains(".diffguard/cache"));
+        assert!(content.contains(".rs-guard/cache"));
         let line_count_before = content.lines().count();
 
         // Second call should not duplicate the entry
@@ -613,12 +613,12 @@ mod tests {
 
         // Create .gitignore with a similar but different path
         let gitignore_path = dir.path().join(".gitignore");
-        std::fs::write(&gitignore_path, ".diffguard/cache2/").unwrap();
+        std::fs::write(&gitignore_path, ".rs-guard/cache2/").unwrap();
 
         // Should add the entry since it's not an exact match
         cache.ensure_gitignored();
         let content = std::fs::read_to_string(&gitignore_path).unwrap();
-        assert!(content.contains(".diffguard/cache"));
+        assert!(content.contains(".rs-guard/cache"));
 
         // Restore original directory
         std::env::set_current_dir(original_dir).unwrap();
@@ -628,7 +628,7 @@ mod tests {
     fn test_cache_disabled_never_hits() {
         let dir = tempdir().unwrap();
         let config = CacheConfig {
-            cache_dir: dir.path().join(".diffguard/cache"),
+            cache_dir: dir.path().join(".rs-guard/cache"),
             ttl: Duration::from_secs(3600),
             enabled: false,
             max_size_bytes: DEFAULT_MAX_SIZE_BYTES,
@@ -654,7 +654,7 @@ mod tests {
     fn test_cache_set_get_roundtrip() {
         let dir = tempdir().unwrap();
         let config = CacheConfig {
-            cache_dir: dir.path().join(".diffguard/cache"),
+            cache_dir: dir.path().join(".rs-guard/cache"),
             ttl: Duration::from_secs(3600),
             enabled: true,
             max_size_bytes: DEFAULT_MAX_SIZE_BYTES,
@@ -685,7 +685,7 @@ mod tests {
     fn test_cache_miss_returns_none() {
         let dir = tempdir().unwrap();
         let config = CacheConfig {
-            cache_dir: dir.path().join(".diffguard/cache"),
+            cache_dir: dir.path().join(".rs-guard/cache"),
             ttl: Duration::from_secs(3600),
             enabled: true,
             max_size_bytes: DEFAULT_MAX_SIZE_BYTES,
@@ -701,7 +701,7 @@ mod tests {
     fn test_cache_entry_expires() {
         let dir = tempdir().unwrap();
         let config = CacheConfig {
-            cache_dir: dir.path().join(".diffguard/cache"),
+            cache_dir: dir.path().join(".rs-guard/cache"),
             ttl: Duration::from_secs(0), // Zero TTL = immediately expired
             enabled: true,
             max_size_bytes: DEFAULT_MAX_SIZE_BYTES,
@@ -747,7 +747,7 @@ mod tests {
     fn test_cache_set_overwrites_existing() {
         let dir = tempdir().unwrap();
         let config = CacheConfig {
-            cache_dir: dir.path().join(".diffguard/cache"),
+            cache_dir: dir.path().join(".rs-guard/cache"),
             ttl: Duration::from_secs(3600),
             enabled: true,
             max_size_bytes: DEFAULT_MAX_SIZE_BYTES,
@@ -771,7 +771,7 @@ mod tests {
     fn test_cache_size_limit_enforcement() {
         let dir = tempdir().unwrap();
         let config = CacheConfig {
-            cache_dir: dir.path().join(".diffguard/cache"),
+            cache_dir: dir.path().join(".rs-guard/cache"),
             ttl: Duration::from_secs(3600),
             enabled: true,
             max_size_bytes: 100, // Very small limit
@@ -801,7 +801,7 @@ mod tests {
     fn test_cache_clear() {
         let dir = tempdir().unwrap();
         let config = CacheConfig {
-            cache_dir: dir.path().join(".diffguard/cache"),
+            cache_dir: dir.path().join(".rs-guard/cache"),
             ttl: Duration::from_secs(3600),
             enabled: true,
             max_size_bytes: DEFAULT_MAX_SIZE_BYTES,
@@ -828,7 +828,7 @@ mod tests {
     fn test_cache_stats() {
         let dir = tempdir().unwrap();
         let config = CacheConfig {
-            cache_dir: dir.path().join(".diffguard/cache"),
+            cache_dir: dir.path().join(".rs-guard/cache"),
             ttl: Duration::from_secs(3600),
             enabled: true,
             max_size_bytes: 1000,
@@ -852,7 +852,7 @@ mod tests {
     fn test_cache_multiline_response() {
         let dir = tempdir().unwrap();
         let config = CacheConfig {
-            cache_dir: dir.path().join(".diffguard/cache"),
+            cache_dir: dir.path().join(".rs-guard/cache"),
             ttl: Duration::from_secs(3600),
             enabled: true,
             max_size_bytes: DEFAULT_MAX_SIZE_BYTES,

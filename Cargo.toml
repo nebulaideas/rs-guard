@@ -1,13 +1,13 @@
 [package]
-name = "diffguard"
+name = "rs-guard"
 version = "0.6.0"
 edition = "2021"
 authors = ["Nebula Ideas <hello@nebulaideas.dev>"]
 license = "MIT"
 description = "AI-powered code review CLI for GitHub PRs"
-repository = "https://github.com/nebulaideas/diffguard-rs"
-homepage = "https://github.com/nebulaideas/diffguard-rs"
-documentation = "https://docs.rs/diffguard"
+repository = "https://github.com/nebulaideas/rs-guard"
+homepage = "https://github.com/nebulaideas/rs-guard"
+documentation = "https://docs.rs/rs-guard"
 readme = "README.md"
 keywords = ["ai", "code-review", "github", "llm", "cli", "devops"]
 categories = ["development-tools", "command-line-utilities"]

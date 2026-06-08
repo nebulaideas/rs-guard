@@ -1,6 +1,6 @@
 # LLM Provider Setup Guide
 
-This document covers how to configure each supported LLM provider for diffguard-rs.
+This document covers how to configure each supported LLM provider for rs-guard.
 
 ---
 
@@ -35,7 +35,7 @@ export DEEPSEEK_API_KEY="your-api-key"
 ### CLI Usage
 
 ```bash
-diffguard --provider deepseek --model deepseek-v4-flash
+rs-guard --provider deepseek --model deepseek-v4-flash
 ```
 
 ### TOML Configuration
@@ -79,7 +79,7 @@ export KIMI_API_KEY="your-api-key"
 ### CLI Usage
 
 ```bash
-diffguard --provider kimi --model kimi-k2.5
+rs-guard --provider kimi --model kimi-k2.5
 ```
 
 ### TOML Configuration
@@ -123,7 +123,7 @@ export DASHSCOPE_API_KEY="your-api-key"
 ### CLI Usage
 
 ```bash
-diffguard --provider qwen --model qwen-plus
+rs-guard --provider qwen --model qwen-plus
 ```
 
 ### TOML Configuration
@@ -168,7 +168,7 @@ export OPENROUTER_API_KEY="your-api-key"
 
 ```bash
 # Route to any model via OpenRouter
-diffguard --provider openrouter --model anthropic/claude-3.5-sonnet
+rs-guard --provider openrouter --model anthropic/claude-3.5-sonnet
 ```
 
 ### TOML Configuration
@@ -180,7 +180,7 @@ model = "openai/gpt-4o-mini"
 [providers.openrouter]
 api_key_env = "OPENROUTER_API_KEY"
 base_url = "https://openrouter.ai/api/v1"
-http_referer = "https://github.com/YOUR_ORG/diffguard-rs"
+http_referer = "https://github.com/YOUR_ORG/rs-guard"
 ```
 
 ### API Key Acquisition
@@ -191,10 +191,10 @@ http_referer = "https://github.com/YOUR_ORG/diffguard-rs"
 
 ### Attribution Headers
 
-OpenRouter requires `HTTP-Referer` and `X-Title` headers for attribution and rate-limit tracking. diffguard-rs sends these automatically:
+OpenRouter requires `HTTP-Referer` and `X-Title` headers for attribution and rate-limit tracking. rs-guard sends these automatically:
 
-- `HTTP-Referer`: `https://github.com/nebulaideas/diffguard-rs` (default)
-- `X-Title`: `diffguard-rs`
+- `HTTP-Referer`: `https://github.com/nebulaideas/rs-guard` (default)
+- `X-Title`: `rs-guard`
 
 Override via `.reviewer.toml`:
 
@@ -228,10 +228,10 @@ export OPENAI_API_KEY="your-api-key"
 
 ```bash
 # Standard OpenAI
-diffguard --provider openai --model gpt-4o
+rs-guard --provider openai --model gpt-4o
 
 # Custom OpenAI-compatible endpoint
-diffguard --provider openai --model custom-model
+rs-guard --provider openai --model custom-model
 ```
 
 ### TOML Configuration

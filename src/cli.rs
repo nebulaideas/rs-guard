@@ -3,9 +3,9 @@
 use clap::Parser;
 use std::path::PathBuf;
 
-/// Command-line arguments for the diffguard review tool.
+/// Command-line arguments for the rs-guard review tool.
 #[derive(Parser, Debug, Clone)]
-#[command(name = "diffguard")]
+#[command(name = "rs-guard")]
 #[command(about = "AI-powered code review CLI for GitHub PRs")]
 #[command(version = env!("CARGO_PKG_VERSION"))]
 pub struct Args {
@@ -58,7 +58,7 @@ pub struct Args {
 
     /// Path to a pre-existing diff file to review instead of fetching from GitHub.
     ///
-    /// When set, diffguard reads the diff content from this file path
+    /// When set, rs-guard reads the diff content from this file path
     /// instead of calling the GitHub API. Useful in CI when the diff has
     /// already been generated (e.g. by `git diff` or a prior workflow step).
     /// If the file does not exist, an error is returned.

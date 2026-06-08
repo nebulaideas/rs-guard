@@ -105,7 +105,7 @@ pub async fn run_pipeline(
                         line_count
                     );
                     let msg = format!(
-                        "⚠️ **diffguard-rs**: This PR diff exceeds the review size limit ({} lines / {} bytes).\n\n\
+                        "⚠️ **rs-guard**: This PR diff exceeds the review size limit ({} lines / {} bytes).\n\n\
                         The diff is too large for an effective AI review. Consider breaking this PR into smaller, focused changes.",
                         line_count, size_bytes
                     );
@@ -320,7 +320,7 @@ pub async fn run_pipeline(
             }
         }
 
-        println!("diffguard-rs Review Complete");
+        println!("rs-guard Review Complete");
         println!("============================");
         println!("Provider:    {}", config.provider);
         println!("Model:       {}", config.model);

@@ -69,7 +69,7 @@ pub struct ChatResponse {
 
 /// Async trait for LLM provider implementations.
 ///
-/// All providers must implement this trait to participate in the diffguard
+/// All providers must implement this trait to participate in the rs-guard
 /// pipeline. Implementations are expected to handle HTTP communication,
 /// authentication, and response parsing.
 #[async_trait]

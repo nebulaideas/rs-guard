@@ -1,12 +1,12 @@
-# diffguard-rs — Architecture
+# rs-guard — Architecture
 
-This document describes the system design, key decisions, and extension points of diffguard-rs.
+This document describes the system design, key decisions, and extension points of rs-guard.
 
 ---
 
 ## Overview
 
-diffguard-rs is a **single-binary, single-pass review pipeline**. It fetches a diff, calls an LLM once, parses the structured response, and either submits a GitHub review (CI mode) or prints a colored terminal summary (local mode). No intermediate state is persisted, no comments are posted during analysis, and no database or server is required.
+rs-guard is a **single-binary, single-pass review pipeline**. It fetches a diff, calls an LLM once, parses the structured response, and either submits a GitHub review (CI mode) or prints a colored terminal summary (local mode). No intermediate state is persisted, no comments are posted during analysis, and no database or server is required.
 
 ---
 
@@ -14,7 +14,7 @@ diffguard-rs is a **single-binary, single-pass review pipeline**. It fetches a d
 
 ```mermaid
 flowchart TD
-    A(["diffguard invoked"]) --> B["Parse CLI Args\n(clap)"]
+    A(["rs-guard invoked"]) --> B["Parse CLI Args\n(clap)"]
     B --> C["Resolve Config\nCLI → env → TOML → defaults"]
     C --> D{"Diff Source?"}
 
@@ -31,7 +31,7 @@ flowchart TD
     K --> L["Store in Cache\nDiffCache::set()"]
     L --> M["Parse Verdict\nparse_verdict()\n[DIFFGUARD_VERDICT_METADATA] block"]
 
-    M --> N["Write Artifacts\nreview-result.txt\ndiffguard-metrics.json"]
+    M --> N["Write Artifacts\nreview-result.txt\nrs-guard-metrics.json"]
 
     N --> O{"Mode?"}
     O -->|"CI"| P["Submit GitHub Review\nsubmit_review()\nAPPROVE / REQUEST_CHANGES / COMMENT"]
@@ -134,7 +134,7 @@ Each `.cache` file stores:
 - **Line 1:** Unix timestamp (seconds since epoch) — stored in content, not mtime, for reliability
 - **Line 2+:** The raw LLM response
 
-Writes are atomic: content is written to a `.tmp` file in the same directory, then renamed into place. This prevents partial reads from concurrent diffguard processes.
+Writes are atomic: content is written to a `.tmp` file in the same directory, then renamed into place. This prevents partial reads from concurrent rs-guard processes.
 
 The cache enforces a configurable maximum size (default: 100 MB) using LRU cleanup: entries are sorted by stored timestamp and the oldest are removed until the total falls below the limit.
 
@@ -185,9 +185,9 @@ otherwise                                              →  COMMENT
 
 ### `github.rs` — Review Submission
 
-Submits reviews via the GitHub REST API (`POST /repos/{owner}/{repo}/pulls/{pr}/reviews`). Includes `<!-- diffguard-bot -->` as an HTML comment signature in the review body for identification.
+Submits reviews via the GitHub REST API (`POST /repos/{owner}/{repo}/pulls/{pr}/reviews`). Includes `<!-- rs-guard-bot -->` as an HTML comment signature in the review body for identification.
 
-When the new state is non-blocking (`APPROVE` or `COMMENT`), any previous diffguard `CHANGES_REQUESTED` reviews are dismissed to clean up the PR review list.
+When the new state is non-blocking (`APPROVE` or `COMMENT`), any previous rs-guard `CHANGES_REQUESTED` reviews are dismissed to clean up the PR review list.
 
 Fallback: if `APPROVE` or `REQUEST_CHANGES` fails with HTTP 403 (insufficient token permissions), the state is downgraded to `COMMENT` and resubmitted.
 
@@ -225,7 +225,7 @@ All provider base URLs are validated against a per-provider allowlist before any
 
 ### Token Permissions
 
-diffguard-rs requests the minimum GitHub token scope needed: `pull-requests: write`. If the token only has `read` permission, the submission is downgraded to `COMMENT` (which requires only `read` for public repos, or a token that can post comments).
+rs-guard requests the minimum GitHub token scope needed: `pull-requests: write`. If the token only has `read` permission, the submission is downgraded to `COMMENT` (which requires only `read` for public repos, or a token that can post comments).
 
 ---
 

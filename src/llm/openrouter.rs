@@ -14,7 +14,7 @@ const DEFAULT_BASE_URL: &str = "https://openrouter.ai/api/v1";
 const DEFAULT_MODEL: &str = "openai/gpt-4o-mini";
 
 /// Default HTTP referer for attribution.
-const DEFAULT_HTTP_REFERER: &str = "https://github.com/nebulaideas/diffguard-rs";
+const DEFAULT_HTTP_REFERER: &str = "https://github.com/nebulaideas/rs-guard";
 
 /// Client for the OpenRouter chat completions API.
 #[derive(Debug, Clone)]
@@ -31,7 +31,7 @@ impl OpenRouterClient {
         let api_key_str = api_key.into();
         let extra_headers = &[
             ("HTTP-Referer", DEFAULT_HTTP_REFERER),
-            ("X-Title", "diffguard"),
+            ("X-Title", "rs-guard"),
         ];
         let client = build_llm_client("openrouter", &api_key_str, extra_headers)?;
         Ok(Self {
@@ -67,7 +67,7 @@ impl OpenRouterClient {
     /// Returns [`DiffguardError::Config`] if the referer value contains
     /// invalid header characters.
     pub fn with_http_referer(self, referer: &str, api_key: &str) -> Result<Self, DiffguardError> {
-        let extra_headers = &[("HTTP-Referer", referer), ("X-Title", "diffguard")];
+        let extra_headers = &[("HTTP-Referer", referer), ("X-Title", "rs-guard")];
         let client = build_llm_client("openrouter", api_key, extra_headers)?;
         Ok(Self { client, ..self })
     }

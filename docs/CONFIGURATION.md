@@ -1,12 +1,12 @@
 # Configuration Reference
 
-This document describes the `.reviewer.toml` configuration file and the configuration resolution order used by diffguard-rs.
+This document describes the `.reviewer.toml` configuration file and the configuration resolution order used by rs-guard.
 
 ---
 
 ## Configuration Resolution Order
 
-diffguard-rs resolves configuration values in the following priority (highest to lowest):
+rs-guard resolves configuration values in the following priority (highest to lowest):
 
 ```
 CLI flags > Environment variables > TOML file > Hardcoded defaults
@@ -18,7 +18,7 @@ If your `.reviewer.toml` sets `provider = "kimi"`, but you run:
 
 ```bash
 export DIFFGUARD_PROVIDER="openai"
-diffguard --provider qwen
+rs-guard --provider qwen
 ```
 
 The effective provider will be `qwen` (CLI flag wins).
@@ -52,7 +52,7 @@ base_url = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
 [providers.openrouter]
 api_key_env = "OPENROUTER_API_KEY"
 base_url = "https://openrouter.ai/api/v1"
-http_referer = "https://github.com/nebulaideas/diffguard-rs"
+http_referer = "https://github.com/nebulaideas/rs-guard"
 
 [providers.openai]
 api_key_env = "OPENAI_API_KEY"

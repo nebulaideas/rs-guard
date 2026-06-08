@@ -4,8 +4,8 @@
 //! correctly sequences diff fetching, LLM calling, verdict parsing, and
 //! review submission.
 
-use diffguard::config::Config;
-use diffguard::pipeline::{run_pipeline, PipelineResult};
+use rs_guard::config::Config;
+use rs_guard::pipeline::{run_pipeline, PipelineResult};
 use serde_json::json;
 use wiremock::matchers::{method, path_regex};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -146,7 +146,7 @@ async fn test_full_pipeline_ci_dismisses_previous_reviews() {
         .respond_with(ResponseTemplate::new(200).set_body_json(json!([{
             "id": 1,
             "state": "CHANGES_REQUESTED",
-            "body": "Previous review\n\n<!-- diffguard-bot -->"
+            "body": "Previous review\n\n<!-- rs-guard-bot -->"
         }])))
         .mount(&github)
         .await;
@@ -215,7 +215,7 @@ async fn test_full_pipeline_empty_diff() {
 #[serial_test::serial]
 async fn test_full_pipeline_cache_hit() {
     // Clear cache before this test to ensure clean state
-    let cache_dir = std::path::Path::new(".diffguard/cache");
+    let cache_dir = std::path::Path::new(".rs-guard/cache");
     if cache_dir.exists() {
         let _ = std::fs::remove_dir_all(cache_dir);
     }

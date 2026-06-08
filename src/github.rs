@@ -12,8 +12,8 @@ use serde_json::json;
 /// HTTP request timeout for GitHub API calls.
 const REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
-/// HTML comment signature used to identify diffguard bot reviews.
-const BOT_SIGNATURE: &str = "<!-- diffguard-bot -->";
+/// HTML comment signature used to identify rs-guard bot reviews.
+const BOT_SIGNATURE: &str = "<!-- rs-guard-bot -->";
 
 /// Submits a review to a GitHub Pull Request without permission fallback.
 async fn submit_review_inner(
@@ -122,7 +122,7 @@ pub async fn submit_review(
     }
 }
 
-/// Dismisses previous diffguard `CHANGES_REQUESTED` reviews on a Pull Request.
+/// Dismisses previous rs-guard `CHANGES_REQUESTED` reviews on a Pull Request.
 ///
 /// Queries all reviews on the PR, identifies those with state `CHANGES_REQUESTED`
 /// that contain the [`BOT_SIGNATURE`] marker, and dismisses each one with the
@@ -457,7 +457,7 @@ mod tests {
         let bot_review = json!({
             "id": 42,
             "state": "CHANGES_REQUESTED",
-            "body": "Some review\n\n<!-- diffguard-bot -->"
+            "body": "Some review\n\n<!-- rs-guard-bot -->"
         });
 
         Mock::given(method("GET"))
@@ -509,7 +509,7 @@ mod tests {
         let approved_review = json!({
             "id": 55,
             "state": "APPROVED",
-            "body": "<!-- diffguard-bot -->\nLGTM"
+            "body": "<!-- rs-guard-bot -->\nLGTM"
         });
 
         Mock::given(method("GET"))
@@ -531,7 +531,7 @@ mod tests {
         let bot_review = json!({
             "id": 42,
             "state": "CHANGES_REQUESTED",
-            "body": "<!-- diffguard-bot -->\nReview"
+            "body": "<!-- rs-guard-bot -->\nReview"
         });
 
         Mock::given(method("GET"))

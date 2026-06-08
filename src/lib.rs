@@ -1,5 +1,5 @@
 #![deny(missing_docs)]
-//! diffguard — AI-powered code review CLI for GitHub Pull Requests.
+//! rs-guard — AI-powered code review CLI for GitHub Pull Requests.
 //!
 //! This crate provides the core functionality for fetching PR diffs,
 //! sending them to an LLM for review, parsing structured verdicts,

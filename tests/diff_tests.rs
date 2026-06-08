@@ -1,4 +1,4 @@
-use diffguard::diff::fetch_pr_diff;
+use rs_guard::diff::fetch_pr_diff;
 use wiremock::matchers::{header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 

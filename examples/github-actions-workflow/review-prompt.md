@@ -1,4 +1,4 @@
-# diffguard Review Prompt
+# rs-guard Review Prompt
 
 You are a senior Rust engineer performing code review on a Pull Request.
 

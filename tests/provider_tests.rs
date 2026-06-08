@@ -1,10 +1,10 @@
-use diffguard::llm::deepseek::DeepSeekClient;
-use diffguard::llm::factory::create_provider;
-use diffguard::llm::kimi::KimiClient;
-use diffguard::llm::openai::OpenAiClient;
-use diffguard::llm::openrouter::OpenRouterClient;
-use diffguard::llm::qwen::QwenClient;
-use diffguard::llm::{LlmProvider, ProviderConfig};
+use rs_guard::llm::deepseek::DeepSeekClient;
+use rs_guard::llm::factory::create_provider;
+use rs_guard::llm::kimi::KimiClient;
+use rs_guard::llm::openai::OpenAiClient;
+use rs_guard::llm::openrouter::OpenRouterClient;
+use rs_guard::llm::qwen::QwenClient;
+use rs_guard::llm::{LlmProvider, ProviderConfig};
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 

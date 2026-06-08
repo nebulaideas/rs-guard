@@ -1,5 +1,5 @@
 use clap::Parser;
-use diffguard::config::{load_toml_config, Config, ProviderTomlConfig, TomlConfig};
+use rs_guard::config::{load_toml_config, Config, ProviderTomlConfig, TomlConfig};
 use serial_test::serial;
 use std::collections::HashMap;
 use std::io::Write;
@@ -181,7 +181,7 @@ fn test_provider_switch_via_apply_args() {
             let mut config = Config::from_env(toml).unwrap();
             assert_eq!(config.provider, "deepseek");
 
-            let args = diffguard::cli::Args::parse_from(["diffguard", "--provider", "kimi"]);
+            let args = rs_guard::cli::Args::parse_from(["rs-guard", "--provider", "kimi"]);
             config.apply_args(&args).unwrap();
 
             assert_eq!(config.provider, "kimi");
@@ -205,7 +205,7 @@ fn test_cli_model_override() {
         let mut config = Config::from_env(toml).unwrap();
         assert_eq!(config.model, "deepseek-v4-flash");
 
-        let args = diffguard::cli::Args::parse_from(["diffguard", "--model", "custom-model"]);
+        let args = rs_guard::cli::Args::parse_from(["rs-guard", "--model", "custom-model"]);
         config.apply_args(&args).unwrap();
 
         assert_eq!(config.model, "custom-model");
@@ -285,7 +285,7 @@ fn test_model_resets_on_provider_change_when_not_explicit() {
             let mut config = Config::from_env(toml).unwrap();
             assert_eq!(config.model, "deepseek-v4-flash");
 
-            let args = diffguard::cli::Args::parse_from(["diffguard", "--provider", "kimi"]);
+            let args = rs_guard::cli::Args::parse_from(["rs-guard", "--provider", "kimi"]);
             config.apply_args(&args).unwrap();
 
             assert_eq!(config.provider, "kimi");
@@ -314,7 +314,7 @@ fn test_toml_model_not_carried_across_provider_change() {
             let mut config = Config::from_env(toml).unwrap();
             assert_eq!(config.model, "my-custom-model");
 
-            let args = diffguard::cli::Args::parse_from(["diffguard", "--provider", "kimi"]);
+            let args = rs_guard::cli::Args::parse_from(["rs-guard", "--provider", "kimi"]);
             config.apply_args(&args).unwrap();
 
             assert_eq!(config.provider, "kimi");
@@ -341,8 +341,8 @@ fn test_cli_model_preserved_across_provider_change() {
             });
 
             let mut config = Config::from_env(toml).unwrap();
-            let args = diffguard::cli::Args::parse_from([
-                "diffguard",
+            let args = rs_guard::cli::Args::parse_from([
+                "rs-guard",
                 "--provider",
                 "kimi",
                 "--model",
@@ -387,7 +387,7 @@ fn test_apply_args_respects_toml_api_key_env_on_switch() {
             let mut config = Config::from_env(toml).unwrap();
             assert_eq!(config.provider, "deepseek");
 
-            let args = diffguard::cli::Args::parse_from(["diffguard", "--provider", "kimi"]);
+            let args = rs_guard::cli::Args::parse_from(["rs-guard", "--provider", "kimi"]);
             config.apply_args(&args).unwrap();
 
             assert_eq!(config.provider, "kimi");
@@ -552,7 +552,7 @@ fn test_ssrf_rejection_on_apply_args_switch_in_ci() {
             let mut config = Config::from_env(toml).unwrap();
             assert_eq!(config.provider, "deepseek");
 
-            let args = diffguard::cli::Args::parse_from(["diffguard", "--provider", "kimi"]);
+            let args = rs_guard::cli::Args::parse_from(["rs-guard", "--provider", "kimi"]);
             let result = config.apply_args(&args);
             assert!(result.is_err());
             let err = result.unwrap_err().to_string();
@@ -599,7 +599,7 @@ fn test_base_url_cleared_on_switch_without_toml_entry() {
                 Some("https://api.deepseek.com".to_string())
             );
 
-            let args = diffguard::cli::Args::parse_from(["diffguard", "--provider", "kimi"]);
+            let args = rs_guard::cli::Args::parse_from(["rs-guard", "--provider", "kimi"]);
             config.apply_args(&args).unwrap();
             assert_eq!(config.provider, "kimi");
             assert_eq!(config.provider_config.base_url, None);
@@ -644,7 +644,7 @@ fn test_base_url_preserved_on_switch_with_toml_entry() {
             });
 
             let mut config = Config::from_env(toml).unwrap();
-            let args = diffguard::cli::Args::parse_from(["diffguard", "--provider", "kimi"]);
+            let args = rs_guard::cli::Args::parse_from(["rs-guard", "--provider", "kimi"]);
             config.apply_args(&args).unwrap();
 
             assert_eq!(
@@ -675,8 +675,8 @@ fn test_model_synced_after_switch_with_cli_model() {
             let mut config = Config::from_env(toml).unwrap();
             assert_eq!(config.provider_config.model, "deepseek-v4-flash");
 
-            let args = diffguard::cli::Args::parse_from([
-                "diffguard",
+            let args = rs_guard::cli::Args::parse_from([
+                "rs-guard",
                 "--provider",
                 "kimi",
                 "--model",

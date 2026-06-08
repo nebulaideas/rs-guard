@@ -1,4 +1,4 @@
-use diffguard::verdict::{
+use rs_guard::verdict::{
     determine_review_state, evaluate_by_tags, parse_verdict, ReviewState, Verdict,
 };
 

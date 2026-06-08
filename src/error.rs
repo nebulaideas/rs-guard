@@ -1,4 +1,4 @@
-//! Error types for the diffguard application.
+//! Error types for the rs-guard application.
 //!
 //! Provides a unified [`DiffguardError`] enum covering all failure modes
 //! encountered during diff fetching, LLM interaction, verdict parsing,
@@ -6,7 +6,7 @@
 
 use thiserror::Error;
 
-/// Unified error type for all diffguard operations.
+/// Unified error type for all rs-guard operations.
 #[derive(Error, Debug)]
 pub enum DiffguardError {
     /// GitHub REST API returned an error response.
