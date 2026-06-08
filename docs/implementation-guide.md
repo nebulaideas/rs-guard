@@ -424,6 +424,7 @@ This design avoids the alternative approach: posting intermediate comments durin
 - **Latency.** The total time grows linearly with the number of intermediate API calls.
 
 By parsing everything in-memory and submitting a single review at the end, we get:
+
 - One HTTP call to the LLM, one to GitHub.
 - Atomic review submission — either the full review is posted, or nothing is.
 - Clear failure modes: if the LLM call fails, no review is posted.
@@ -461,18 +462,18 @@ flowchart TD
 
 ### Error Handling per Step
 
-| Step | Error Type | Behavior |
-|---|---|---|
-| Config resolution | `RsGuardError::Config` | Print error + exit 1 |
-| Diff fetch (CI) | `RsGuardError::GitHubApi` | Propagate with context |
-| Diff fetch (local) | `RsGuardError::EmptyDiff` | Print info + exit 0 |
-| Diff fetch (any) | `RsGuardError::DiffTooLarge` | CI: post explanatory `COMMENT` + exit 0; Local: print warning + exit 0 |
-| LLM call | `RsGuardError::LlmApi` | Retried by `with_retry_simple()` (3 attempts with exponential backoff) |
-| LLM call | Circuit breaker open | Infrastructure exists (`retry.rs`) but circuit breaker is not enabled for LLM calls — only retry with exponential backoff is wired |
-| Verdict parse | `RsGuardError::VerdictParse` | Propagate with context |
-| GitHub submission | `RsGuardError::PermissionDenied` | Fallback to `COMMENT` state |
-| Artifact write | `io::Error` | Log warning, do not fail the pipeline |
-| Metrics write | `io::Error` | Log warning, do not fail the pipeline |
+| Step               | Error Type                       | Behavior                                                                                                                           |
+| ------------------ | -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| Config resolution  | `RsGuardError::Config`           | Print error + exit 1                                                                                                               |
+| Diff fetch (CI)    | `RsGuardError::GitHubApi`        | Propagate with context                                                                                                             |
+| Diff fetch (local) | `RsGuardError::EmptyDiff`        | Print info + exit 0                                                                                                                |
+| Diff fetch (any)   | `RsGuardError::DiffTooLarge`     | CI: post explanatory `COMMENT` + exit 0; Local: print warning + exit 0                                                             |
+| LLM call           | `RsGuardError::LlmApi`           | Retried by `with_retry_simple()` (3 attempts with exponential backoff)                                                             |
+| LLM call           | Circuit breaker open             | Infrastructure exists (`retry.rs`) but circuit breaker is not enabled for LLM calls — only retry with exponential backoff is wired |
+| Verdict parse      | `RsGuardError::VerdictParse`     | Propagate with context                                                                                                             |
+| GitHub submission  | `RsGuardError::PermissionDenied` | Fallback to `COMMENT` state                                                                                                        |
+| Artifact write     | `io::Error`                      | Log warning, do not fail the pipeline                                                                                              |
+| Metrics write      | `io::Error`                      | Log warning, do not fail the pipeline                                                                                              |
 
 ### Exit Signal
 
@@ -629,16 +630,16 @@ cargo test --lib
 
 The CI pipeline runs on every push to `main` and every pull request. It consists of **8 parallel jobs**:
 
-| Job | Purpose | Command |
-|---|---|---|
-| **Format Check** | Enforces `rustfmt` consistency | `cargo fmt --all -- --check` |
-| **Clippy** | Zero-warning lint gate | `cargo clippy --all-targets --all-features -- -D warnings` |
-| **Test** | Full test suite | `cargo test` |
-| **Doc Tests** | Validates doc comments compile | `cargo test --doc` |
-| **Release Build** | Smoke test that release binary compiles | `cargo build --release` |
-| **cargo-deny** | License + security audit | `cargo deny check --config deny.toml` |
-| **cargo-audit** | Checks for known vulnerabilities | `cargo audit` |
-| **Benchmarks** | Runs on `main` only | `cargo bench --bench verdict -- --quick` |
+| Job               | Purpose                                 | Command                                                    |
+| ----------------- | --------------------------------------- | ---------------------------------------------------------- |
+| **Format Check**  | Enforces `rustfmt` consistency          | `cargo fmt --all -- --check`                               |
+| **Clippy**        | Zero-warning lint gate                  | `cargo clippy --all-targets --all-features -- -D warnings` |
+| **Test**          | Full test suite                         | `cargo test`                                               |
+| **Doc Tests**     | Validates doc comments compile          | `cargo test --doc`                                         |
+| **Release Build** | Smoke test that release binary compiles | `cargo build --release`                                    |
+| **cargo-deny**    | License + security audit                | `cargo deny check --config deny.toml`                      |
+| **cargo-audit**   | Checks for known vulnerabilities        | `cargo audit`                                              |
+| **Benchmarks**    | Runs on `main` only                     | `cargo bench --bench verdict -- --quick`                   |
 
 All jobs use `Swatinem/rust-cache` for Cargo build caching.
 
@@ -697,6 +698,7 @@ rs-guard uses `reqwest` with the `rustls-tls` feature (not `native-tls`):
 - **Security audit.** `rustls` is written in Rust with no `unsafe` blocks in its TLS implementation.
 
 Alternative HTTP clients were considered:
+
 - `ureq` — synchronous, simpler, but lacks async support needed for `tokio`.
 - `minreq` — minimal, but missing features like JSON deserialization and timeout configuration.
 
@@ -712,12 +714,12 @@ strip = true
 panic = "abort"
 ```
 
-| Setting | Effect |
-|---|---|
-| `opt-level = 3` | Maximum optimization |
-| `lto = true` | Link-Time Optimization removes dead code across crates |
-| `strip = true` | Strip debug symbols from binary |
-| `panic = "abort"` | Removes unwind tables, smaller binary |
+| Setting           | Effect                                                 |
+| ----------------- | ------------------------------------------------------ |
+| `opt-level = 3`   | Maximum optimization                                   |
+| `lto = true`      | Link-Time Optimization removes dead code across crates |
+| `strip = true`    | Strip debug symbols from binary                        |
+| `panic = "abort"` | Removes unwind tables, smaller binary                  |
 
 Result: **~5 MB binary** that starts in under 100ms. Much faster than running `cargo run` in CI, which requires compilation from source on every run.
 
@@ -740,13 +742,13 @@ The release binary is already small (~5 MB). Further size reductions are possibl
 
 The `benches/verdict.rs` file defines 5 Criterion benchmarks covering verdict parsing — the only CPU-intensive step in the pipeline:
 
-| Benchmark | What it measures |
-|---|---|
-| `parse_metadata_block` | Regex extraction of `[RS_GUARD_VERDICT_METADATA]` |
-| `evaluate_by_tags` | Fallback tag counting |
-| `parse_no_metadata_fallback` | Metadata miss → tag fallback path |
-| `determine_review_state` | State determination from a `Verdict` struct |
-| `parse_large_response` | ~10 KB LLM response parsing |
+| Benchmark                    | What it measures                                  |
+| ---------------------------- | ------------------------------------------------- |
+| `parse_metadata_block`       | Regex extraction of `[RS_GUARD_VERDICT_METADATA]` |
+| `evaluate_by_tags`           | Fallback tag counting                             |
+| `parse_no_metadata_fallback` | Metadata miss → tag fallback path                 |
+| `determine_review_state`     | State determination from a `Verdict` struct       |
+| `parse_large_response`       | ~10 KB LLM response parsing                       |
 
 Run benchmarks:
 
@@ -810,12 +812,12 @@ The 422 "not permitted" response from GitHub Actions is handled alongside 403.
 
 ### Supply Chain Security
 
-| Tool | Purpose | Config |
-|---|---|---|
-| `cargo-deny` | License + security audit | `deny.toml` — allowlist: MIT, Apache-2.0, BSD-3-Clause, ISC, Unicode-3.0, MPL-2.0, CDLA-Permissive-2.0 |
-| `cargo-audit` | Known vulnerability check | Runs against `Cargo.lock` in CI |
-| `Cargo.lock` | Pin exact dependency versions | Committed to the repository |
-| `rustls-tls` | No OpenSSL system dependency | `reqwest` feature flag |
+| Tool          | Purpose                       | Config                                                                                                 |
+| ------------- | ----------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `cargo-deny`  | License + security audit      | `deny.toml` — allowlist: MIT, Apache-2.0, BSD-3-Clause, ISC, Unicode-3.0, MPL-2.0, CDLA-Permissive-2.0 |
+| `cargo-audit` | Known vulnerability check     | Runs against `Cargo.lock` in CI                                                                        |
+| `Cargo.lock`  | Pin exact dependency versions | Committed to the repository                                                                            |
+| `rustls-tls`  | No OpenSSL system dependency  | `reqwest` feature flag                                                                                 |
 
 Run locally:
 

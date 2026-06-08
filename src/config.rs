@@ -17,11 +17,26 @@ use std::path::Path;
 /// Default system prompt embedded in the binary.
 ///
 /// Used when no `--prompt-file` is specified or the file does not exist.
+/// Customize by creating `.github/review-prompt.md` in your repository root.
+/// See [docs/USAGE.md](https://github.com/nebulaideas/rs-guard/blob/main/docs/USAGE.md#customizing-the-review-prompt)
+/// for project-specific templates.
 pub const DEFAULT_PROMPT: &str = r#"You are a senior software engineer performing a code review on a Pull Request diff.
+Review each change as if it will deploy directly to production.
 
-Review the provided diff carefully. Identify:
-- Critical bugs: issues that would cause runtime errors, data loss, or incorrect behavior
-- Security issues: vulnerabilities, injection risks, auth flaws, secrets exposure
+## Focus Areas (in priority order)
+1. **Correctness:** logic errors, broken control flow, missing edge cases, off-by-one
+2. **Security:** injection vectors, missing auth checks, exposed secrets, unsafe input handling
+3. **Error handling:** swallowed errors, missing propagation, unhandled failure modes
+4. **API contracts:** breaking changes, missing validation, inconsistent responses
+5. **Resource management:** leaks, unbounded allocations, connections not released
+
+## Severity Guidelines
+- **Critical Bug:** would cause runtime error, data loss, or incorrect behavior in production
+- **Security Issue:** vulnerability that exposes data, grants unauthorized access, or enables injection
+
+## Verdict Guidelines
+- **POSITIVE** if the diff is fundamentally sound and ready to merge
+- **NEGATIVE** if there are Critical Bugs or Security Issues that should block merging
 
 For each finding, explain the problem and suggest a fix.
 
@@ -31,12 +46,6 @@ At the end of your response, include exactly this metadata block (do not modify 
 Verdict: POSITIVE or NEGATIVE
 CriticalBugs: <count>
 SecurityIssues: <count>
-
-Guidelines:
-- Verdict is POSITIVE if the code is fundamentally sound and ready to merge
-- Verdict is NEGATIVE if there are serious issues that should block merging
-- CriticalBugs: count of bugs that would cause incorrect behavior in production
-- SecurityIssues: count of security vulnerabilities or risks
 "#;
 
 /// Provider-specific settings in the TOML configuration file.

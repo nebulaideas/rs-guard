@@ -29,11 +29,11 @@ In local mode, rs-guard:
 
 ### Exit Codes
 
-| Code | Meaning |
-|---|---|
-| `0` | Review completed successfully (`APPROVE` or `COMMENT`) |
-| `1` | Error occurred (API failure, config error, etc.) |
-| `2` | Review returned `REQUEST_CHANGES` — blocks commit |
+| Code | Meaning                                                |
+| ---- | ------------------------------------------------------ |
+| `0`  | Review completed successfully (`APPROVE` or `COMMENT`) |
+| `1`  | Error occurred (API failure, config error, etc.)       |
+| `2`  | Review returned `REQUEST_CHANGES` — blocks commit      |
 
 ---
 
@@ -134,6 +134,7 @@ Diff Lines:  42
 ```
 
 States are color-coded:
+
 - **Green (`APPROVE`)** — Code is ready to merge
 - **Red (`REQUEST_CHANGES`)** — Issues must be addressed
 - **Yellow (`COMMENT`)** — Minor concerns, human review recommended

@@ -118,6 +118,7 @@ pub trait LlmProvider: Send + Sync + std::fmt::Debug {
 ```
 
 The `factory.rs` module maps a provider name string to a `Box<dyn LlmProvider>`. Adding a new provider requires:
+
 1. A new module in `src/llm/` implementing the trait
 2. An entry in `providers.rs` (metadata: name, env var, default model, base URL)
 3. A match arm in `factory.rs`
@@ -133,6 +134,7 @@ key = SHA-256(diff_content | prompt | provider | model | temperature)
 ```
 
 Each `.cache` file stores:
+
 - **Line 1:** Unix timestamp (seconds since epoch) — stored in content, not mtime, for reliability
 - **Line 2+:** The raw LLM response
 
@@ -158,11 +160,11 @@ stateDiagram-v2
 
 Three diff sources with different behavior:
 
-| Source | Function | On `DiffTooLarge` |
-|---|---|---|
-| GitHub API (`--ci`) | `fetch_pr_diff()` | Posts an explanatory `COMMENT` review |
-| File (`--diff-file`) | `fetch_file_diff()` | Prints to stderr, exits 0 |
-| Local (`git diff --cached`) | `fetch_local_diff()` | Prints to stderr, exits 0 |
+| Source                      | Function             | On `DiffTooLarge`                     |
+| --------------------------- | -------------------- | ------------------------------------- |
+| GitHub API (`--ci`)         | `fetch_pr_diff()`    | Posts an explanatory `COMMENT` review |
+| File (`--diff-file`)        | `fetch_file_diff()`  | Prints to stderr, exits 0             |
+| Local (`git diff --cached`) | `fetch_local_diff()` | Prints to stderr, exits 0             |
 
 After fetching, `chunk_diff()` trims large diffs to the first 50 + last 50 lines. Returns `Cow<str>` — borrowed when no truncation is needed (zero allocation in the common case).
 
@@ -233,14 +235,14 @@ rs-guard requests the minimum GitHub token scope needed: `pull-requests: write`.
 
 ## Performance Characteristics
 
-| Metric | Typical Value |
-|---|---|
-| Binary size (release, stripped) | ~5 MB |
-| Cold startup to first API call | < 100ms |
+| Metric                          | Typical Value         |
+| ------------------------------- | --------------------- |
+| Binary size (release, stripped) | ~5 MB                 |
+| Cold startup to first API call  | < 100ms               |
 | End-to-end latency (cache miss) | 3–15s (LLM-dominated) |
-| End-to-end latency (cache hit) | < 200ms |
-| Memory footprint | < 50 MB |
-| Diff size limit | 100 KB / 1500 lines |
+| End-to-end latency (cache hit)  | < 200ms               |
+| Memory footprint                | < 50 MB               |
+| Diff size limit                 | 100 KB / 1500 lines   |
 
 The Criterion benchmarks in `benches/verdict.rs` cover verdict parsing (the only CPU-intensive step). Run with:
 

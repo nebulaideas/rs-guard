@@ -89,6 +89,7 @@ sudo mv rs-guard /usr/local/bin/
 #### Windows (x86_64)
 
 **PowerShell:**
+
 ```powershell
 Invoke-WebRequest -Uri "https://github.com/nebulaideas/rs-guard/releases/latest/download/rs-guard-x86_64-pc-windows-msvc.exe" -OutFile "rs-guard.exe"
 Move-Item "rs-guard.exe" "C:\Program Files\rs-guard\"
@@ -98,6 +99,7 @@ $env:Path += ";C:\Program Files\rs-guard"
 ```
 
 **Command Prompt:**
+
 ```cmd
 curl -L -o rs-guard.exe ^
   https://github.com/nebulaideas/rs-guard/releases/latest/download/rs-guard-x86_64-pc-windows-msvc.exe
@@ -215,6 +217,7 @@ Native ARM64 binaries run 20-30% faster on M1/M2/M3 chips compared to Rosetta tr
 4. Click **OK** and restart your terminal
 
 Alternatively, add to PowerShell profile (`$PROFILE`):
+
 ```powershell
 $env:Path += ";$env:USERPROFILE\.cargo\bin"
 ```
@@ -222,6 +225,7 @@ $env:Path += ";$env:USERPROFILE\.cargo\bin"
 #### Windows Defender
 
 If flagged as unknown software:
+
 - Right-click → **Properties** → Check **Unblock**
 - Or add an exclusion in Windows Security settings
 
@@ -243,6 +247,7 @@ rs-guard
 ```
 
 Expected output:
+
 ```
 rs-guard 0.6.0
 AI-powered code review CLI for GitHub PRs
@@ -274,7 +279,7 @@ jobs:
   review:
     runs-on: ubuntu-latest
     if: ${{ !github.event.pull_request.head.repo.fork }}
-    
+
     steps:
       - uses: actions/checkout@v4
 
@@ -323,10 +328,10 @@ If using `.reviewer.toml`:
 
 Configure these in your repository settings (**Settings** → **Secrets and variables** → **Actions**):
 
-| Secret | Description |
-|--------|-------------|
-| `DEEPSEEK_API_KEY` | Your DeepSeek API key (or other provider) |
-| `GITHUB_TOKEN` | Auto-provided by GitHub Actions (no setup needed) |
+| Secret             | Description                                       |
+| ------------------ | ------------------------------------------------- |
+| `DEEPSEEK_API_KEY` | Your DeepSeek API key (or other provider)         |
+| `GITHUB_TOKEN`     | Auto-provided by GitHub Actions (no setup needed) |
 
 ---
 
@@ -350,6 +355,7 @@ set DEEPSEEK_API_KEY=your-api-key
 ```
 
 **Optional:** Add to your shell profile for persistence:
+
 ```bash
 # ~/.bashrc or ~/.zshrc
 export DEEPSEEK_API_KEY="your-api-key"
@@ -383,6 +389,7 @@ git commit -m "feat: add new feature"
 ```
 
 To bypass the hook when needed:
+
 ```bash
 git commit --no-verify -m "quick fix"
 ```
@@ -406,6 +413,7 @@ rs-guard --diff-file my-changes.diff
 **Cause:** Binary not in PATH.
 
 **Solution:**
+
 ```bash
 # Find where rs-guard was installed
 which rs-guard  # Linux/macOS
@@ -424,6 +432,7 @@ export PATH="$HOME/.cargo/bin:$PATH"
 **Cause:** Binary lacks execute permission.
 
 **Solution:**
+
 ```bash
 chmod +x rs-guard
 ```
@@ -433,6 +442,7 @@ chmod +x rs-guard
 **Cause:** Downloaded binary doesn't match your system architecture.
 
 **Solution:** Check your architecture:
+
 ```bash
 # Linux/macOS
 uname -m
@@ -449,6 +459,7 @@ Download the matching binary variant.
 **Cause:** Rust version < 1.82.
 
 **Solution:**
+
 ```bash
 rustup update stable
 rustc --version  # Verify >= 1.82
@@ -459,6 +470,7 @@ rustc --version  # Verify >= 1.82
 **Cause:** Outdated CA certificates or network issue.
 
 **Solution:**
+
 ```bash
 # Update CA certificates
 sudo apt-get update && sudo apt-get install --reinstall ca-certificates  # Debian/Ubuntu
@@ -473,6 +485,7 @@ curl -k -L -o rs-guard <URL>
 **Cause:** PATH not updated or terminal needs restart.
 
 **Solution:**
+
 1. Close and reopen your terminal/PowerShell
 2. Verify PATH: `$env:Path -split ';' | Select-String rs-guard`
 3. Re-add to PATH if needed (see Windows section above)
@@ -480,6 +493,7 @@ curl -k -L -o rs-guard <URL>
 ### macOS: "Cannot be opened because the developer cannot be verified"
 
 **Solution:**
+
 ```bash
 xattr -d com.apple.quarantine $(which rs-guard)
 ```
@@ -501,5 +515,5 @@ Or go to **System Preferences** → **Security & Privacy** → Click **Open Anyw
 ## Getting Help
 
 - **Documentation:** See [docs/](docs/) directory
-- **Issues:** https://github.com/nebulaideas/rs-guard/issues
-- **Discussions:** https://github.com/nebulaideas/rs-guard/discussions
+- **Issues:** <https://github.com/nebulaideas/rs-guard/issues>
+- **Discussions:** <https://github.com/nebulaideas/rs-guard/discussions>

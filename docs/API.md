@@ -153,115 +153,115 @@ pub struct ProviderConfig {
 
 ### `verdict`
 
-| Item | Description |
-|---|---|
-| `parse_verdict(response: &str)` | Extracts `[RS_GUARD_VERDICT_METADATA]` block and returns `(Verdict, ReviewState)` |
-| `Verdict` | Review verdict with bug/security counts |
-| `ReviewState` | `Approve` / `RequestChanges` / `Comment` |
-| `evaluate_by_tags(response: &str)` | Tag-based fallback for when metadata block is missing |
+| Item                               | Description                                                                       |
+| ---------------------------------- | --------------------------------------------------------------------------------- |
+| `parse_verdict(response: &str)`    | Extracts `[RS_GUARD_VERDICT_METADATA]` block and returns `(Verdict, ReviewState)` |
+| `Verdict`                          | Review verdict with bug/security counts                                           |
+| `ReviewState`                      | `Approve` / `RequestChanges` / `Comment`                                          |
+| `evaluate_by_tags(response: &str)` | Tag-based fallback for when metadata block is missing                             |
 
 ### `config`
 
-| Item | Description |
-|---|---|
-| `Config` | Resolved application configuration |
-| `Config::from_env(toml: Option<TomlConfig>)` | Resolves env vars with optional TOML defaults |
-| `Config::apply_args(&mut self, args: &Args)` | Applies CLI overrides |
-| `Config::load_prompt_file(&mut self, path: &Path)` | Loads prompt from file |
-| `Config::validate_for_ci(&self)` | Validates required CI fields |
-| `load_toml_config(path: &Path)` | Parses `.reviewer.toml` |
-| `TomlConfig` | TOML configuration structure |
-| `DEFAULT_PROMPT` | Embedded default system prompt |
+| Item                                               | Description                                   |
+| -------------------------------------------------- | --------------------------------------------- |
+| `Config`                                           | Resolved application configuration            |
+| `Config::from_env(toml: Option<TomlConfig>)`       | Resolves env vars with optional TOML defaults |
+| `Config::apply_args(&mut self, args: &Args)`       | Applies CLI overrides                         |
+| `Config::load_prompt_file(&mut self, path: &Path)` | Loads prompt from file                        |
+| `Config::validate_for_ci(&self)`                   | Validates required CI fields                  |
+| `load_toml_config(path: &Path)`                    | Parses `.reviewer.toml`                       |
+| `TomlConfig`                                       | TOML configuration structure                  |
+| `DEFAULT_PROMPT`                                   | Embedded default system prompt                |
 
 ### `diff`
 
-| Item | Description |
-|---|---|
-| `fetch_pr_diff(base_url, owner, repo, pr, token)` | Fetches PR diff via GitHub API |
-| `fetch_local_diff()` | Runs `git diff --cached` |
-| `fetch_file_diff(path)` | Reads diff from a file |
-| `chunk_diff(content: &str)` | Truncates large diffs to 50 head + 50 tail |
-| `DiffResult` | Struct holding diff content and metadata |
+| Item                                              | Description                                |
+| ------------------------------------------------- | ------------------------------------------ |
+| `fetch_pr_diff(base_url, owner, repo, pr, token)` | Fetches PR diff via GitHub API             |
+| `fetch_local_diff()`                              | Runs `git diff --cached`                   |
+| `fetch_file_diff(path)`                           | Reads diff from a file                     |
+| `chunk_diff(content: &str)`                       | Truncates large diffs to 50 head + 50 tail |
+| `DiffResult`                                      | Struct holding diff content and metadata   |
 
 ### `github`
 
-| Item | Description |
-|---|---|
-| `submit_review(base_url, owner, repo, pr, state, message, token)` | Submits a review via GitHub API |
-| `dismiss_previous_reviews(base_url, owner, repo, pr, token)` | Dismisses previous `CHANGES_REQUESTED` reviews |
+| Item                                                              | Description                                    |
+| ----------------------------------------------------------------- | ---------------------------------------------- |
+| `submit_review(base_url, owner, repo, pr, state, message, token)` | Submits a review via GitHub API                |
+| `dismiss_previous_reviews(base_url, owner, repo, pr, token)`      | Dismisses previous `CHANGES_REQUESTED` reviews |
 
 ### `http`
 
-| Item | Description |
-|---|---|
-| `build_github_http_client()` | Shared `reqwest::Client` builder for GitHub |
-| `github_diff_headers(token)` | Standard headers for GitHub diff API |
-| `validate_github_base_url(url)` | SSRF allowlist check for GitHub URLs |
-| `validate_provider_base_url(url)` | SSRF allowlist check for provider URLs |
+| Item                              | Description                                 |
+| --------------------------------- | ------------------------------------------- |
+| `build_github_http_client()`      | Shared `reqwest::Client` builder for GitHub |
+| `github_diff_headers(token)`      | Standard headers for GitHub diff API        |
+| `validate_github_base_url(url)`   | SSRF allowlist check for GitHub URLs        |
+| `validate_provider_base_url(url)` | SSRF allowlist check for provider URLs      |
 
 ### `cache`
 
-| Item | Description |
-|---|---|
-| `DiffCache` | Cache using SHA-256 keyed filenames |
-| `CacheConfig` | TTL, max size, and enable/disable options |
-| `CacheConfig::default()` | 24h TTL, 100 MB limit, enabled by default |
-| `DiffCache::new(config)` | Creates cache instance |
-| `DiffCache::get()` | Check cache by key hash |
-| `DiffCache::set()` | Store response atomically |
-| `DiffCache::enforce_size_limit()` | LRU cleanup if exceeded max size |
-| `DiffCache::ensure_gitignored()` | Adds `.rs-guard/cache/` to `.gitignore` |
+| Item                              | Description                               |
+| --------------------------------- | ----------------------------------------- |
+| `DiffCache`                       | Cache using SHA-256 keyed filenames       |
+| `CacheConfig`                     | TTL, max size, and enable/disable options |
+| `CacheConfig::default()`          | 24h TTL, 100 MB limit, enabled by default |
+| `DiffCache::new(config)`          | Creates cache instance                    |
+| `DiffCache::get()`                | Check cache by key hash                   |
+| `DiffCache::set()`                | Store response atomically                 |
+| `DiffCache::enforce_size_limit()` | LRU cleanup if exceeded max size          |
+| `DiffCache::ensure_gitignored()`  | Adds `.rs-guard/cache/` to `.gitignore`   |
 
 ### `retry`
 
-| Item | Description |
-|---|---|
+| Item                                                      | Description                                          |
+| --------------------------------------------------------- | ---------------------------------------------------- |
 | `with_retry(operation, circuit: Option<&CircuitBreaker>)` | Retries on transient errors with exponential backoff |
-| `CircuitBreaker` | Simple Closed/Open circuit breaker |
-| `CircuitBreakerConfig` | Threshold, cooldown, and enable/disable |
+| `CircuitBreaker`                                          | Simple Closed/Open circuit breaker                   |
+| `CircuitBreakerConfig`                                    | Threshold, cooldown, and enable/disable              |
 
 ### `output`
 
-| Item | Description |
-|---|---|
-| `print_colored_report(msg, verdict, state, writer)` | Print colored review summary |
-| `print_colored_summary(msg, verdict, state, config, writer)` | Full colored summary with metrics |
-| `write_artifact(msg, verdict, state, config, path)` | Write `review-result.txt` |
-| `write_metrics(metrics, path)` | Write `rs-guard-metrics.json` |
-| `Artifact` | Struct for artifact file contents |
-| `ReviewMetrics` | JSON metrics: provider, model, tokens, latency, cost, verdict, state |
-| `ARTIFACT_FILENAME` | `"review-result.txt"` |
-| `METRICS_FILENAME` | `"rs-guard-metrics.json"` |
+| Item                                                         | Description                                                          |
+| ------------------------------------------------------------ | -------------------------------------------------------------------- |
+| `print_colored_report(msg, verdict, state, writer)`          | Print colored review summary                                         |
+| `print_colored_summary(msg, verdict, state, config, writer)` | Full colored summary with metrics                                    |
+| `write_artifact(msg, verdict, state, config, path)`          | Write `review-result.txt`                                            |
+| `write_metrics(metrics, path)`                               | Write `rs-guard-metrics.json`                                        |
+| `Artifact`                                                   | Struct for artifact file contents                                    |
+| `ReviewMetrics`                                              | JSON metrics: provider, model, tokens, latency, cost, verdict, state |
+| `ARTIFACT_FILENAME`                                          | `"review-result.txt"`                                                |
+| `METRICS_FILENAME`                                           | `"rs-guard-metrics.json"`                                            |
 
 ### `error`
 
-| Item | Description |
-|---|---|
-| `RsGuardError` | Enum: `GitHubApi`, `LlmApi`, `VerdictParse`, `Config`, `Io`, `DiffTooLarge`, `EmptyDiff`, `InvalidDiffContent`, `PermissionDenied` |
-| `RsGuardError::is_retryable()` | Returns true for transient errors |
-| `RsGuardError::is_permission_denied()` | Returns true for 403 permission errors |
+| Item                                   | Description                                                                                                                        |
+| -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `RsGuardError`                         | Enum: `GitHubApi`, `LlmApi`, `VerdictParse`, `Config`, `Io`, `DiffTooLarge`, `EmptyDiff`, `InvalidDiffContent`, `PermissionDenied` |
+| `RsGuardError::is_retryable()`         | Returns true for transient errors                                                                                                  |
+| `RsGuardError::is_permission_denied()` | Returns true for 403 permission errors                                                                                             |
 
 ### `llm`
 
-| Item | Description |
-|---|---|
-| `LlmProvider` trait | `name()` + `chat_completion()` |
-| `Provider` | Type alias: `Box<dyn LlmProvider>` |
-| `ProviderConfig` | Per-provider config overrides |
-| `ChatMessage` | Single message with `role` and `content` |
-| `ChatRequest` | Request body with `model`, `messages`, `temperature`, `max_tokens` |
-| `ChatResponse` | Parsed response with `choices` vector |
-| `factory::create_provider()` | Factory: `provider_name + api_key -> Provider` |
-| `providers::all_providers()` | Metadata for all known providers |
-| `providers::find_provider()` | Lookup provider metadata by name |
-| `providers::known_provider_names()` | List of all supported provider names |
+| Item                                | Description                                                        |
+| ----------------------------------- | ------------------------------------------------------------------ |
+| `LlmProvider` trait                 | `name()` + `chat_completion()`                                     |
+| `Provider`                          | Type alias: `Box<dyn LlmProvider>`                                 |
+| `ProviderConfig`                    | Per-provider config overrides                                      |
+| `ChatMessage`                       | Single message with `role` and `content`                           |
+| `ChatRequest`                       | Request body with `model`, `messages`, `temperature`, `max_tokens` |
+| `ChatResponse`                      | Parsed response with `choices` vector                              |
+| `factory::create_provider()`        | Factory: `provider_name + api_key -> Provider`                     |
+| `providers::all_providers()`        | Metadata for all known providers                                   |
+| `providers::find_provider()`        | Lookup provider metadata by name                                   |
+| `providers::known_provider_names()` | List of all supported provider names                               |
 
 ### `redact`
 
-| Item | Description |
-|---|---|
-| `redact_secrets(content)` | Removes secret patterns from content |
-| `log_redacted(prefix, content)` | Logs content with secrets redacted |
+| Item                            | Description                          |
+| ------------------------------- | ------------------------------------ |
+| `redact_secrets(content)`       | Removes secret patterns from content |
+| `log_redacted(prefix, content)` | Logs content with secrets redacted   |
 
 ---
 

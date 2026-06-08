@@ -20,36 +20,36 @@
 
 ## Technology Stack
 
-| Layer | Technology |
-|---|---|
-| Language | Rust (edition 2021, toolchain 1.82+) |
-| Build Tool | Cargo (single crate) |
-| Async Runtime | Tokio |
-| HTTP Client | reqwest (rustls-tls) |
-| CLI Framework | clap (derive macros) |
-| Serialization | serde, serde_json, toml |
-| Error Handling | thiserror, anyhow |
-| Terminal Output | colored |
-| Testing | Built-in test framework + wiremock (HTTP mocking) |
-| URL Validation | url crate |
-| Secrets | env vars + redact module |
-| Hashing | sha2 + hex (cache keys) |
+| Layer           | Technology                                        |
+| --------------- | ------------------------------------------------- |
+| Language        | Rust (edition 2021, toolchain 1.82+)              |
+| Build Tool      | Cargo (single crate)                              |
+| Async Runtime   | Tokio                                             |
+| HTTP Client     | reqwest (rustls-tls)                              |
+| CLI Framework   | clap (derive macros)                              |
+| Serialization   | serde, serde_json, toml                           |
+| Error Handling  | thiserror, anyhow                                 |
+| Terminal Output | colored                                           |
+| Testing         | Built-in test framework + wiremock (HTTP mocking) |
+| URL Validation  | url crate                                         |
+| Secrets         | env vars + redact module                          |
+| Hashing         | sha2 + hex (cache keys)                           |
 
 ### Implemented LLM Providers
 
-| Provider | Status | Default Model |
-|---|---|---|
-| DeepSeek | ✅ Phase 1 | `deepseek-v4-flash` |
-| Kimi (Moonshot AI) | ✅ Phase 2 | `kimi-k2.5` |
-| Qwen (Alibaba Cloud) | ✅ Phase 2 | `qwen-plus` |
-| OpenRouter | ✅ Phase 2 | `openai/gpt-4o-mini` |
-| OpenAI | ✅ Phase 2 | `gpt-4o-mini` |
+| Provider             | Status     | Default Model        |
+| -------------------- | ---------- | -------------------- |
+| DeepSeek             | ✅ Phase 1 | `deepseek-v4-flash`  |
+| Kimi (Moonshot AI)   | ✅ Phase 2 | `kimi-k2.5`          |
+| Qwen (Alibaba Cloud) | ✅ Phase 2 | `qwen-plus`          |
+| OpenRouter           | ✅ Phase 2 | `openai/gpt-4o-mini` |
+| OpenAI               | ✅ Phase 2 | `gpt-4o-mini`        |
 
 ---
 
 ## Repository Structure
 
-```
+```text
 rs-guard/
 ├── src/                           # Single crate source (16 modules)
 │   ├── main.rs                    # CLI entry point (thin)
@@ -114,21 +114,21 @@ rs-guard/
 
 ## Key Architecture Decisions
 
-| Decision | Choice |
-|---|---|
-| Crate structure | Single crate (workspace deferred until library demand emerges) |
-| Provider dispatch | `Box<dyn LlmProvider>` trait objects (refactored from enum dispatch in Phase 1) |
-| Exit signal | `PipelineResult` enum (Success / ReviewBlocked) — not `process::exit()` in library code |
-| SSRF protection | URL allowlist per provider in CI mode; loopback allowed in local mode |
-| Print functions | Accept `impl Write` for testability |
-| `Config::empty()` | Test-only constructor for integration tests |
-| `#![deny(missing_docs)]` | Enforced at crate level |
-| Cache keying | SHA-256 over (diff \| prompt \| provider \| model \| temperature) — all parameters matter |
-| Cache timestamps | Stored in file content (line 1), not mtime — reliable across clock changes and file copies |
-| Cache size limit | 100 MB default with LRU cleanup — prevents unbounded disk usage |
-| Circuit breaker | Simple Closed/Open only (no half-open), opt-in, default disabled |
-| Cost calculation | Integer cents, not floating point — avoids precision issues |
-| Diff chunking | `Cow<str>` return — zero allocation when no truncation needed |
+| Decision                 | Choice                                                                                     |
+| ------------------------ | ------------------------------------------------------------------------------------------ |
+| Crate structure          | Single crate (workspace deferred until library demand emerges)                             |
+| Provider dispatch        | `Box<dyn LlmProvider>` trait objects (refactored from enum dispatch in Phase 1)            |
+| Exit signal              | `PipelineResult` enum (Success / ReviewBlocked) — not `process::exit()` in library code    |
+| SSRF protection          | URL allowlist per provider in CI mode; loopback allowed in local mode                      |
+| Print functions          | Accept `impl Write` for testability                                                        |
+| `Config::empty()`        | Test-only constructor for integration tests                                                |
+| `#![deny(missing_docs)]` | Enforced at crate level                                                                    |
+| Cache keying             | SHA-256 over (diff \| prompt \| provider \| model \| temperature) — all parameters matter  |
+| Cache timestamps         | Stored in file content (line 1), not mtime — reliable across clock changes and file copies |
+| Cache size limit         | 100 MB default with LRU cleanup — prevents unbounded disk usage                            |
+| Circuit breaker          | Simple Closed/Open only (no half-open), opt-in, default disabled                           |
+| Cost calculation         | Integer cents, not floating point — avoids precision issues                                |
+| Diff chunking            | `Cow<str>` return — zero allocation when no truncation needed                              |
 
 ---
 
@@ -162,21 +162,21 @@ cargo audit
 
 ## Test Coverage
 
-| Module | Test Count | Type |
-|---|---|---|
-| `verdict.rs` | 22 (7 inline + 15 integration) | Unit + Integration |
-| `config.rs` | 21 | Integration |
-| `github.rs` | 13 | Inline (wiremock) |
-| `output.rs` | 6 | Inline |
-| `cache.rs` | 19 | Inline |
-| `retry.rs` | 17 (6 retry + 11 circuit breaker) | Inline |
-| `provider*` | 19 (5 inline + 14 integration) | Unit + Integration |
-| `diff.rs` | 26 (21 inline + 5 integration) | Unit + Integration |
-| `redact.rs` | 8 | Inline |
-| `pipeline.rs` | 5 | Integration |
-| `http.rs` | 16 | Inline |
-| `cli.rs` | 3 | Inline |
-| **Total** | **~252** | |
+| Module        | Test Count                        | Type               |
+| ------------- | --------------------------------- | ------------------ |
+| `verdict.rs`  | 22 (7 inline + 15 integration)    | Unit + Integration |
+| `config.rs`   | 21                                | Integration        |
+| `github.rs`   | 13                                | Inline (wiremock)  |
+| `output.rs`   | 6                                 | Inline             |
+| `cache.rs`    | 19                                | Inline             |
+| `retry.rs`    | 17 (6 retry + 11 circuit breaker) | Inline             |
+| `provider*`   | 19 (5 inline + 14 integration)    | Unit + Integration |
+| `diff.rs`     | 26 (21 inline + 5 integration)    | Unit + Integration |
+| `redact.rs`   | 8                                 | Inline             |
+| `pipeline.rs` | 5                                 | Integration        |
+| `http.rs`     | 16                                | Inline             |
+| `cli.rs`      | 3                                 | Inline             |
+| **Total**     | **~252**                          |                    |
 
 ---
 
@@ -184,27 +184,27 @@ cargo audit
 
 ### Pre-requisite Cleanup (Phase 0)
 
-| Task | Status |
-|---|---|
-| P0.1 — Remove `process::exit` from `run_pipeline()` | ✅ Done |
-| P0.2 — `github.rs` test suite (13 tests) | ✅ Done |
-| P0.3 — `output.rs` `impl Write` refactor + tests | ✅ Done |
-| P0.4 — `#![deny(missing_docs)]` | ✅ Done |
-| P0.5 — Update AGENTS.md | ✅ Done (this file) |
-| P0.6 — DRY diff-fetch error handling | ❌ Deferred (behaviors differ per source) |
-| P0.7 — Shared HTTP client builder | ✅ Done |
-| P0.8 — `tests/test_data/` directory | ✅ Done |
-| P0.9 — Full pipeline integration test (5 scenarios) | ✅ Done |
+| Task                                                | Status                                    |
+| --------------------------------------------------- | ----------------------------------------- |
+| P0.1 — Remove `process::exit` from `run_pipeline()` | ✅ Done                                   |
+| P0.2 — `github.rs` test suite (13 tests)            | ✅ Done                                   |
+| P0.3 — `output.rs` `impl Write` refactor + tests    | ✅ Done                                   |
+| P0.4 — `#![deny(missing_docs)]`                     | ✅ Done                                   |
+| P0.5 — Update AGENTS.md                             | ✅ Done (this file)                       |
+| P0.6 — DRY diff-fetch error handling                | ❌ Deferred (behaviors differ per source) |
+| P0.7 — Shared HTTP client builder                   | ✅ Done                                   |
+| P0.8 — `tests/test_data/` directory                 | ✅ Done                                   |
+| P0.9 — Full pipeline integration test (5 scenarios) | ✅ Done                                   |
 
 ### Advanced Features
 
-| Task | Status |
-|---|---|
-| 3.1 — Response caching (`src/cache.rs`, `.rs-guard/cache/`) | ✅ Done — 13 inline tests, SHA-256 keyed, TTL+size limit, atomic writes |
-| 3.2 — Metrics export (`rs-guard-metrics.json`) | ✅ Done — `ReviewMetrics` struct, `write_metrics()`, per-run JSON artifact |
-| 3.3 — Error recovery (exp backoff + circuit breaker) | ✅ Done — `with_retry`, `CircuitBreaker`, 20 inline tests, thread-safe |
-| 3.4 — Diff chunking (50/50 head/tail, `Cow<str>`) | ✅ Done — integrated in pipeline, warning shown in both CI and local modes |
-| 3.5 — Enhanced CI pipeline (deny, audit, bench, docs-deploy) | ✅ Done — `ci.yml` + `docs-deploy.yml`, `benches/verdict.rs` |
+| Task                                                         | Status                                                                     |
+| ------------------------------------------------------------ | -------------------------------------------------------------------------- |
+| 3.1 — Response caching (`src/cache.rs`, `.rs-guard/cache/`)  | ✅ Done — 13 inline tests, SHA-256 keyed, TTL+size limit, atomic writes    |
+| 3.2 — Metrics export (`rs-guard-metrics.json`)               | ✅ Done — `ReviewMetrics` struct, `write_metrics()`, per-run JSON artifact |
+| 3.3 — Error recovery (exp backoff + circuit breaker)         | ✅ Done — `with_retry`, `CircuitBreaker`, 20 inline tests, thread-safe     |
+| 3.4 — Diff chunking (50/50 head/tail, `Cow<str>`)            | ✅ Done — integrated in pipeline, warning shown in both CI and local modes |
+| 3.5 — Enhanced CI pipeline (deny, audit, bench, docs-deploy) | ✅ Done — `ci.yml` + `docs-deploy.yml`, `benches/verdict.rs`               |
 
 ---
 
@@ -212,15 +212,15 @@ cargo audit
 
 ### Documentation Polish
 
-| Task | Status |
-|---|---|
-| 4.1 — Update AGENTS.md | ✅ Done |
-| 4.2 — Update CHANGELOG.md (0.1.0–0.3.0 + [Unreleased]) | ✅ Done |
+| Task                                                      | Status  |
+| --------------------------------------------------------- | ------- |
+| 4.1 — Update AGENTS.md                                    | ✅ Done |
+| 4.2 — Update CHANGELOG.md (0.1.0–0.3.0 + [Unreleased])    | ✅ Done |
 | 4.3 — README.md rewrite (keep logo, add Phase 3 features) | ✅ Done |
-| 4.4 — `docs/ARCHITECTURE.md` (Mermaid diagrams) | ✅ Done |
-| 4.5 — `docs/USAGE.md` (full CLI + troubleshooting) | ✅ Done |
-| 4.6 — `docs/API.md` (module API + custom provider guide) | ✅ Done |
-| 4.7 — Update `docs/MVP_IMPLEMENTATION_PLAN.md` | ✅ Done |
+| 4.4 — `docs/ARCHITECTURE.md` (Mermaid diagrams)           | ✅ Done |
+| 4.5 — `docs/USAGE.md` (full CLI + troubleshooting)        | ✅ Done |
+| 4.6 — `docs/API.md` (module API + custom provider guide)  | ✅ Done |
+| 4.7 — Update `docs/MVP_IMPLEMENTATION_PLAN.md`            | ✅ Done |
 
 ---
 
@@ -228,12 +228,12 @@ cargo audit
 
 ### Library Extraction Readiness
 
-| Task | Status |
-|---|---|
-| 5.1 — All public APIs documented (`#![deny(missing_docs)]`) | ✅ Done |
-| 5.2 — Test coverage >= 85% (~170 tests) | ✅ Done |
-| 5.3 — Benchmark suite for verdict parsing | ✅ Done — `benches/verdict.rs` |
-| 5.4 — Workspace deferred (single crate remains) | ✅ Done |
+| Task                                                        | Status                         |
+| ----------------------------------------------------------- | ------------------------------ |
+| 5.1 — All public APIs documented (`#![deny(missing_docs)]`) | ✅ Done                        |
+| 5.2 — Test coverage >= 85% (~170 tests)                     | ✅ Done                        |
+| 5.3 — Benchmark suite for verdict parsing                   | ✅ Done — `benches/verdict.rs` |
+| 5.4 — Workspace deferred (single crate remains)             | ✅ Done                        |
 
 ---
 
@@ -241,15 +241,15 @@ cargo audit
 
 ### crates.io Publishing & crates.ai Registration
 
-| Task | Status |
-|---|---|
-| 6.1 — Prerequisites verification (tests, clippy, fmt, deny, audit) | ✅ Done |
-| 6.2 — `Cargo.toml` metadata finalized | ✅ Done — version 0.6.0, all fields complete |
-| 6.3 — `README.md` with `cargo install` instructions | ✅ Done |
-| 6.4 — `CHANGELOG.md` with Phase 6 entry | ✅ Done |
-| 6.5 — Publish to crates.io | ✅ Done — [crates.io/crates/rs-guard](https://crates.io/crates/rs-guard) |
-| 6.6 — Register on crates.ai | ✅ Done — [crates.ai/crates/rs-guard](https://crates.ai/crates/rs-guard) |
-| 6.7 — Post-publish verification | ✅ Done |
+| Task                                                               | Status                                                                   |
+| ------------------------------------------------------------------ | ------------------------------------------------------------------------ |
+| 6.1 — Prerequisites verification (tests, clippy, fmt, deny, audit) | ✅ Done                                                                  |
+| 6.2 — `Cargo.toml` metadata finalized                              | ✅ Done — version 0.6.0, all fields complete                             |
+| 6.3 — `README.md` with `cargo install` instructions                | ✅ Done                                                                  |
+| 6.4 — `CHANGELOG.md` with Phase 6 entry                            | ✅ Done                                                                  |
+| 6.5 — Publish to crates.io                                         | ✅ Done — [crates.io/crates/rs-guard](https://crates.io/crates/rs-guard) |
+| 6.6 — Register on crates.ai                                        | ✅ Done — [crates.ai/crates/rs-guard](https://crates.ai/crates/rs-guard) |
+| 6.7 — Post-publish verification                                    | ✅ Done                                                                  |
 
 ---
 
@@ -314,6 +314,7 @@ cargo publish
 ```
 
 After publishing:
+
 - Verify the crate appears at <https://crates.io/crates/rs-guard>
 - Verify docs.rs auto-generates documentation at <https://docs.rs/rs-guard>
 
@@ -352,10 +353,10 @@ rs-guard --version
 
 Once published, update the Phase 6 status table in this file:
 
-| Task | Status |
-|---|---|
-| 6.5 — Publish to crates.io | ✅ Done — [crates.io/crates/rs-guard](https://crates.io/crates/rs-guard) |
-| 6.6 — Register on crates.ai | ✅ Done — [crates.ai/crates/rs-guard](https://crates.ai/crates/rs-guard) |
-| 6.7 — Post-publish verification | ✅ Done |
+| Task                            | Status                                                                   |
+| ------------------------------- | ------------------------------------------------------------------------ |
+| 6.5 — Publish to crates.io      | ✅ Done — [crates.io/crates/rs-guard](https://crates.io/crates/rs-guard) |
+| 6.6 — Register on crates.ai     | ✅ Done — [crates.ai/crates/rs-guard](https://crates.ai/crates/rs-guard) |
+| 6.7 — Post-publish verification | ✅ Done                                                                  |
 
 ---

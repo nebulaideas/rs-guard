@@ -93,26 +93,26 @@ rs-guard/
 
 ### Provider Support Roadmap
 
-| Provider | Phase | Base URL | Auth |
-| --- | --- | --- | --- |
-| **DeepSeek** | 1 | `https://api.deepseek.com` | `Bearer {key}` |
-| **Kimi** (Moonshot AI) | 2 | `https://api.moonshot.ai/v1` | `Bearer {key}` |
-| **Qwen** (Alibaba Cloud) | 2 | `https://dashscope-intl.aliyuncs.com/compatible-mode/v1` | `Bearer {key}` |
-| **OpenRouter** | 2 | `https://openrouter.ai/api/v1` | `Bearer {key}` + referer headers |
-| **OpenAI** (generic) | 2 | `https://api.openai.com/v1` | `Bearer {key}` |
+| Provider                 | Phase | Base URL                                                 | Auth                             |
+| ------------------------ | ----- | -------------------------------------------------------- | -------------------------------- |
+| **DeepSeek**             | 1     | `https://api.deepseek.com`                               | `Bearer {key}`                   |
+| **Kimi** (Moonshot AI)   | 2     | `https://api.moonshot.ai/v1`                             | `Bearer {key}`                   |
+| **Qwen** (Alibaba Cloud) | 2     | `https://dashscope-intl.aliyuncs.com/compatible-mode/v1` | `Bearer {key}`                   |
+| **OpenRouter**           | 2     | `https://openrouter.ai/api/v1`                           | `Bearer {key}` + referer headers |
+| **OpenAI** (generic)     | 2     | `https://api.openai.com/v1`                              | `Bearer {key}`                   |
 
 ---
 
 ## Quality Targets
 
-| Metric | Target | Tool |
-| --- | --- | --- |
-| **Test Coverage** | 85%+ | `cargo-tarpaulin` |
-| **Documentation Coverage** | 85%+ | `cargo +nightly doc --show-coverage` |
-| **Clippy** | 0 warnings | `cargo clippy -- -D warnings` |
-| **Rustfmt** | Enforced in CI | `cargo fmt --check` |
-| **License Audit** | 0 conflicts | `cargo-deny` |
-| **Security Audit** | 0 known vulnerabilities | `cargo-audit` |
+| Metric                     | Target                  | Tool                                 |
+| -------------------------- | ----------------------- | ------------------------------------ |
+| **Test Coverage**          | 85%+                    | `cargo-tarpaulin`                    |
+| **Documentation Coverage** | 85%+                    | `cargo +nightly doc --show-coverage` |
+| **Clippy**                 | 0 warnings              | `cargo clippy -- -D warnings`        |
+| **Rustfmt**                | Enforced in CI          | `cargo fmt --check`                  |
+| **License Audit**          | 0 conflicts             | `cargo-deny`                         |
+| **Security Audit**         | 0 known vulnerabilities | `cargo-audit`                        |
 
 ---
 
@@ -227,10 +227,10 @@ Create a working Rust CLI in a single crate: fetch PR diffs, call DeepSeek, pars
 pub struct Args {
     #[arg(short, long, default_value = ".github/review-prompt.md")]
     pub prompt_file: PathBuf,
-    
+
     #[arg(short, long, default_value = "deepseek-v4-flash")]
     pub model: String,
-    
+
     #[arg(short, long, default_value_t = 0.1)]
     pub temperature: f32,
 
@@ -263,6 +263,7 @@ pub struct Args {
 You are a senior software engineer performing a code review on a Pull Request diff.
 
 Review the provided diff carefully. Identify:
+
 - Critical bugs: issues that would cause runtime errors, data loss, or incorrect behavior
 - Security issues: vulnerabilities, injection risks, auth flaws, secrets exposure
 
@@ -276,6 +277,7 @@ CriticalBugs: <count>
 SecurityIssues: <count>
 
 Guidelines:
+
 - Verdict is POSITIVE if the code is fundamentally sound and ready to merge
 - Verdict is NEGATIVE if there are serious issues that should block merging
 - CriticalBugs: count of bugs that would cause incorrect behavior in production
@@ -323,22 +325,22 @@ Guidelines:
 
 ### Test Matrix for Phase 1
 
-| Test | Input | Expected |
-| --- | --- | --- |
-| Parse valid POSITIVE | `Verdict: POSITIVE, CriticalBugs: 0, SecurityIssues: 0` | `ReviewState::Approve` |
-| Parse NEGATIVE | `Verdict: NEGATIVE` | `ReviewState::RequestChanges` |
-| Parse critical > 2 | `CriticalBugs: 5` | `ReviewState::RequestChanges` |
-| Parse security > 0 | `SecurityIssues: 1` | `ReviewState::RequestChanges` |
-| Missing metadata | (no block in response) | Fallback to tag counting |
-| Tag fallback | `[Critical Bug] x3` | `ReviewState::RequestChanges` |
-| Clean tag fallback | No tags found | `ReviewState::Comment` |
-| Empty diff | GitHub returns 200 + empty | Graceful warning, exit 0 |
-| Diff too large | Diff exceeds 100KB or 1,500 lines | Submit comment explaining limit, exit 0 |
-| GitHub 404 | PR doesn't exist | Error with PR number in message |
-| GitHub 429 | Rate limited | Retry with backoff or clear error |
-| DeepSeek timeout | No response in 60s | Retry once, then error |
-| GitHub 429 | Rate limited | Retry twice with 1s/2s backoff |
-| GitHub 503 | Transient outage | Retry twice with 1s/2s backoff |
+| Test                 | Input                                                   | Expected                                |
+| -------------------- | ------------------------------------------------------- | --------------------------------------- |
+| Parse valid POSITIVE | `Verdict: POSITIVE, CriticalBugs: 0, SecurityIssues: 0` | `ReviewState::Approve`                  |
+| Parse NEGATIVE       | `Verdict: NEGATIVE`                                     | `ReviewState::RequestChanges`           |
+| Parse critical > 2   | `CriticalBugs: 5`                                       | `ReviewState::RequestChanges`           |
+| Parse security > 0   | `SecurityIssues: 1`                                     | `ReviewState::RequestChanges`           |
+| Missing metadata     | (no block in response)                                  | Fallback to tag counting                |
+| Tag fallback         | `[Critical Bug] x3`                                     | `ReviewState::RequestChanges`           |
+| Clean tag fallback   | No tags found                                           | `ReviewState::Comment`                  |
+| Empty diff           | GitHub returns 200 + empty                              | Graceful warning, exit 0                |
+| Diff too large       | Diff exceeds 100KB or 1,500 lines                       | Submit comment explaining limit, exit 0 |
+| GitHub 404           | PR doesn't exist                                        | Error with PR number in message         |
+| GitHub 429           | Rate limited                                            | Retry with backoff or clear error       |
+| DeepSeek timeout     | No response in 60s                                      | Retry once, then error                  |
+| GitHub 429           | Rate limited                                            | Retry twice with 1s/2s backoff          |
+| GitHub 503           | Transient outage                                        | Retry twice with 1s/2s backoff          |
 
 ### Changelog Entry — Phase 1
 
@@ -346,6 +348,7 @@ Guidelines:
 ## [0.1.0] — 2026-06-XX
 
 ### Added
+
 - Initial release with DeepSeek provider support (`deepseek-v4-flash`)
 - GitHub Actions integration: fetches PR diffs and submits review states
 - In-memory verdict parsing (`[RS_GUARD_VERDICT_METADATA]` block)
@@ -477,6 +480,7 @@ Extend `src/llm/` to support multiple LLM providers. Add `.reviewer.toml` config
 ## [0.2.0] — 2026-07-XX
 
 ### Added
+
 - Kimi (Moonshot AI) provider support with `kimi-k2.5` default model
 - Qwen (Alibaba Cloud) provider support with `qwen-plus` default model
 - OpenRouter provider support with unified gateway routing
@@ -490,6 +494,7 @@ Extend `src/llm/` to support multiple LLM providers. Add `.reviewer.toml` config
 - `docs/PROVIDERS.md`, `docs/CONFIGURATION.md`, `docs/LOCAL_MODE.md`
 
 ### Changed
+
 - `src/llm/` restructured with provider-per-module pattern
 - CLI argument parsing extended with provider selection
 - Configuration resolution: CLI flags > env vars > TOML file > defaults
@@ -542,8 +547,8 @@ results. These fixes ensure the foundation is solid.
 #### P0.6: DRY — Extract diff-fetch error handling (deferred)
 
 - [ ] **Deferred.** The three diff sources (file, CI, local) have genuinely different behaviors:
-  file/local print warnings, CI submits a GitHub comment for `DiffTooLarge`. Extracting
-  would introduce more complexity than it removes. Revisit if a 4th diff source is added.
+      file/local print warnings, CI submits a GitHub comment for `DiffTooLarge`. Extracting
+      would introduce more complexity than it removes. Revisit if a 4th diff source is added.
 
 #### P0.7: DRY — Shared HTTP client builder
 
@@ -663,7 +668,7 @@ Add production-hardening features: diff chunking for large PRs, response caching
 7. **src/error.rs**:
    - ~~`is_permission_denied()` only matched HTTP 403, missing GitHub Actions' 422 "not permitted" error for APPROVE reviews.~~ **FIXED**: Now matches 422 responses containing `"not permitted"`, enabling automatic fallback to COMMENT in GitHub Actions.
 
-7. **src/config.rs**:
+8. **src/config.rs**:
    - Lines 329-335: Model resolution logic is complex with multiple fallback paths.
    - The `model_set_via_cli` flag is a workaround for tracking model changes - consider a cleaner approach.
    - ~~**Missing test**: No test for `validate_local_provider_base_url` warnings.~~ **FIXED**: Added 5 tests for local provider URL validation.
@@ -677,8 +682,8 @@ Add production-hardening features: diff chunking for large PRs, response caching
 5. Metrics Filename: Use unique filenames (e.g., with timestamp) to avoid conflicts in parallel runs.
 6. Jitter Randomness: Use `rand` crate for better jitter distribution instead of deterministic modulo.
 7. ~~**Permission Fallback Coverage**: `is_permission_denied()` did not cover GitHub Actions' 422 policy restriction.~~ **COMPLETED**: 422 + `"not permitted"` now triggers fallback to COMMENT.
-7. ~~**Line Ending Simplification**: Refactor `chunk_diff` line ending logic for clarity.~~ **COMPLETED**: Simplified to detect line ending style once.
-8. ~~**Gitignore Matching**: Use exact line matching instead of `contains()` for cache directory detection.~~ **COMPLETED**: Now uses exact line matching.
+8. ~~**Line Ending Simplification**: Refactor `chunk_diff` line ending logic for clarity.~~ **COMPLETED**: Simplified to detect line ending style once.
+9. ~~**Gitignore Matching**: Use exact line matching instead of `contains()` for cache directory detection.~~ **COMPLETED**: Now uses exact line matching.
 
 #### Additional Tests Needed
 
@@ -703,6 +708,7 @@ Add production-hardening features: diff chunking for large PRs, response caching
 ## [0.3.0] — 2026-08-XX
 
 ### Added
+
 - Diff chunking for large PRs exceeding model context window
 - Response caching by diff hash (SHA-256) with configurable TTL
 - `--no-cache` flag to bypass cache
@@ -717,6 +723,7 @@ Add production-hardening features: diff chunking for large PRs, response caching
 - Cost estimation using integer cents to avoid floating point precision issues
 
 ### Changed
+
 - `fetch_pr_diff()` now returns diff + size metadata for chunking decisions
 - `LlmProvider::chat_completion()` accepts optional `max_tokens` parameter
 - Cache stores timestamp in file instead of using mtime for reliability
@@ -725,6 +732,7 @@ Add production-hardening features: diff chunking for large PRs, response caching
 - Chunking warning now shown in both CI and local modes
 
 ### Fixed
+
 - Cache `ensure_gitignored` now logs warnings on failure instead of silently failing
 - Circuit breaker is now thread-safe with `Arc<Mutex<>>` for concurrent access
 - Line ending preservation in diff chunking
@@ -760,12 +768,12 @@ echo "Act as a Principal Architect reviewing code..." > .github/review-prompt.md
 ```
 
 - [x] **Feature highlights** with icons:
-
   - Multi-provider (DeepSeek, Kimi, Qwen, OpenRouter, OpenAI)
   - In-memory verdict parsing (no intermediate comments)
   - GitHub Actions + local pre-commit support
   - Configurable prompts per repository
   - Fast: single binary, ~3s execution
+
 - [x] **Installation**: Binary download, compile from source, cargo install (when published)
 - [x] **Usage examples**: CI mode, local mode, with different providers
 - [x] **Configuration**: Link to `docs/CONFIGURATION.md`
@@ -809,6 +817,7 @@ echo "Act as a Principal Architect reviewing code..." > .github/review-prompt.md
 ## [0.4.0] — 2026-08-XX
 
 ### Added
+
 - Complete README.md with quick-start, badges, feature highlights, and usage examples
 - `docs/ARCHITECTURE.md` — System design and extension guide
 - `docs/USAGE.md` — Full CLI reference and troubleshooting
@@ -816,6 +825,7 @@ echo "Act as a Principal Architect reviewing code..." > .github/review-prompt.md
 - GitHub Pages documentation site auto-deployment
 
 ### Changed
+
 - README rewritten for clarity and completeness
 - All documentation reviewed and cross-linked
 ```
@@ -857,7 +867,6 @@ cargo doc --no-deps --open
 ##### 3. Adding a New LLM Provider
 
 - [ ] Step-by-step guide:
-
   1. Create `src/llm/{provider}.rs`
   2. Implement `{Provider}Client` struct with `chat_completion` method
   3. Add `Provider::{Provider}` variant in `src/llm/mod.rs`
@@ -867,6 +876,7 @@ cargo doc --no-deps --open
   7. Add TOML config schema in `src/config.rs`
   8. Add unit tests with mock responses
   9. Update `docs/PROVIDERS.md`
+
 - [ ] Provider implementation checklist with code review criteria
 
 ##### 4. The In-Memory Pipeline
@@ -914,6 +924,7 @@ cargo doc --no-deps --open
 ## [0.5.0] — 2026-09-XX
 
 ### Added
+
 - `docs/implementation-guide.md` — Comprehensive developer guide
 - Contributor onboarding documentation
 - Step-by-step guide for adding new LLM providers
@@ -973,6 +984,7 @@ To enable `cargo install rs-guard`, publish to [crates.io](https://crates.io):
 1. **Get a crates.io API token** at <https://crates.io/settings/tokens>
 2. **Add it as a GitHub secret**: Settings → Secrets and variables → Actions → `CRATES_TOKEN`
 3. **Tag and push a release:**
+
    ```bash
    # Bump version in Cargo.toml
    # Update CHANGELOG.md
@@ -981,12 +993,14 @@ To enable `cargo install rs-guard`, publish to [crates.io](https://crates.io):
    git tag v0.7.0
    git push origin v0.7.0
    ```
+
 4. The release workflow will:
    - Build and strip the binary
    - Upload it as a GitHub Release asset
    - Publish to crates.io via `cargo publish` (automatic, using `CRATES_TOKEN`)
 
 **To test locally before publishing:**
+
 ```bash
 # Test local install
 cargo install --path .
@@ -1007,11 +1021,13 @@ without actually uploading to crates.io.
 ## [0.6.0] — 2026-09-XX
 
 ### Added
+
 - Registered on crates.ai for project discovery
 - Published to crates.io: `cargo install rs-guard`
 - docs.rs documentation auto-generated and linked
 
 ### Changed
+
 - `Cargo.toml` metadata finalized
 - `README.md` includes `cargo install` instructions
 ```
@@ -1041,37 +1057,37 @@ Create a composite GitHub Action for one-click installation and usage:
 
 ```yaml
 # action.yml
-name: 'DiffGuard AI Code Review'
-description: 'AI-powered code review for GitHub PRs using DeepSeek, Kimi, Qwen, and more'
-author: 'NebulaIdeas'
+name: "DiffGuard AI Code Review"
+description: "AI-powered code review for GitHub PRs using DeepSeek, Kimi, Qwen, and more"
+author: "NebulaIdeas"
 
 inputs:
   provider:
-    description: 'LLM provider (deepseek, kimi, qwen, openrouter, openai)'
+    description: "LLM provider (deepseek, kimi, qwen, openrouter, openai)"
     required: false
-    default: 'deepseek'
+    default: "deepseek"
   model:
-    description: 'Model name'
+    description: "Model name"
     required: false
-    default: 'deepseek-v4-flash'
+    default: "deepseek-v4-flash"
   temperature:
-    description: 'Temperature for LLM (0.0-1.0)'
+    description: "Temperature for LLM (0.0-1.0)"
     required: false
-    default: '0.1'
+    default: "0.1"
   prompt-file:
-    description: 'Custom prompt file path'
+    description: "Custom prompt file path"
     required: false
-    default: '.github/review-prompt.md'
+    default: ".github/review-prompt.md"
   api-key:
-    description: 'LLM API key'
+    description: "LLM API key"
     required: true
   github-token:
-    description: 'GitHub token for review submission'
+    description: "GitHub token for review submission"
     required: false
     default: ${{ github.token }}
 
 runs:
-  using: 'composite'
+  using: "composite"
   steps:
     - name: Install rs-guard
       shell: bash
@@ -1079,7 +1095,7 @@ runs:
         curl -L https://github.com/nebulaideas/rs-guard/releases/latest/download/rs-guard-x86_64-unknown-linux-gnu.tar.gz | tar xz
         chmod +x rs-guard
         sudo mv rs-guard /usr/local/bin/
-    
+
     - name: Run code review
       shell: bash
       env:
@@ -1098,8 +1114,8 @@ runs:
                   --prompt-file "$RS_GUARD_PROMPT_FILE"
 
 branding:
-  icon: 'shield'
-  color: 'blue'
+  icon: "shield"
+  color: "blue"
 ```
 
 **Example workflow usage:**
@@ -1117,7 +1133,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: DiffGuard AI Review
         uses: nebulaideas/rs-guard@main
         with:
@@ -1162,7 +1178,7 @@ strategy:
 - name: Install cross (for Linux ARM64)
   if: matrix.target == 'aarch64-unknown-linux-gnu'
   run: cargo install cross
-  
+
 - name: Build with cross
   if: matrix.target == 'aarch64-unknown-linux-gnu'
   run: cross build --release --target ${{ matrix.target }}
@@ -1181,17 +1197,17 @@ use tokio::task::JoinSet;
 async fn review_diff_parallel(diff: &str, config: &Config) -> Result<Vec<FileReview>> {
     let mut set = JoinSet::new();
     let files = split_diff_by_file(diff);
-    
+
     for file_chunk in files {
         let config_clone = config.clone();
         set.spawn(async move {
             review_file_chunk(file_chunk, &config_clone).await
         });
     }
-    
+
     let mut results = Vec::new();
     while let Some(res) = set.join_next().await {
-        results.push(res??); 
+        results.push(res??);
     }
     Ok(results)
 }
@@ -1229,7 +1245,7 @@ impl IncrementalCache {
             None => true,
         }
     }
-    
+
     pub fn update(&mut self, filepath: String, content: &str, verdict: Verdict) {
         let hash = Sha256::digest(content.as_bytes());
         self.file_hashes.insert(filepath, hash.to_vec());
@@ -1254,18 +1270,18 @@ pub async fn stream_chat_completion(client: &Client, request: ChatRequest) -> Re
         .send()
         .await?
         .bytes_stream();
-    
+
     let mut buffer = String::new();
     while let Some(chunk) = stream.next().await {
         let chunk = String::from_utf8_lossy(&chunk?);
         buffer.push_str(&chunk);
-        
+
         // Try to parse verdict incrementally
         if let Some(verdict) = parse_partial_verdict(&buffer) {
             return Ok(verdict);
         }
     }
-    
+
     parse_full_verdict(&buffer)
 }
 ```
@@ -1293,10 +1309,10 @@ use tree_sitter::{Parser, Tree};
 pub fn compute_ast_hash(code: &str, language: &str) -> Result<Vec<u8>> {
     let mut parser = Parser::new();
     parser.set_language(get_language(language)?)?;
-    
+
     let tree = parser.parse(code, None)
         .ok_or_else(|| CacheError::ParseFailed)?;
-    
+
     // Hash the tree structure, not raw text
     let mut hasher = Sha256::new();
     hash_tree_node(&mut hasher, tree.root_node());
@@ -1333,7 +1349,7 @@ impl TeamCache {
             prefix: format!("rs-guard:{}", team_id),
         })
     }
-    
+
     pub fn get_verdict(&mut self, file_hash: &str) -> Option<Verdict> {
         let key = format!("{}:verdict:{}", self.prefix, file_hash);
         let result: Option<String> = redis::cmd("GET")
@@ -1369,11 +1385,11 @@ fn init_logging() {
     let fmt_layer = tracing_subscriber::fmt::layer()
         .json()
         .with_target(false);
-    
+
     let filter_layer = EnvFilter::try_from_default_env()
         .or_else(|_| EnvFilter::try_new("info"))
         .unwrap();
-    
+
     tracing_subscriber::registry()
         .with(filter_layer)
         .with(fmt_layer)
@@ -1419,7 +1435,7 @@ impl Metrics {
             "reviews_total": self.reviews_total.load(Ordering::Relaxed),
             "approve_rate": self.approve_count.load(Ordering::Relaxed) as f64 / self.reviews_total.load(Ordering::Relaxed) as f64,
             "avg_latency_ms": self.avg_latency_ms.load(Ordering::Relaxed),
-            "cache_hit_rate": self.cache_hit_count.load(Ordering::Relaxed) as f64 / 
+            "cache_hit_rate": self.cache_hit_count.load(Ordering::Relaxed) as f64 /
                 (self.cache_hit_count.load(Ordering::Relaxed) + self.cache_miss_count.load(Ordering::Relaxed)) as f64,
         }).to_string()
     }
@@ -1466,6 +1482,7 @@ if config.dry_run {
 ## [0.7.0] — 2026-XX-XX
 
 ### Added
+
 - GitHub Action wrapper (`action.yml`) for one-click installation
 - Multi-platform release builds (Linux x86_64/ARM64, macOS x86_64/ARM64, Windows x86_64)
 - `--parallel` flag for concurrent file processing (3-5x faster for large PRs)
@@ -1478,11 +1495,13 @@ if config.dry_run {
 - `--dry-run` mode for testing without submission
 
 ### Changed
+
 - Release workflow now builds 5 platform targets
 - Default logging format changed to structured JSON
 - Cache layer now supports both local file and Redis backends
 
 ### Fixed
+
 - Cross-compilation support for ARM64 architectures
 - Memory leaks in long-running parallel processing scenarios
 ```
@@ -1530,38 +1549,38 @@ if config.dry_run {
 
 ## Appendix A: Environment Variables Reference
 
-| Variable | Required By | Description |
-| --- | --- | --- |
-| `DEEPSEEK_API_KEY` | DeepSeek provider | API key from DeepSeek platform |
-| `KIMI_API_KEY` | Kimi provider | API key from Moonshot AI platform |
-| `DASHSCOPE_API_KEY` | Qwen provider | API key from Alibaba Cloud DashScope |
-| `OPENROUTER_API_KEY` | OpenRouter provider | API key from OpenRouter |
-| `OPENAI_API_KEY` | OpenAI provider | API key from OpenAI |
-| `GITHUB_TOKEN` | GitHub mode | Auto-provided by GitHub Actions |
-| `PR_NUMBER` | GitHub mode | Pull request number |
-| `REPO_FULL_NAME` | GitHub mode | Repository in `owner/repo` format |
-| `GITHUB_ACTIONS` | Auto-detected | Presence indicates CI mode |
+| Variable             | Required By         | Description                          |
+| -------------------- | ------------------- | ------------------------------------ |
+| `DEEPSEEK_API_KEY`   | DeepSeek provider   | API key from DeepSeek platform       |
+| `KIMI_API_KEY`       | Kimi provider       | API key from Moonshot AI platform    |
+| `DASHSCOPE_API_KEY`  | Qwen provider       | API key from Alibaba Cloud DashScope |
+| `OPENROUTER_API_KEY` | OpenRouter provider | API key from OpenRouter              |
+| `OPENAI_API_KEY`     | OpenAI provider     | API key from OpenAI                  |
+| `GITHUB_TOKEN`       | GitHub mode         | Auto-provided by GitHub Actions      |
+| `PR_NUMBER`          | GitHub mode         | Pull request number                  |
+| `REPO_FULL_NAME`     | GitHub mode         | Repository in `owner/repo` format    |
+| `GITHUB_ACTIONS`     | Auto-detected       | Presence indicates CI mode           |
 
 ## Appendix B: CLI Flags Reference
 
-| Flag | Short | Default | Description |
-| --- | --- | --- | --- |
-| `--prompt-file` | `-p` | `.github/review-prompt.md` | Path to system prompt markdown file |
-| `--model` | `-m` | (provider-specific) | LLM model identifier |
-| `--temperature` | `-t` | `0.1` | Sampling temperature (0.0 - 2.0) |
-| `--provider` | | `deepseek` | LLM provider to use |
-| `--config` | `-c` | `.reviewer.toml` | Path to configuration TOML file (Phase 2) |
-| `--no-cache` | | | Bypass response cache (Phase 3) |
-| `--help` | `-h` | | Display help |
-| `--version` | `-V` | | Display version |
+| Flag            | Short | Default                    | Description                               |
+| --------------- | ----- | -------------------------- | ----------------------------------------- |
+| `--prompt-file` | `-p`  | `.github/review-prompt.md` | Path to system prompt markdown file       |
+| `--model`       | `-m`  | (provider-specific)        | LLM model identifier                      |
+| `--temperature` | `-t`  | `0.1`                      | Sampling temperature (0.0 - 2.0)          |
+| `--provider`    |       | `deepseek`                 | LLM provider to use                       |
+| `--config`      | `-c`  | `.reviewer.toml`           | Path to configuration TOML file (Phase 2) |
+| `--no-cache`    |       |                            | Bypass response cache (Phase 3)           |
+| `--help`        | `-h`  |                            | Display help                              |
+| `--version`     | `-V`  |                            | Display version                           |
 
 ## Appendix C: Exit Codes
 
-| Code | Meaning |
-| --- | --- |
-| `0` | Review completed successfully |
-| `1` | Error occurred (API failure, parse error, config error, etc.) |
-| `2` | Local mode only: review returned `REQUEST_CHANGES` (blocks commit) |
+| Code | Meaning                                                            |
+| ---- | ------------------------------------------------------------------ |
+| `0`  | Review completed successfully                                      |
+| `1`  | Error occurred (API failure, parse error, config error, etc.)      |
+| `2`  | Local mode only: review returned `REQUEST_CHANGES` (blocks commit) |
 
 ## Appendix D: Review State Logic
 
@@ -1595,22 +1614,22 @@ The root `LICENSE` file is **MIT** (Copyright 2026 Nebula Ideas). Earlier versio
 
 Record of architectural and design decisions made during implementation.
 
-| Date | Decision | Option Chosen | Rationale |
-| ------ | ---------- | --------------- | ----------- |
-| 2026-06-07 | P0.1: Exit signal mechanism | `PipelineResult` enum | Keeps `run_pipeline` testable; semantically clear vs `anyhow::Result<i32>` or error variant abuse |
-| 2026-06-07 | P0.3: Testing print functions | Refactor to `impl Write` | Enables fast, deterministic buffer-based testing; small refactor cost |
-| 2026-06-07 | 3.1: Cache location | `.rs-guard/cache/` (project-local) | Per-project isolation; auto-gitignore for convenience |
-| 2026-06-07 | 3.3: Circuit breaker complexity | Simple Closed/Open only, opt-in, default disabled | 90% of value for 10% of complexity; half-open tracking adds ~80 LOC for rare edge case |
-| 2026-06-07 | 3.4: Truncation defaults | 50 head / 50 tail lines | Reasonable balance for most model context windows (~8K tokens) |
-| 2026-06-07 | 3.5: Benchmark library | Criterion (0.5) with HTML reports | Industry standard, stable Rust support, detailed output |
-| 2026-06-07 | 3.5: Docs deploy | GitHub Pages via `actions/deploy-pages@v4` | Free, zero-config, auto-updates on push to main |
-| 2026-06-07 | Code Review: Cache timestamp | Store timestamp in file instead of mtime | mtime is unreliable (system clock changes, file copies); file content is authoritative |
-| 2026-06-07 | Code Review: Cache size limit | 100MB default with LRU cleanup | Prevents unbounded disk usage; LRU ensures most useful entries are kept |
-| 2026-06-07 | Code Review: Circuit breaker thread safety | `Arc<Mutex<>>` wrapping internal state | Enables safe concurrent access from multiple async tasks |
-| 2026-06-07 | Code Review: Cost calculation | Integer cents instead of floating point | Avoids floating point precision issues; simpler arithmetic |
-| 2026-06-07 | Code Review: Chunking allocation | `Cow<str>` return type | Avoids allocation when no chunking needed; zero-cost abstraction |
-| 2026-06-07 | Code Review: Output error handling | Return `io::Result` from print functions | Proper error propagation instead of silently ignoring I/O errors |
-| 2026-06-07 | Code Review: Chunking warning consistency | Show warning in both CI and local modes | Consistent user experience; users should know when diff is truncated |
-| 2026-06-07 | Code Review: CI dependency caching | `Swatinem/rust-cache@v2` | Significantly speeds up CI builds by caching dependencies |
-| 2026-06-07 | P0.6: DRY diff-fetch handling | **Deferred** | Three diff sources have different behavior (CI submits GitHub comment); extraction would add complexity |
-| 2026-06-08 | CI: GitHub Actions APPROVE restriction | 422 fallback to COMMENT | GitHub Actions `GITHUB_TOKEN` returns HTTP 422 (not 403) for APPROVE reviews; `is_permission_denied()` now matches 422 + `"not permitted"` message |
+| Date       | Decision                                   | Option Chosen                                     | Rationale                                                                                                                                          |
+| ---------- | ------------------------------------------ | ------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 2026-06-07 | P0.1: Exit signal mechanism                | `PipelineResult` enum                             | Keeps `run_pipeline` testable; semantically clear vs `anyhow::Result<i32>` or error variant abuse                                                  |
+| 2026-06-07 | P0.3: Testing print functions              | Refactor to `impl Write`                          | Enables fast, deterministic buffer-based testing; small refactor cost                                                                              |
+| 2026-06-07 | 3.1: Cache location                        | `.rs-guard/cache/` (project-local)                | Per-project isolation; auto-gitignore for convenience                                                                                              |
+| 2026-06-07 | 3.3: Circuit breaker complexity            | Simple Closed/Open only, opt-in, default disabled | 90% of value for 10% of complexity; half-open tracking adds ~80 LOC for rare edge case                                                             |
+| 2026-06-07 | 3.4: Truncation defaults                   | 50 head / 50 tail lines                           | Reasonable balance for most model context windows (~8K tokens)                                                                                     |
+| 2026-06-07 | 3.5: Benchmark library                     | Criterion (0.5) with HTML reports                 | Industry standard, stable Rust support, detailed output                                                                                            |
+| 2026-06-07 | 3.5: Docs deploy                           | GitHub Pages via `actions/deploy-pages@v4`        | Free, zero-config, auto-updates on push to main                                                                                                    |
+| 2026-06-07 | Code Review: Cache timestamp               | Store timestamp in file instead of mtime          | mtime is unreliable (system clock changes, file copies); file content is authoritative                                                             |
+| 2026-06-07 | Code Review: Cache size limit              | 100MB default with LRU cleanup                    | Prevents unbounded disk usage; LRU ensures most useful entries are kept                                                                            |
+| 2026-06-07 | Code Review: Circuit breaker thread safety | `Arc<Mutex<>>` wrapping internal state            | Enables safe concurrent access from multiple async tasks                                                                                           |
+| 2026-06-07 | Code Review: Cost calculation              | Integer cents instead of floating point           | Avoids floating point precision issues; simpler arithmetic                                                                                         |
+| 2026-06-07 | Code Review: Chunking allocation           | `Cow<str>` return type                            | Avoids allocation when no chunking needed; zero-cost abstraction                                                                                   |
+| 2026-06-07 | Code Review: Output error handling         | Return `io::Result` from print functions          | Proper error propagation instead of silently ignoring I/O errors                                                                                   |
+| 2026-06-07 | Code Review: Chunking warning consistency  | Show warning in both CI and local modes           | Consistent user experience; users should know when diff is truncated                                                                               |
+| 2026-06-07 | Code Review: CI dependency caching         | `Swatinem/rust-cache@v2`                          | Significantly speeds up CI builds by caching dependencies                                                                                          |
+| 2026-06-07 | P0.6: DRY diff-fetch handling              | **Deferred**                                      | Three diff sources have different behavior (CI submits GitHub comment); extraction would add complexity                                            |
+| 2026-06-08 | CI: GitHub Actions APPROVE restriction     | 422 fallback to COMMENT                           | GitHub Actions `GITHUB_TOKEN` returns HTTP 422 (not 403) for APPROVE reviews; `is_permission_denied()` now matches 422 + `"not permitted"` message |

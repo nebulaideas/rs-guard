@@ -26,11 +26,11 @@ export DEEPSEEK_API_KEY="your-api-key"
 
 ### Provider Details
 
-| Key | Value |
-|---|---|
-| Base URL | `https://api.deepseek.com` |
-| Default Model | `deepseek-v4-flash` |
-| Auth Header | `Bearer {DEEPSEEK_API_KEY}` |
+| Key           | Value                       |
+| ------------- | --------------------------- |
+| Base URL      | `https://api.deepseek.com`  |
+| Default Model | `deepseek-v4-flash`         |
+| Auth Header   | `Bearer {DEEPSEEK_API_KEY}` |
 
 ### CLI Usage
 
@@ -69,11 +69,11 @@ export KIMI_API_KEY="your-api-key"
 
 ### Provider Details
 
-| Key | Value |
-|---|---|
-| Base URL | `https://api.moonshot.ai/v1` |
-| Default Model | `kimi-k2.5` |
-| Auth Header | `Bearer {KIMI_API_KEY}` |
+| Key             | Value                             |
+| --------------- | --------------------------------- |
+| Base URL        | `https://api.moonshot.ai/v1`      |
+| Default Model   | `kimi-k2.5`                       |
+| Auth Header     | `Bearer {KIMI_API_KEY}`           |
 | Special Feature | `reasoning_content` field support |
 
 ### CLI Usage
@@ -113,12 +113,12 @@ export DASHSCOPE_API_KEY="your-api-key"
 
 ### Provider Details
 
-| Key | Value |
-|---|---|
-| Base URL | `https://dashscope-intl.aliyuncs.com/compatible-mode/v1` |
-| Default Model | `qwen-plus` |
-| Auth Header | `Bearer {DASHSCOPE_API_KEY}` |
-| Special Feature | Requires `result_format: "message"` in requests |
+| Key             | Value                                                    |
+| --------------- | -------------------------------------------------------- |
+| Base URL        | `https://dashscope-intl.aliyuncs.com/compatible-mode/v1` |
+| Default Model   | `qwen-plus`                                              |
+| Auth Header     | `Bearer {DASHSCOPE_API_KEY}`                             |
+| Special Feature | Requires `result_format: "message"` in requests          |
 
 ### CLI Usage
 
@@ -157,12 +157,12 @@ export OPENROUTER_API_KEY="your-api-key"
 
 ### Provider Details
 
-| Key | Value |
-|---|---|
-| Base URL | `https://openrouter.ai/api/v1` |
-| Default Model | `openai/gpt-4o-mini` |
-| Auth Header | `Bearer {OPENROUTER_API_KEY}` |
-| Extra Headers | `HTTP-Referer`, `X-Title` |
+| Key           | Value                          |
+| ------------- | ------------------------------ |
+| Base URL      | `https://openrouter.ai/api/v1` |
+| Default Model | `openai/gpt-4o-mini`           |
+| Auth Header   | `Bearer {OPENROUTER_API_KEY}`  |
+| Extra Headers | `HTTP-Referer`, `X-Title`      |
 
 ### CLI Usage
 
@@ -217,12 +217,12 @@ export OPENAI_API_KEY="your-api-key"
 
 ### Provider Details
 
-| Key | Value |
-|---|---|
-| Base URL | `https://api.openai.com/v1` |
-| Default Model | `gpt-4o-mini` |
-| Auth Header | `Bearer {OPENAI_API_KEY}` |
-| Note | Generic OpenAI-compatible; works with custom endpoints |
+| Key           | Value                                                  |
+| ------------- | ------------------------------------------------------ |
+| Base URL      | `https://api.openai.com/v1`                            |
+| Default Model | `gpt-4o-mini`                                          |
+| Auth Header   | `Bearer {OPENAI_API_KEY}`                              |
+| Note          | Generic OpenAI-compatible; works with custom endpoints |
 
 ### CLI Usage
 
@@ -268,10 +268,10 @@ base_url = "http://localhost:11434/v1"
 
 ## Environment Variables Reference
 
-| Variable | Provider | Required When |
-|---|---|---|
-| `DEEPSEEK_API_KEY` | DeepSeek | `--provider deepseek` (default) |
-| `KIMI_API_KEY` | Kimi | `--provider kimi` |
-| `DASHSCOPE_API_KEY` | Qwen | `--provider qwen` |
-| `OPENROUTER_API_KEY` | OpenRouter | `--provider openrouter` |
-| `OPENAI_API_KEY` | OpenAI | `--provider openai` |
+| Variable             | Provider   | Required When                   |
+| -------------------- | ---------- | ------------------------------- |
+| `DEEPSEEK_API_KEY`   | DeepSeek   | `--provider deepseek` (default) |
+| `KIMI_API_KEY`       | Kimi       | `--provider kimi`               |
+| `DASHSCOPE_API_KEY`  | Qwen       | `--provider qwen`               |
+| `OPENROUTER_API_KEY` | OpenRouter | `--provider openrouter`         |
+| `OPENAI_API_KEY`     | OpenAI     | `--provider openai`             |

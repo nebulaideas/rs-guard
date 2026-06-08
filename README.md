@@ -142,23 +142,23 @@ See [docs/USAGE.md](docs/USAGE.md) for the complete reference including all envi
 
 ## Environment Variables
 
-| Variable | When Required | Description |
-|---|---|---|
-| `DEEPSEEK_API_KEY` | DeepSeek provider | [DeepSeek Platform](https://platform.deepseek.com) |
-| `KIMI_API_KEY` | Kimi provider | [Moonshot AI](https://platform.moonshot.cn) |
-| `DASHSCOPE_API_KEY` | Qwen provider | [Alibaba Cloud DashScope](https://dashscope.aliyun.com) |
-| `OPENROUTER_API_KEY` | OpenRouter provider | [OpenRouter](https://openrouter.ai) |
-| `OPENAI_API_KEY` | OpenAI provider | [OpenAI Platform](https://platform.openai.com) |
-| `GITHUB_TOKEN` | CI mode | Auto-provided by GitHub Actions |
-| `PR_NUMBER` | CI mode | Pull request number |
-| `REPO_FULL_NAME` | CI mode | Repository in `owner/repo` format |
-| `RS_GUARD_PROVIDER` | Optional | Override provider via env var |
-| `RS_GUARD_MODEL` | Optional | Override model via env var |
-| `RS_GUARD_TEMPERATURE` | Optional | Override temperature via env var |
-| `RS_GUARD_MAX_TOKENS` | Optional | Override max tokens via env var |
-| `RS_GUARD_DIFF_FILE` | Optional | Path to a pre-existing diff file |
-| `RS_GUARD_METRICS_PATH` | Optional | Path for the metrics JSON artifact |
-| `GITHUB_API_URL` | Optional | Custom GitHub API base URL (Enterprise) |
+| Variable                | When Required       | Description                                             |
+| ----------------------- | ------------------- | ------------------------------------------------------- |
+| `DEEPSEEK_API_KEY`      | DeepSeek provider   | [DeepSeek Platform](https://platform.deepseek.com)      |
+| `KIMI_API_KEY`          | Kimi provider       | [Moonshot AI](https://platform.moonshot.cn)             |
+| `DASHSCOPE_API_KEY`     | Qwen provider       | [Alibaba Cloud DashScope](https://dashscope.aliyun.com) |
+| `OPENROUTER_API_KEY`    | OpenRouter provider | [OpenRouter](https://openrouter.ai)                     |
+| `OPENAI_API_KEY`        | OpenAI provider     | [OpenAI Platform](https://platform.openai.com)          |
+| `GITHUB_TOKEN`          | CI mode             | Auto-provided by GitHub Actions                         |
+| `PR_NUMBER`             | CI mode             | Pull request number                                     |
+| `REPO_FULL_NAME`        | CI mode             | Repository in `owner/repo` format                       |
+| `RS_GUARD_PROVIDER`     | Optional            | Override provider via env var                           |
+| `RS_GUARD_MODEL`        | Optional            | Override model via env var                              |
+| `RS_GUARD_TEMPERATURE`  | Optional            | Override temperature via env var                        |
+| `RS_GUARD_MAX_TOKENS`   | Optional            | Override max tokens via env var                         |
+| `RS_GUARD_DIFF_FILE`    | Optional            | Path to a pre-existing diff file                        |
+| `RS_GUARD_METRICS_PATH` | Optional            | Path for the metrics JSON artifact                      |
+| `GITHUB_API_URL`        | Optional            | Custom GitHub API base URL (Enterprise)                 |
 
 See [docs/PROVIDERS.md](docs/PROVIDERS.md) for per-provider setup details.
 
@@ -229,11 +229,11 @@ All LLM processing is in-memory. No intermediate comments are posted during anal
 
 ## Exit Codes
 
-| Code | Meaning |
-|---|---|
-| `0` | Review completed successfully |
-| `1` | Error occurred (API failure, config error, parse error, etc.) |
-| `2` | Local mode only: review returned `REQUEST_CHANGES` (commit blocked) |
+| Code | Meaning                                                             |
+| ---- | ------------------------------------------------------------------- |
+| `0`  | Review completed successfully                                       |
+| `1`  | Error occurred (API failure, config error, parse error, etc.)       |
+| `2`  | Local mode only: review returned `REQUEST_CHANGES` (commit blocked) |
 
 ---
 
@@ -267,15 +267,15 @@ cargo doc --no-deps --open
 
 ## Documentation
 
-| Document | Description |
-|---|---|
-| [docs/INSTALLATION.md](docs/INSTALLATION.md) | **Complete installation guide** for all platforms (Linux, macOS, Windows) |
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | System design, Mermaid diagrams, security model |
-| [docs/USAGE.md](docs/USAGE.md) | Full CLI reference, GitHub Actions guide, troubleshooting |
-| [docs/API.md](docs/API.md) | Module API docs, custom provider implementation guide |
-| [docs/PROVIDERS.md](docs/PROVIDERS.md) | Per-provider setup and API key acquisition |
-| [docs/CONFIGURATION.md](docs/CONFIGURATION.md) | `.reviewer.toml` full schema reference |
-| [docs/LOCAL_MODE.md](docs/LOCAL_MODE.md) | Pre-commit hook setup |
+| Document                                       | Description                                                               |
+| ---------------------------------------------- | ------------------------------------------------------------------------- |
+| [docs/INSTALLATION.md](docs/INSTALLATION.md)   | **Complete installation guide** for all platforms (Linux, macOS, Windows) |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)   | System design, Mermaid diagrams, security model                           |
+| [docs/USAGE.md](docs/USAGE.md)                 | Full CLI reference, GitHub Actions guide, troubleshooting                 |
+| [docs/API.md](docs/API.md)                     | Module API docs, custom provider implementation guide                     |
+| [docs/PROVIDERS.md](docs/PROVIDERS.md)         | Per-provider setup and API key acquisition                                |
+| [docs/CONFIGURATION.md](docs/CONFIGURATION.md) | `.reviewer.toml` full schema reference                                    |
+| [docs/LOCAL_MODE.md](docs/LOCAL_MODE.md)       | Pre-commit hook setup                                                     |
 
 ---
 
