@@ -38,7 +38,8 @@ fn local_config() -> Config {
     c
 }
 
-const VALID_DIFF: &str = "diff --git a/f.rs b/f.rs\n--- a/f.rs\n+++ b/f.rs\n@@ -1 +1,2 @@\n+line1\n line0";
+const VALID_DIFF: &str =
+    "diff --git a/f.rs b/f.rs\n--- a/f.rs\n+++ b/f.rs\n@@ -1 +1,2 @@\n+line1\n line0";
 
 const POSITIVE_RESPONSE: &str = "Looks good.\n\n[DIFFGUARD_VERDICT_METADATA]\nVerdict: POSITIVE\nCriticalBugs: 0\nSecurityIssues: 0";
 
@@ -152,7 +153,9 @@ async fn test_full_pipeline_ci_dismisses_previous_reviews() {
 
     // Dismissal succeeds
     Mock::given(method("PUT"))
-        .and(path_regex(r"/repos/test-owner/test-repo/pulls/\d+/reviews/\d+/dismissals"))
+        .and(path_regex(
+            r"/repos/test-owner/test-repo/pulls/\d+/reviews/\d+/dismissals",
+        ))
         .respond_with(ResponseTemplate::new(200))
         .mount(&github)
         .await;
@@ -220,7 +223,8 @@ async fn test_full_pipeline_cache_hit() {
     let llm = MockServer::start().await;
 
     // Use unique diff content to avoid cache collisions with other tests
-    let unique_diff = format!("diff --git a/unique{}.rs b/unique{}.rs\n+line{}", 
+    let unique_diff = format!(
+        "diff --git a/unique{}.rs b/unique{}.rs\n+line{}",
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
@@ -389,4 +393,32 @@ async fn test_full_pipeline_local_blocked() {
 
     let result = run_pipeline(config, Some(diff_path.to_str().unwrap())).await;
     assert!(matches!(result, Ok(PipelineResult::ReviewBlocked)));
+}
+
+#[tokio::test]
+async fn test_full_pipeline_circuit_breaker_opens_on_repeated_failures() {
+    let github = MockServer::start().await;
+    let llm = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path_regex(r"/repos/test-owner/test-repo/pulls/\d+"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(VALID_DIFF))
+        .mount(&github)
+        .await;
+
+    // LLM server returns 500 errors - this will trigger retries and eventually fail
+    Mock::given(method("POST"))
+        .and(path_regex(r"/chat/completions"))
+        .respond_with(ResponseTemplate::new(500).set_body_string("Internal Server Error"))
+        .mount(&llm)
+        .await;
+
+    let mut config = ci_config(42, "deepseek", "test-token");
+    config.github_base_url = github.uri();
+    config.provider_config.base_url = Some(llm.uri());
+    config.no_cache = true; // Disable cache to avoid conflicts
+
+    // The call should fail after retries due to repeated 500 errors
+    let result = run_pipeline(config, None).await;
+    assert!(result.is_err());
 }

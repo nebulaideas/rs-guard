@@ -469,11 +469,7 @@ mod tests {
     async fn test_retry_with_circuit_breaker_records_success() {
         let cb = CircuitBreaker::new(3, 60);
 
-        let result = with_retry(
-            || async { Ok::<_, DiffguardError>("ok") },
-            Some(&cb),
-        )
-        .await;
+        let result = with_retry(|| async { Ok::<_, DiffguardError>("ok") }, Some(&cb)).await;
 
         assert!(result.is_ok());
         assert_eq!(cb.failure_count(), 0);
@@ -551,5 +547,24 @@ mod tests {
         // Circuit should be open (threshold was 5, we had 10 failures)
         assert_eq!(cb.current_state(), CircuitState::Open);
         assert_eq!(cb.failure_count(), 10);
+    }
+
+    #[tokio::test]
+    async fn test_circuit_breaker_auto_reset_after_cooldown() {
+        // Create a circuit breaker with a very short cooldown (1 second)
+        let cb = CircuitBreaker::new(2, 1);
+
+        // Record failures to open the circuit
+        cb.record_failure();
+        cb.record_failure();
+        assert_eq!(cb.current_state(), CircuitState::Open);
+
+        // Wait for cooldown to expire
+        tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+
+        // Next success should reset the circuit to closed
+        cb.record_success();
+        assert_eq!(cb.current_state(), CircuitState::Closed);
+        assert_eq!(cb.failure_count(), 0);
     }
 }

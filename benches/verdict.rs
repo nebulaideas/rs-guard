@@ -23,7 +23,8 @@ fn bench_evaluate_by_tags(c: &mut Criterion) {
 }
 
 fn bench_parse_no_metadata(c: &mut Criterion) {
-    let response = "Everything looks good. No issues found in this PR. The code is clean and well-structured.";
+    let response =
+        "Everything looks good. No issues found in this PR. The code is clean and well-structured.";
 
     c.bench_function("parse_no_metadata_fallback", |b| {
         b.iter(|| {

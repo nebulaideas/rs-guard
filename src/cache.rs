@@ -62,6 +62,60 @@ impl Default for CacheConfig {
     }
 }
 
+/// Cache key components that uniquely identify a cache entry.
+#[derive(Debug, Clone)]
+struct CacheKey {
+    /// SHA-256 hash of the diff content.
+    diff_hash: String,
+    /// SHA-256 hash of the prompt.
+    prompt_hash: String,
+    /// Provider name.
+    provider: String,
+    /// Model identifier.
+    model: String,
+    /// Sampling temperature.
+    temperature: f32,
+}
+
+impl CacheKey {
+    /// Creates a new cache key from the given components.
+    fn new(
+        diff_content: &str,
+        prompt: &str,
+        provider: &str,
+        model: &str,
+        temperature: f32,
+    ) -> Self {
+        let diff_hash = hash_content(diff_content);
+        let prompt_hash = hash_content(prompt);
+        Self {
+            diff_hash,
+            prompt_hash,
+            provider: provider.to_string(),
+            model: model.to_string(),
+            temperature,
+        }
+    }
+
+    /// Returns the cache key as a hex string.
+    fn as_string(&self) -> String {
+        let mut hasher = Sha256::new();
+        hasher.update(self.diff_hash.as_bytes());
+        hasher.update(self.prompt_hash.as_bytes());
+        hasher.update(self.provider.as_bytes());
+        hasher.update(self.model.as_bytes());
+        hasher.update(self.temperature.to_le_bytes());
+        hex::encode(hasher.finalize())
+    }
+}
+
+/// Computes a hex-encoded SHA-256 hash of the given content.
+fn hash_content(content: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(content.as_bytes());
+    hex::encode(hasher.finalize())
+}
+
 /// Computes a hex-encoded SHA-256 hash of the given diff content.
 ///
 /// The hash is used as the cache key.
@@ -74,9 +128,7 @@ impl Default for CacheConfig {
 /// assert_eq!(hash.len(), 64);
 /// ```
 pub fn diff_hash(content: &str) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(content.as_bytes());
-    hex::encode(hasher.finalize())
+    hash_content(content)
 }
 
 /// Cache for LLM review responses indexed by diff content hash.
@@ -109,14 +161,15 @@ impl DiffCache {
 
     /// Returns the cache file path for a given hash key.
     fn cache_path(&self, key: &str) -> PathBuf {
-        self.config.cache_dir.join(format!("{}.{}", key, CACHE_FILE_EXT))
+        self.config
+            .cache_dir
+            .join(format!("{}.{}", key, CACHE_FILE_EXT))
     }
 
     /// Ensures the cache directory exists, creating it if necessary.
     fn ensure_cache_dir(&self) -> Result<(), DiffguardError> {
-        fs::create_dir_all(&self.config.cache_dir).map_err(|e| {
-            DiffguardError::Config(format!("Failed to create cache dir: {}", e))
-        })
+        fs::create_dir_all(&self.config.cache_dir)
+            .map_err(|e| DiffguardError::Config(format!("Failed to create cache dir: {}", e)))
     }
 
     /// Returns the current time as seconds since Unix epoch.
@@ -164,14 +217,26 @@ impl DiffCache {
     ///
     /// # Arguments
     ///
-    /// * `content` — Diff content to hash and look up.
-    pub fn get(&self, content: &str) -> Option<String> {
+    /// * `diff_content` — Diff content to hash and look up.
+    /// * `prompt` — System prompt used for the review.
+    /// * `provider` — LLM provider name.
+    /// * `model` — Model identifier.
+    /// * `temperature` — Sampling temperature.
+    pub fn get(
+        &self,
+        diff_content: &str,
+        prompt: &str,
+        provider: &str,
+        model: &str,
+        temperature: f32,
+    ) -> Option<String> {
         if !self.config.enabled {
             return None;
         }
 
-        let key = diff_hash(content);
-        let path = self.cache_path(&key);
+        let key = CacheKey::new(diff_content, prompt, provider, model, temperature);
+        let key_str = key.as_string();
+        let path = self.cache_path(&key_str);
 
         if !path.exists() {
             return None;
@@ -179,11 +244,11 @@ impl DiffCache {
 
         match self.read_entry(&path) {
             Some(response) => {
-                log::debug!("Cache hit for diff hash: {}", key);
+                log::debug!("Cache hit for cache key: {}", key_str);
                 Some(response)
             }
             None => {
-                log::debug!("Cache miss or expired entry for diff hash: {}", key);
+                log::debug!("Cache miss or expired entry for cache key: {}", key_str);
                 None
             }
         }
@@ -199,24 +264,47 @@ impl DiffCache {
     ///
     /// # Arguments
     ///
-    /// * `content` — Diff content to hash and key by.
+    /// * `diff_content` — Diff content to hash and key by.
+    /// * `prompt` — System prompt used for the review.
+    /// * `provider` — LLM provider name.
+    /// * `model` — Model identifier.
+    /// * `temperature` — Sampling temperature.
     /// * `response` — The LLM response text to cache.
     ///
     /// # Errors
     ///
     /// Returns [`DiffguardError::Io`] if the file cannot be written.
-    pub fn set(&self, content: &str, response: &str) -> Result<(), DiffguardError> {
+    pub fn set(
+        &self,
+        diff_content: &str,
+        prompt: &str,
+        provider: &str,
+        model: &str,
+        temperature: f32,
+        response: &str,
+    ) -> Result<(), DiffguardError> {
         if !self.config.enabled {
             return Ok(());
         }
 
-        let key = diff_hash(content);
-        let path = self.cache_path(&key);
+        let key = CacheKey::new(diff_content, prompt, provider, model, temperature);
+        let key_str = key.as_string();
+        let path = self.cache_path(&key_str);
 
-        // Write to temp file in same directory, then atomically rename
-        let tmp_path = path.with_extension("tmp");
+        // Write to temp file with unique name in same directory, then atomically rename
+        // Use timestamp + random component for uniqueness to prevent symlink attacks
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let tmp_filename = format!("{}.{}.tmp", key_str, timestamp);
+        let tmp_path = self.config.cache_dir.join(&tmp_filename);
+
         {
-            let mut tmp = fs::File::create(&tmp_path)?;
+            let mut tmp = fs::File::options()
+                .write(true)
+                .create_new(true)
+                .open(&tmp_path)?;
 
             // Write timestamp as first line
             writeln!(tmp, "{}", Self::now_secs())?;
@@ -228,7 +316,7 @@ impl DiffCache {
 
         fs::rename(&tmp_path, &path)?;
 
-        log::debug!("Cached response for diff hash: {}", key);
+        log::debug!("Cached response for cache key: {}", key_str);
 
         // Check size limit and cleanup if needed
         self.enforce_size_limit()?;
@@ -241,7 +329,10 @@ impl DiffCache {
         let mut total = 0u64;
 
         let entries = fs::read_dir(&self.config.cache_dir).map_err(|e| {
-            DiffguardError::Io(std::io::Error::other(format!("Failed to read cache dir: {}", e)))
+            DiffguardError::Io(std::io::Error::other(format!(
+                "Failed to read cache dir: {}",
+                e
+            )))
         })?;
 
         for entry in entries.flatten() {
@@ -269,25 +360,31 @@ impl DiffCache {
             self.config.max_size_bytes
         );
 
-        // Collect all cache files with their modification times
-        let mut files: Vec<(PathBuf, SystemTime)> = Vec::new();
+        // Collect all cache files with their stored timestamps
+        let mut files: Vec<(PathBuf, u64)> = Vec::new();
 
         let entries = fs::read_dir(&self.config.cache_dir).map_err(|e| {
-            DiffguardError::Io(std::io::Error::other(format!("Failed to read cache dir: {}", e)))
+            DiffguardError::Io(std::io::Error::other(format!(
+                "Failed to read cache dir: {}",
+                e
+            )))
         })?;
 
         for entry in entries.flatten() {
             let path = entry.path();
             if path.extension().and_then(|e| e.to_str()) == Some(CACHE_FILE_EXT) {
-                if let Ok(metadata) = entry.metadata() {
-                    if let Ok(modified) = metadata.modified() {
-                        files.push((path, modified));
+                // Read the stored timestamp from the first line of the file
+                if let Ok(content) = fs::read_to_string(&path) {
+                    if let Some(first_line) = content.lines().next() {
+                        if let Ok(timestamp) = first_line.parse::<u64>() {
+                            files.push((path, timestamp));
+                        }
                     }
                 }
             }
         }
 
-        // Sort by modification time (oldest first)
+        // Sort by stored timestamp (oldest first)
         files.sort_by_key(|a| a.1);
 
         // Remove oldest files until we're under the limit
@@ -323,10 +420,14 @@ impl DiffCache {
         let gitignore_path = Path::new(".gitignore");
         let entry = format!("{}/\n", DEFAULT_CACHE_DIR);
 
-        // Check if entry already exists
+        // Check if entry already exists using exact line matching
         match fs::read_to_string(gitignore_path) {
             Ok(content) => {
-                if content.contains(&entry) || content.contains(DEFAULT_CACHE_DIR) {
+                // Check for exact line match (with or without trailing slash)
+                let has_entry = content.lines().any(|line| {
+                    line == DEFAULT_CACHE_DIR || line == format!("{}/", DEFAULT_CACHE_DIR)
+                });
+                if has_entry {
                     return;
                 }
             }
@@ -364,7 +465,10 @@ impl DiffCache {
     /// or files cannot be removed.
     pub fn clear(&self) -> Result<(), DiffguardError> {
         let entries = fs::read_dir(&self.config.cache_dir).map_err(|e| {
-            DiffguardError::Io(std::io::Error::other(format!("Failed to read cache dir: {}", e)))
+            DiffguardError::Io(std::io::Error::other(format!(
+                "Failed to read cache dir: {}",
+                e
+            )))
         })?;
 
         for entry in entries.flatten() {
@@ -385,7 +489,10 @@ impl DiffCache {
         let mut total_size = 0u64;
 
         let entries = fs::read_dir(&self.config.cache_dir).map_err(|e| {
-            DiffguardError::Io(std::io::Error::other(format!("Failed to read cache dir: {}", e)))
+            DiffguardError::Io(std::io::Error::other(format!(
+                "Failed to read cache dir: {}",
+                e
+            )))
         })?;
 
         for entry in entries.flatten() {
@@ -439,6 +546,82 @@ mod tests {
     }
 
     #[test]
+    fn test_cache_key_includes_all_parameters() {
+        let key1 = CacheKey::new("diff", "prompt", "deepseek", "model", 0.1);
+        let key2 = CacheKey::new("diff", "prompt", "deepseek", "model", 0.1);
+        let key3 = CacheKey::new("diff", "prompt", "deepseek", "model", 0.2);
+        let key4 = CacheKey::new("diff", "prompt", "openai", "model", 0.1);
+
+        assert_eq!(key1.as_string(), key2.as_string());
+        assert_ne!(key1.as_string(), key3.as_string());
+        assert_ne!(key1.as_string(), key4.as_string());
+    }
+
+    #[test]
+    fn test_gitignore_auto_creation() {
+        let dir = tempdir().unwrap();
+        let cache_dir = dir.path().join(".diffguard/cache");
+        let config = CacheConfig {
+            cache_dir: cache_dir.clone(),
+            ttl: Duration::from_secs(3600),
+            enabled: true,
+            max_size_bytes: DEFAULT_MAX_SIZE_BYTES,
+        };
+        let cache = DiffCache::new(config).unwrap();
+
+        // Change to the temp directory for the test
+        let original_dir = std::env::current_dir().unwrap();
+        std::env::set_current_dir(dir.path()).unwrap();
+
+        // First call should create .gitignore
+        cache.ensure_gitignored();
+        let gitignore_path = dir.path().join(".gitignore");
+        assert!(gitignore_path.exists());
+        let content = std::fs::read_to_string(&gitignore_path).unwrap();
+        assert!(content.contains(DEFAULT_CACHE_DIR));
+        let line_count_before = content.lines().count();
+
+        // Second call should not duplicate the entry
+        cache.ensure_gitignored();
+        let content_after = std::fs::read_to_string(&gitignore_path).unwrap();
+        let line_count_after = content_after.lines().count();
+        // Line count should be the same (no new lines added)
+        assert_eq!(line_count_before, line_count_after);
+
+        // Restore original directory
+        std::env::set_current_dir(original_dir).unwrap();
+    }
+
+    #[test]
+    fn test_gitignore_exact_line_matching() {
+        let dir = tempdir().unwrap();
+        let cache_dir = dir.path().join(".diffguard/cache");
+        let config = CacheConfig {
+            cache_dir: cache_dir.clone(),
+            ttl: Duration::from_secs(3600),
+            enabled: true,
+            max_size_bytes: DEFAULT_MAX_SIZE_BYTES,
+        };
+        let cache = DiffCache::new(config).unwrap();
+
+        // Change to the temp directory for the test
+        let original_dir = std::env::current_dir().unwrap();
+        std::env::set_current_dir(dir.path()).unwrap();
+
+        // Create .gitignore with a similar but different path
+        let gitignore_path = dir.path().join(".gitignore");
+        std::fs::write(&gitignore_path, ".diffguard/cache2/").unwrap();
+
+        // Should add the entry since it's not an exact match
+        cache.ensure_gitignored();
+        let content = std::fs::read_to_string(&gitignore_path).unwrap();
+        assert!(content.contains(DEFAULT_CACHE_DIR));
+
+        // Restore original directory
+        std::env::set_current_dir(original_dir).unwrap();
+    }
+
+    #[test]
     fn test_cache_disabled_never_hits() {
         let dir = tempdir().unwrap();
         let config = CacheConfig {
@@ -449,8 +632,19 @@ mod tests {
         };
         let cache = DiffCache::new(config).unwrap();
 
-        cache.set("test content", "cached response").unwrap();
-        assert!(cache.get("test content").is_none());
+        cache
+            .set(
+                "test content",
+                "prompt",
+                "deepseek",
+                "model",
+                0.1,
+                "cached response",
+            )
+            .unwrap();
+        assert!(cache
+            .get("test content", "prompt", "deepseek", "model", 0.1)
+            .is_none());
     }
 
     #[test]
@@ -464,8 +658,23 @@ mod tests {
         };
         let cache = DiffCache::new(config).unwrap();
 
-        cache.set("diff content", "llm response").unwrap();
-        let result = cache.get("diff content");
+        cache
+            .set(
+                "diff content",
+                "system prompt",
+                "deepseek",
+                "deepseek-v4-flash",
+                0.1,
+                "llm response",
+            )
+            .unwrap();
+        let result = cache.get(
+            "diff content",
+            "system prompt",
+            "deepseek",
+            "deepseek-v4-flash",
+            0.1,
+        );
         assert_eq!(result, Some("llm response".to_string()));
     }
 
@@ -480,7 +689,9 @@ mod tests {
         };
         let cache = DiffCache::new(config).unwrap();
 
-        assert!(cache.get("nonexistent content").is_none());
+        assert!(cache
+            .get("nonexistent content", "prompt", "deepseek", "model", 0.1)
+            .is_none());
     }
 
     #[test]
@@ -494,14 +705,23 @@ mod tests {
         };
         let cache = DiffCache::new(config).unwrap();
 
-        cache.set("expiring content", "will expire").unwrap();
+        cache
+            .set(
+                "expiring content",
+                "prompt",
+                "deepseek",
+                "model",
+                0.1,
+                "will expire",
+            )
+            .unwrap();
 
         // Should be expired and return None
-        let result = cache.get("expiring content");
+        let result = cache.get("expiring content", "prompt", "deepseek", "model", 0.1);
         assert!(result.is_none());
 
         // File should have been deleted
-        let key = diff_hash("expiring content");
+        let key = CacheKey::new("expiring content", "prompt", "deepseek", "model", 0.1).as_string();
         assert!(!cache.cache_path(&key).exists());
     }
 
@@ -531,10 +751,17 @@ mod tests {
         };
         let cache = DiffCache::new(config).unwrap();
 
-        cache.set("key", "version 1").unwrap();
-        cache.set("key", "version 2").unwrap();
+        cache
+            .set("key", "prompt", "deepseek", "model", 0.1, "version 1")
+            .unwrap();
+        cache
+            .set("key", "prompt", "deepseek", "model", 0.1, "version 2")
+            .unwrap();
 
-        assert_eq!(cache.get("key"), Some("version 2".to_string()));
+        assert_eq!(
+            cache.get("key", "prompt", "deepseek", "model", 0.1),
+            Some("version 2".to_string())
+        );
     }
 
     #[test]
@@ -551,7 +778,14 @@ mod tests {
         // Add several entries
         for i in 0..10 {
             cache
-                .set(&format!("content {}", i), &format!("response {}", i))
+                .set(
+                    &format!("content {}", i),
+                    "prompt",
+                    "deepseek",
+                    "model",
+                    0.1,
+                    &format!("response {}", i),
+                )
                 .unwrap();
         }
 
@@ -571,8 +805,12 @@ mod tests {
         };
         let cache = DiffCache::new(config).unwrap();
 
-        cache.set("key1", "value1").unwrap();
-        cache.set("key2", "value2").unwrap();
+        cache
+            .set("key1", "prompt", "deepseek", "model", 0.1, "value1")
+            .unwrap();
+        cache
+            .set("key2", "prompt", "deepseek", "model", 0.1, "value2")
+            .unwrap();
 
         let stats = cache.stats().unwrap();
         assert_eq!(stats.file_count, 2);
@@ -594,8 +832,12 @@ mod tests {
         };
         let cache = DiffCache::new(config).unwrap();
 
-        cache.set("key1", "value1").unwrap();
-        cache.set("key2", "value2").unwrap();
+        cache
+            .set("key1", "prompt", "deepseek", "model", 0.1, "value1")
+            .unwrap();
+        cache
+            .set("key2", "prompt", "deepseek", "model", 0.1, "value2")
+            .unwrap();
 
         let stats = cache.stats().unwrap();
         assert_eq!(stats.file_count, 2);
@@ -615,8 +857,13 @@ mod tests {
         let cache = DiffCache::new(config).unwrap();
 
         let multiline = "line1\nline2\nline3\nline4";
-        cache.set("key", multiline).unwrap();
+        cache
+            .set("key", "prompt", "deepseek", "model", 0.1, multiline)
+            .unwrap();
 
-        assert_eq!(cache.get("key"), Some(multiline.to_string()));
+        assert_eq!(
+            cache.get("key", "prompt", "deepseek", "model", 0.1),
+            Some(multiline.to_string())
+        );
     }
 }

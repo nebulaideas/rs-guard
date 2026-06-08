@@ -70,10 +70,7 @@ pub struct Args {
     pub diff_file: Option<String>,
 
     /// Bypass the response cache, forcing an LLM API call.
-    #[arg(
-        long,
-        help = "Bypass response cache and force LLM API call"
-    )]
+    #[arg(long, help = "Bypass response cache and force LLM API call")]
     pub no_cache: bool,
 }
 

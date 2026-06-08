@@ -29,10 +29,12 @@ async fn main() {
         process::exit(1);
     });
 
-    config.load_prompt_file(&args.prompt_file).unwrap_or_else(|e| {
-        eprintln!("Failed to load prompt file: {}", e);
-        process::exit(1);
-    });
+    config
+        .load_prompt_file(&args.prompt_file)
+        .unwrap_or_else(|e| {
+            eprintln!("Failed to load prompt file: {}", e);
+            process::exit(1);
+        });
 
     let diff_file = args.diff_file.as_deref();
 

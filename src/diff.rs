@@ -86,6 +86,11 @@ fn validate_diff_content(content: &str) -> Result<(), DiffguardError> {
 /// A tuple of (chunked_content, was_truncated, removed_lines).
 /// The chunked_content is a `Cow<str>` to avoid allocation when no chunking is needed.
 pub fn chunk_diff(content: &str) -> (Cow<'_, str>, bool, usize) {
+    // Detect line ending style from the original content
+    let has_crlf = content.contains("\r\n");
+    let line_ending = if has_crlf { "\r\n" } else { "\n" };
+    let ends_with_newline = content.ends_with('\n') || content.ends_with("\r\n");
+
     let lines: Vec<&str> = content.lines().collect();
     let total = lines.len();
     let threshold = CHUNK_HEAD_LINES + CHUNK_TAIL_LINES;
@@ -101,23 +106,20 @@ pub fn chunk_diff(content: &str) -> (Cow<'_, str>, bool, usize) {
 
     let mut result = String::with_capacity(content.len() / 2);
 
-    // Add head lines with their original line endings
-    for (i, line) in head.iter().enumerate() {
+    // Add head lines with detected line endings
+    for line in head {
         result.push_str(line);
-        // Preserve the line ending from the original content
-        if i < head.len() - 1 || content.contains('\n') {
-            result.push('\n');
-        }
+        result.push_str(line_ending);
     }
 
     result.push_str(&placeholder);
 
-    // Add tail lines with their original line endings
+    // Add tail lines with detected line endings
     for (i, line) in tail.iter().enumerate() {
         result.push_str(line);
-        // Add newline after each tail line except possibly the last
-        if i < tail.len() - 1 || content.ends_with('\n') {
-            result.push('\n');
+        // Add line ending after each tail line except the last one if original didn't end with newline
+        if i < tail.len() - 1 || ends_with_newline {
+            result.push_str(line_ending);
         }
     }
 
@@ -479,5 +481,58 @@ mod tests {
         assert!(!truncated);
         // This would fail to compile if result was not Cow
         assert!(matches!(result, Cow::Borrowed(_)));
+    }
+
+    #[test]
+    fn test_fetch_file_diff_valid() {
+        let dir = tempfile::tempdir().unwrap();
+        let diff_path = dir.path().join("test.diff");
+        let diff_content =
+            "diff --git a/f.rs b/f.rs\n--- a/f.rs\n+++ b/f.rs\n@@ -1 +1,2 @@\n+line1\n line0";
+        std::fs::write(&diff_path, diff_content).unwrap();
+
+        let result = fetch_file_diff(diff_path.to_str().unwrap()).unwrap();
+        assert_eq!(result.content, diff_content);
+        assert!(result.size_bytes > 0);
+        assert!(result.line_count > 0);
+    }
+
+    #[test]
+    fn test_fetch_file_diff_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        let diff_path = dir.path().join("empty.diff");
+        std::fs::write(&diff_path, "").unwrap();
+
+        let result = fetch_file_diff(diff_path.to_str().unwrap());
+        assert!(matches!(result, Err(DiffguardError::EmptyDiff)));
+    }
+
+    #[test]
+    fn test_fetch_file_diff_invalid_content() {
+        let dir = tempfile::tempdir().unwrap();
+        let diff_path = dir.path().join("invalid.diff");
+        std::fs::write(&diff_path, "not a diff").unwrap();
+
+        let result = fetch_file_diff(diff_path.to_str().unwrap());
+        assert!(matches!(result, Err(DiffguardError::InvalidDiffContent)));
+    }
+
+    #[test]
+    fn test_fetch_file_diff_too_large() {
+        let dir = tempfile::tempdir().unwrap();
+        let diff_path = dir.path().join("large.diff");
+        // Create a valid diff header followed by large content to exceed MAX_DIFF_BYTES (100KB)
+        let diff_header = "diff --git a/f.rs b/f.rs\n--- a/f.rs\n+++ b/f.rs\n@@ -1 +1,2 @@\n";
+        let large_content = format!("{}{}", diff_header, "+line\n".repeat(200 * 1024));
+        std::fs::write(&diff_path, &large_content).unwrap();
+
+        let result = fetch_file_diff(diff_path.to_str().unwrap());
+        assert!(matches!(result, Err(DiffguardError::DiffTooLarge { .. })));
+    }
+
+    #[test]
+    fn test_fetch_file_diff_not_found() {
+        let result = fetch_file_diff("/nonexistent/path.diff");
+        assert!(matches!(result, Err(DiffguardError::Config(_))));
     }
 }

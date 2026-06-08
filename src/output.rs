@@ -154,8 +154,7 @@ pub fn print_colored_report(
 ///
 /// Returns [`std::io::Error`] if the file cannot be created or written.
 pub fn write_metrics(metrics: &ReviewMetrics, path: &str) -> std::io::Result<()> {
-    let json = serde_json::to_string_pretty(metrics)
-        .map_err(std::io::Error::other)?;
+    let json = serde_json::to_string_pretty(metrics).map_err(std::io::Error::other)?;
     std::fs::write(path, json)
 }
 
@@ -330,8 +329,14 @@ mod tests {
             diff_line_count: 25,
         };
         let mut buf = Vec::new();
-        print_colored_summary("review text", &verdict, &ReviewState::Comment, &config, &mut buf)
-            .unwrap();
+        print_colored_summary(
+            "review text",
+            &verdict,
+            &ReviewState::Comment,
+            &config,
+            &mut buf,
+        )
+        .unwrap();
         let output = String::from_utf8(buf).unwrap();
         assert!(output.contains("openai"));
         assert!(output.contains("gpt-4o"));

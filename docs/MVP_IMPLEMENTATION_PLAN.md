@@ -14,9 +14,9 @@
 
 ### Repository Structure
 
-**Phase 1 (Current): Single Crate**
+#### Phase 1 (Current): Single Crate
 
-```
+```text
 diffguard-rs/
 ├── Cargo.toml                    # Single crate manifest
 ├── Cargo.lock
@@ -70,17 +70,18 @@ diffguard-rs/
 └── .github/workflows/             # CI/CD pipelines
 ```
 
-**Future Reference: Multi-Crate Workspace (Phase 5+)**
+#### Future Reference: Multi-Crate Workspace (Phase 5+)
 
 > If demand emerges for using `diffguard` components as libraries, the single crate can be split into a workspace:
 >
-> ```
+> ```text
 > crates/
 > ├── diffguard-core/           # Diff fetch, verdict parser, GitHub API
 > ├── diffguard-llm/            # LlmProvider trait + provider impls
 > └── diffguard-cli/            # CLI args, config, main flow
 > ```
-> See [Future Workspace Decomposition](#future-workspace-decomposition-reference) for migration steps.
+>
+> See [Future Workspace Decomposition](#reference-future-workspace-decomposition) for migration steps.
 
 ### Core Flow
 
@@ -93,7 +94,7 @@ diffguard-rs/
 ### Provider Support Roadmap
 
 | Provider | Phase | Base URL | Auth |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | **DeepSeek** | 1 | `https://api.deepseek.com` | `Bearer {key}` |
 | **Kimi** (Moonshot AI) | 2 | `https://api.moonshot.ai/v1` | `Bearer {key}` |
 | **Qwen** (Alibaba Cloud) | 2 | `https://dashscope-intl.aliyuncs.com/compatible-mode/v1` | `Bearer {key}` |
@@ -105,7 +106,7 @@ diffguard-rs/
 ## Quality Targets
 
 | Metric | Target | Tool |
-|---|---|---|
+| --- | --- | --- |
 | **Test Coverage** | 85%+ | `cargo-tarpaulin` |
 | **Documentation Coverage** | 85%+ | `cargo +nightly doc --show-coverage` |
 | **Clippy** | 0 warnings | `cargo clippy -- -D warnings` |
@@ -117,11 +118,11 @@ diffguard-rs/
 
 ## Phase 1: Foundation — Single Crate + DeepSeek MVP
 
-### Goal
+### Phase 1 Goal
 
 Create a working Rust CLI in a single crate: fetch PR diffs, call DeepSeek, parse verdicts, submit reviews to GitHub. All other providers and advanced features are deferred.
 
-### Deliverables
+### Phase 1 Deliverables
 
 #### Repository Setup
 
@@ -135,6 +136,7 @@ Create a working Rust CLI in a single crate: fetch PR diffs, call DeepSeek, pars
 #### Single Crate Structure
 
 **`src/retry.rs`** — Basic retry logic:
+
 - `with_retry<T, F, Fut>(operation: F) -> Result<T, DiffguardError>`
 - Retry on: HTTP 429, 502, 503, 504, timeout errors
 - Strategy: 2 retries with fixed backoff (1s, 2s)
@@ -142,6 +144,7 @@ Create a working Rust CLI in a single crate: fetch PR diffs, call DeepSeek, pars
 - All public items have `///` doc comments
 
 **`src/error.rs`** — Define `DiffguardError` enum with variants:
+
 - `GitHubApi { status: u16, message: String }`
 - `LlmApi { provider: String, status: u16, message: String }`
 - `VerdictParse(String)`
@@ -154,6 +157,7 @@ Create a working Rust CLI in a single crate: fetch PR diffs, call DeepSeek, pars
 - All public items have `///` doc comments
 
 **`src/diff.rs`** — Implement `fetch_pr_diff()` and `fetch_local_diff()`:
+
 - `fetch_pr_diff(base_url, owner, repo, pr_number, token)` — configurable `base_url` for GitHub Enterprise support
 - HTTP GET with `Accept: application/vnd.github.v3.diff`
 - `github_headers(token)` helper validates token format via `HeaderValue::from_str` (returns `Config` error instead of panicking)
@@ -164,6 +168,7 @@ Create a working Rust CLI in a single crate: fetch PR diffs, call DeepSeek, pars
 - All public items have `///` doc comments
 
 **`src/verdict.rs`** — Implement verdict parsing:
+
 - `parse_metadata_block(response: &str) -> Option<Verdict>`
 - Regex compiled once via `std::sync::LazyLock` (avoids recompilation per call)
 - `determine_review_state(verdict: &Verdict) -> ReviewState`
@@ -174,6 +179,7 @@ Create a working Rust CLI in a single crate: fetch PR diffs, call DeepSeek, pars
 - All public items have `///` doc comments
 
 **`src/github.rs`** — Implement GitHub review submission:
+
 - `submit_review(base_url, owner, repo, pr_number, state, message, token)` — configurable `base_url` for GitHub Enterprise
 - `dismiss_previous_reviews(base_url, owner, repo, pr_number, token)` — queries reviews with `CHANGES_REQUESTED` state and bodies containing `<!-- diffguard-bot -->` signature, then dismisses them
 - Permission fallback: if `REQUEST_CHANGES` or `APPROVE` fails with permission error, retry with `COMMENT` and prepend `[Bot fallback from {state}]`
@@ -182,6 +188,7 @@ Create a working Rust CLI in a single crate: fetch PR diffs, call DeepSeek, pars
 - All public items have `///` doc comments
 
 **`src/output.rs`** — Artifact + console output:
+
 - `ARTIFACT_FILENAME` constant (`"review-result.txt"`)
 - `write_artifact(review, verdict, state, config, path)` — writes structured artifact
 - `print_colored_report(review, verdict, state)` — terminal output with verdict metadata included
@@ -189,12 +196,14 @@ Create a working Rust CLI in a single crate: fetch PR diffs, call DeepSeek, pars
 - All public items have `///` doc comments
 
 **`src/llm/mod.rs`** — LLM provider types + enum dispatch:
+
 - Phase 1 uses enum-based dispatch (`Provider` enum with match arms) instead of a trait object
 - The `LlmProvider` trait is deferred to Phase 2 when multiple providers require dynamic dispatch
 - Shared types: `ChatMessage`, `ChatRequest`, `ChatResponse`, `LlmError`
 - All public items have `///` doc comments
 
 **`src/llm/deepseek.rs`** — DeepSeek provider implementation:
+
 - Base URL: `https://api.deepseek.com`
 - Endpoint: `POST /chat/completions`
 - Model default: `deepseek-v4-flash`
@@ -206,11 +215,13 @@ Create a working Rust CLI in a single crate: fetch PR diffs, call DeepSeek, pars
 - All public items have `///` doc comments
 
 **`src/llm/factory.rs`** — Provider factory:
+
 - `create_provider(provider_name, api_key) -> Result<Provider, DiffguardError>`
 - Propagates `DeepSeekClient::new()` errors (invalid API key format)
 - All public items have `///` doc comments
 
 **`src/cli.rs`** — Clap derive struct:
+
 ```rust
 #[derive(Parser)]
 pub struct Args {
@@ -222,15 +233,17 @@ pub struct Args {
     
     #[arg(short, long, default_value_t = 0.1)]
     pub temperature: f32,
-    
+
     #[arg(long, env = "DIFFGUARD_PROVIDER", default_value = "deepseek")]
     pub provider: String,
 }
 ```
+
 - Note: `--config` / `-c` flag deferred to Phase 2 (TOML parsing not yet implemented)
 - All public items have `///` doc comments
 
 **`src/config.rs`** — Environment variable resolution + default prompt:
+
 - `DEEPSEEK_API_KEY` (required for DeepSeek)
 - `GITHUB_TOKEN` (required for GitHub mode)
 - `PR_NUMBER` (required for GitHub mode)
@@ -245,6 +258,7 @@ pub struct Args {
 - All public items have `///` doc comments
 
 **Default Prompt Template (embedded in binary):**
+
 ```markdown
 You are a senior software engineer performing a code review on a Pull Request diff.
 
@@ -269,6 +283,7 @@ Guidelines:
 ```
 
 **`src/main.rs`** — Entry point:
+
 - Parse CLI args with Clap
 - `Config::from_env()` → `config.apply_args(&args)` → `config.load_prompt_file()` → `config.validate_for_ci()`
 - `run_pipeline(config)` — extracted pipeline function for testability
@@ -309,7 +324,7 @@ Guidelines:
 ### Test Matrix for Phase 1
 
 | Test | Input | Expected |
-|---|---|---|
+| --- | --- | --- |
 | Parse valid POSITIVE | `Verdict: POSITIVE, CriticalBugs: 0, SecurityIssues: 0` | `ReviewState::Approve` |
 | Parse NEGATIVE | `Verdict: NEGATIVE` | `ReviewState::RequestChanges` |
 | Parse critical > 2 | `CriticalBugs: 5` | `ReviewState::RequestChanges` |
@@ -351,11 +366,11 @@ Guidelines:
 
 ## Phase 2: Multi-Provider Support + Local Mode
 
-### Goal
+### Phase 2 Goal
 
 Extend `src/llm/` to support multiple LLM providers. Add `.reviewer.toml` configuration and implement local pre-commit execution mode.
 
-### Deliverables
+### Phase 2 Deliverables
 
 #### Provider Implementations
 
@@ -404,33 +419,35 @@ Extend `src/llm/` to support multiple LLM providers. Add `.reviewer.toml` config
   - `Config::apply_args()` uses `Option<T>` CLI fields for reliable override detection
   - Per-provider TOML settings (`base_url`, `api_key_env`, `http_referer`) wired to provider clients
   - Schema:
+
     ```toml
     provider = "deepseek"
     model = "deepseek-v4-flash"
     temperature = 0.1
     max_tokens = 8192
-    
+
     [providers.deepseek]
     api_key_env = "DEEPSEEK_API_KEY"
     base_url = "https://api.deepseek.com"
-    
+
     [providers.kimi]
     api_key_env = "KIMI_API_KEY"
     base_url = "https://api.moonshot.ai/v1"
-    
+
     [providers.qwen]
     api_key_env = "DASHSCOPE_API_KEY"
     base_url = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
-    
+
     [providers.openrouter]
     api_key_env = "OPENROUTER_API_KEY"
     base_url = "https://openrouter.ai/api/v1"
     http_referer = "https://github.com/YOUR_ORG/diffguard-rs"
-    
+
     [providers.openai]
     api_key_env = "OPENAI_API_KEY"
     base_url = "https://api.openai.com/v1"
     ```
+
   - CLI flags override TOML values
   - Environment variables override both
 
@@ -482,7 +499,7 @@ Extend `src/llm/` to support multiple LLM providers. Add `.reviewer.toml` config
 
 ## Phase 0: Pre-requisite Cleanup
 
-### Goal
+### Phase 0 Goal
 
 Address code quality, test coverage, and testability issues discovered during
 codebase review before implementing Phase 3 features.
@@ -493,7 +510,7 @@ Running Phase 3 on top of untested modules (github.rs, output.rs) and
 untestable code (process::exit in run_pipeline) would produce fragile
 results. These fixes ensure the foundation is solid.
 
-### Deliverables
+### Phase 0 Deliverables
 
 #### P0.1: Remove `process::exit` from `run_pipeline()` (exit signal)
 
@@ -548,11 +565,11 @@ results. These fixes ensure the foundation is solid.
 
 ## Phase 3: Advanced Features
 
-### Goal
+### Phase 3 Goal
 
 Add production-hardening features: diff chunking for large PRs, response caching, cost/latency metrics, and enhanced CI pipeline features.
 
-### Deliverables
+### Phase 3 Deliverables
 
 #### Diff Chunking (Task 3.4)
 
@@ -579,7 +596,8 @@ Add production-hardening features: diff chunking for large PRs, response caching
 - [x] Track per-run metrics: token usage (input/output), API latency, cost estimate
 - [x] Export as JSON artifact: `diffguard-metrics.json`
 - [x] Console summary in CI logs:
-  ```
+
+  ```text
   diffguard-rs Review Complete
   =============================
   Provider:    deepseek
@@ -611,6 +629,68 @@ Add production-hardening features: diff chunking for large PRs, response caching
   - Max 3 retries per request
   - Jitter: ±25% random variation on each delay
 - [x] 10 inline tests for retry + circuit breaker
+
+### Code Review Findings (Phase 3)
+
+#### Code Quality Issues Identified
+
+1. **src/cache.rs**:
+   - ~~Line 329: `.gitignore` check uses `contains(DEFAULT_CACHE_DIR)` which could match partial strings (e.g., `.diffguard/cache2/` would match). Should use exact line matching.~~ **FIXED**: Now uses exact line matching via `lines().any()`.
+   - Cache size limit enforcement reads the directory twice (once in `total_size()`, once in `enforce_size_limit()`) - minor inefficiency.
+   - ~~**Missing test**: No test for `.gitignore` auto-creation logic.~~ **FIXED**: Added `test_gitignore_auto_creation` and `test_gitignore_exact_line_matching`.
+
+2. **src/pipeline.rs**:
+   - Lines 186, 212: Token estimation uses `/ 4` approximation - inaccurate for different tokenizers. Consider using actual tokenizer counts.
+   - Cost estimation function `estimate_cost_cents` uses hardcoded pricing that will become stale. Should be configurable or fetched from provider.
+   - ~~Cache is keyed on original diff content but chunked content is sent to LLM - cache misses may occur when chunking behavior changes.~~ **FIXED**: Cache key now includes prompt, provider, model, and temperature.
+   - ~~**Missing test**: No integration test for circuit breaker opening in pipeline.~~ **FIXED**: Added `test_full_pipeline_circuit_breaker_opens_on_repeated_failures`.
+
+3. **src/retry.rs**:
+   - Line 211: Jitter uses `nanos % 997` which is deterministic, not truly random. Consider using `rand` crate for better distribution.
+   - ~~**Missing test**: No test for circuit breaker auto-reset after cooldown period.~~ **FIXED**: Added `test_circuit_breaker_auto_reset_after_cooldown`.
+
+4. **src/diff.rs**:
+   - ~~Lines 105-122: Line ending preservation logic is complex and could be simplified.~~ **FIXED**: Simplified to detect line ending style once and apply consistently.
+   - ~~**Missing test**: No test for `fetch_file_diff` function.~~ **FIXED**: Added 5 tests for `fetch_file_diff` covering valid, empty, invalid, too large, and not found cases.
+
+5. **src/github.rs**:
+   - Lines 191-239: Dismissal logic uses individual HTTP calls in a loop - could be batched if GitHub API supports it.
+   - ~~**Missing test**: No test for permission fallback message format.~~ **FIXED**: Test already exists as `test_submit_review_permission_fallback_to_comment`.
+
+6. **src/output.rs**:
+   - Metrics are written to fixed filename `diffguard-metrics.json` - could conflict in parallel runs. Consider timestamp-based naming.
+
+7. **src/config.rs**:
+   - Lines 329-335: Model resolution logic is complex with multiple fallback paths.
+   - The `model_set_via_cli` flag is a workaround for tracking model changes - consider a cleaner approach.
+   - ~~**Missing test**: No test for `validate_local_provider_base_url` warnings.~~ **FIXED**: Added 5 tests for local provider URL validation.
+
+#### Tech Debt for Future Phases
+
+1. **Token Estimation**: Replace `/ 4` approximation with actual tokenizer counts (add `tiktoken-rs` or similar).
+2. **Cost Estimation**: Move pricing to configuration file or fetch from provider APIs dynamically.
+3. ~~**Cache Keying**: Include model and prompt in cache key to avoid stale cached responses when these change.~~ **COMPLETED**: Cache key now includes prompt, provider, model, and temperature.
+4. Dismissal Batching: Investigate GitHub API for batch dismissal support.
+5. Metrics Filename: Use unique filenames (e.g., with timestamp) to avoid conflicts in parallel runs.
+6. Jitter Randomness: Use `rand` crate for better jitter distribution instead of deterministic modulo.
+7. ~~**Line Ending Simplification**: Refactor `chunk_diff` line ending logic for clarity.~~ **COMPLETED**: Simplified to detect line ending style once.
+8. ~~**Gitignore Matching**: Use exact line matching instead of `contains()` for cache directory detection.~~ **COMPLETED**: Now uses exact line matching.
+
+#### Additional Tests Needed
+
+~~1. `src/cache.rs`: Test for `.gitignore` auto-creation~~ **COMPLETED**
+~~2. `src/pipeline.rs`: Integration test for circuit breaker opening~~ **COMPLETED**
+~~3. `src/diff.rs`: Test for `fetch_file_diff`~~ **COMPLETED**
+~~4. `src/github.rs`: Test for permission fallback message format~~ **COMPLETED**
+~~5. `src/config.rs`: Test for local provider URL validation warnings~~ **COMPLETED**
+~~6. `src/retry.rs`: Test for circuit breaker auto-reset after cooldown~~ **COMPLETED**
+
+#### Additional Improvements Completed
+
+1. **Cache Concurrency Safety**: Cache temp writes now use unique tmp names with `create_new` to prevent symlink attacks and unsafe renames.
+2. **Cache Eviction Ordering**: Cache eviction now uses stored timestamp from file content instead of filesystem mtime for reliability.
+3. **CI Benchmark Job**: Fixed benchmark job to correctly fail on `cargo bench` errors by removing redundant exit code check.
+4. **Config Safety**: Removed `Default` derive from `Config` and added explicit test-only constructor to avoid accidental use in production code.
 
 ### Changelog Entry — Phase 3
 
@@ -650,29 +730,32 @@ Add production-hardening features: diff chunking for large PRs, response caching
 
 ## Phase 4: README + Documentation Polish
 
-### Goal
+### Phase 4 Goal
 
 Create a world-class README and complete all documentation files. This is the public-facing quality gate before crates.ai registration.
 
-### Deliverables
+### Phase 4 Deliverables
 
 #### README.md (Complete Rewrite)
 
 - [ ] **Hero section**: One-sentence description + animated GIF or screenshot of terminal output
 - [ ] **Badges**: CI status, test coverage, docs.rs, crates.io version, license
 - [ ] **Quick Start** (3-step copy-paste):
-  ```bash
-  # 1. Download binary
-  curl -L -o diffguard \
-    https://github.com/YOUR_ORG/diffguard-rs/releases/latest/download/diffguard
-  chmod +x diffguard
-  
-  # 2. Create prompt file
-  echo "Act as a Principal Architect reviewing code..." > .github/review-prompt.md
-  
-  # 3. Add to your workflow (see examples/github-actions-workflow/ai-review.yml)
-  ```
+
+```bash
+# 1. Download binary
+curl -L -o diffguard \
+  https://github.com/YOUR_ORG/diffguard-rs/releases/latest/download/diffguard
+chmod +x diffguard
+
+# 2. Create prompt file
+echo "Act as a Principal Architect reviewing code..." > .github/review-prompt.md
+
+# 3. Add to your workflow (see examples/github-actions-workflow/ai-review.yml)
+```
+
 - [ ] **Feature highlights** with icons:
+
   - Multi-provider (DeepSeek, Kimi, Qwen, OpenRouter, OpenAI)
   - In-memory verdict parsing (no intermediate comments)
   - GitHub Actions + local pre-commit support
@@ -736,34 +819,40 @@ Create a world-class README and complete all documentation files. This is the pu
 
 ## Phase 5: Implementation Guide
 
-### Goal
+### Phase 5 Goal
 
 Create a comprehensive developer-facing guide that documents how the project is built, how to extend it, and the architectural decisions behind key design choices. This is the "how and why" companion to the user-facing documentation.
 
-### Deliverables
+### Phase 5 Deliverables
 
 #### docs/implementation-guide.md
 
-**1. Getting Started for Contributors**
+##### 1. Getting Started for Contributors
+
 - [ ] Development environment setup: Rust toolchain (1.82+), required components (`clippy`, `rustfmt`)
 - [ ] `cargo` commands for daily development:
-  ```bash
-  cargo build
-  cargo test
-  cargo clippy --all-targets --all-features -- -D warnings
-  cargo fmt --all
-  cargo doc --no-deps --open
-  ```
+
+```bash
+cargo build
+cargo test
+cargo clippy --all-targets --all-features -- -D warnings
+cargo fmt --all
+cargo doc --no-deps --open
+```
+
 - [ ] Running integration tests: `cargo test -- --ignored` for tests requiring network
 - [ ] Using `cargo-tarpaulin` for coverage reports locally
 
-**2. Crate Organization**
-- [ ] Rationale for single-crate structure vs workspace (see [Architecture Decision](#why-single-crate-for-mvp))
-- [ ] Module dependency flow: `main.rs` → `cli.rs` + `config.rs`; `diff.rs` + `github.rs` + `verdict.rs` + `llm/` as core pipeline
-- [ ] When and how to split into a workspace (see [Future Workspace Decomposition](#future-workspace-decomposition-reference))
+##### 2. Crate Organization
 
-**3. Adding a New LLM Provider**
+- [ ] Rationale for single-crate structure vs workspace (see [Architecture Decision](#reference-why-single-crate-for-mvp))
+- [ ] Module dependency flow: `main.rs` → `cli.rs` + `config.rs`; `diff.rs` + `github.rs` + `verdict.rs` + `llm/` as core pipeline
+- [ ] When and how to split into a workspace (see [Future Workspace Decomposition](#reference-future-workspace-decomposition))
+
+##### 3. Adding a New LLM Provider
+
 - [ ] Step-by-step guide:
+
   1. Create `src/llm/{provider}.rs`
   2. Implement `{Provider}Client` struct with `chat_completion` method
   3. Add `Provider::{Provider}` variant in `src/llm/mod.rs`
@@ -775,35 +864,41 @@ Create a comprehensive developer-facing guide that documents how the project is 
   9. Update `docs/PROVIDERS.md`
 - [ ] Provider implementation checklist with code review criteria
 
-**4. The In-Memory Pipeline**
+##### 4. The In-Memory Pipeline
+
 - [ ] Why we parse metadata in-memory instead of posting intermediate comments
 - [ ] Comparison with two-step JS pipeline: network calls, race conditions, latency
 - [ ] Error handling strategy: what happens when each step fails
 
-**5. Testing Strategy**
+##### 5. Testing Strategy
+
 - [ ] Unit test patterns: pure functions, mock traits, test data fixtures
 - [ ] Integration test patterns: `wiremock` for HTTP, `tempfile` for filesystem
 - [ ] How to write a good test for `verdict.rs`, `diff.rs`, `github.rs`
 - [ ] Test data organization in `tests/test_data/`
 
-**6. CI/CD Pipeline**
+##### 6. CI/CD Pipeline
+
 - [ ] Full explanation of each CI job and its purpose
 - [ ] How the release pipeline works: binary compilation, stripping, GitHub Release creation
 - [ ] Version tagging strategy and release cadence recommendations
 
-**7. Performance Considerations**
+##### 7. Performance Considerations
+
 - [ ] Why `reqwest` over `ureq` or `minreq`
 - [ ] Why compile to a static binary instead of running `cargo run` in CI
 - [ ] Binary size optimization: `strip`, LTO, `panic = "abort"`
 - [ ] Benchmarking with `criterion.rs`
 
-**8. Security Model**
+##### 8. Security Model
+
 - [ ] Secret handling: env vars only, no hardcoded keys
 - [ ] Log sanitization: `[REDACTED]` for auth headers
 - [ ] GitHub token scope: minimum required permissions
 - [ ] Supply chain security: `cargo-deny`, `cargo-audit`, `Cargo.lock`
 
-**9. Common Tasks**
+##### 9. Common Tasks
+
 - [ ] Bumping the version: update `Cargo.toml`, update `CHANGELOG.md`, tag and push
 - [ ] Adding a new CLI flag: update `cli.rs`, `config.rs`, `main.rs`, `docs/USAGE.md`
 - [ ] Debugging a failing review: enable `RUST_LOG=debug`, check `review-result.txt`
@@ -833,6 +928,7 @@ Register diffguard-rs on [crates.ai](https://crates.ai) for discovery and distri
 ### Prerequisites Checklist
 
 Before registration, all of the following must be complete:
+
 - [ ] `Cargo.toml` has proper metadata:
   - `name`, `version`, `authors`, `edition`, `license`, `description`, `repository`, `keywords`, `categories`
 - [ ] `README.md` is complete and professional
@@ -851,7 +947,7 @@ Before registration, all of the following must be complete:
 
 ### crates.ai Registration Steps
 
-1. **Create a crates.ai account** at https://crates.ai (uses GitHub OAuth)
+1. **Create a crates.ai account** at <https://crates.ai> (uses GitHub OAuth)
 2. **Register the repository**:
    - Submit the GitHub repository URL
    - crates.ai scans the `Cargo.toml`
@@ -870,6 +966,7 @@ Before registration, all of the following must be complete:
 If publishing to crates.io for `cargo install diffguard`:
 
 1. **Verify `Cargo.toml`**:
+
    ```toml
    [package]
    name = "diffguard"
@@ -885,7 +982,9 @@ If publishing to crates.io for `cargo install diffguard`:
    keywords = ["ai", "code-review", "github", "llm", "cli"]
    categories = ["development-tools", "command-line-utilities"]
    ```
+
 2. **Login and publish**:
+
    ```bash
    cargo login  # paste API key from crates.io
    cargo publish
@@ -913,6 +1012,7 @@ If publishing to crates.io for `cargo install diffguard`:
 > **When to split:** Only if concrete demand emerges for using `diffguard` components as standalone libraries (e.g., another project wants to import just the LLM provider trait, or just the verdict parser).
 >
 > **Migration steps:**
+>
 > 1. Create workspace `Cargo.toml` with `[workspace.members]`
 > 2. Extract `src/llm/` → `crates/diffguard-llm/src/`
 > 3. Extract `src/diff.rs`, `src/verdict.rs`, `src/github.rs`, `src/output.rs`, `src/error.rs` → `crates/diffguard-core/src/`
@@ -931,6 +1031,7 @@ If publishing to crates.io for `cargo install diffguard`:
 **Decision:** Start as a single crate. Defer workspace split until library demand is proven.
 
 **Rationale:**
+
 - **Faster iteration:** No cross-crate compilation boundaries; refactoring is a single `cargo check`
 - **Simpler testing:** Unit tests can access private modules via `#[cfg(test)]`; no need to expose internals prematurely
 - **Less boilerplate:** One `Cargo.toml`, one version to bump, no workspace dependency management
@@ -938,6 +1039,7 @@ If publishing to crates.io for `cargo install diffguard`:
 - **Easy to split later:** Moving modules between crates is a well-understood Rust refactoring; the reverse is painful
 
 **When to revisit:** If any of the following happen:
+
 - Another project wants to depend on `diffguard` LLM providers as a library
 - The CLI binary and library logic need independent versioning
 - Compile times become a bottleneck due to crate size (unlikely for this scope)
@@ -947,7 +1049,7 @@ If publishing to crates.io for `cargo install diffguard`:
 ## Appendix A: Environment Variables Reference
 
 | Variable | Required By | Description |
-|---|---|---|
+| --- | --- | --- |
 | `DEEPSEEK_API_KEY` | DeepSeek provider | API key from DeepSeek platform |
 | `KIMI_API_KEY` | Kimi provider | API key from Moonshot AI platform |
 | `DASHSCOPE_API_KEY` | Qwen provider | API key from Alibaba Cloud DashScope |
@@ -961,7 +1063,7 @@ If publishing to crates.io for `cargo install diffguard`:
 ## Appendix B: CLI Flags Reference
 
 | Flag | Short | Default | Description |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `--prompt-file` | `-p` | `.github/review-prompt.md` | Path to system prompt markdown file |
 | `--model` | `-m` | (provider-specific) | LLM model identifier |
 | `--temperature` | `-t` | `0.1` | Sampling temperature (0.0 - 2.0) |
@@ -974,14 +1076,14 @@ If publishing to crates.io for `cargo install diffguard`:
 ## Appendix C: Exit Codes
 
 | Code | Meaning |
-|---|---|
+| --- | --- |
 | `0` | Review completed successfully |
 | `1` | Error occurred (API failure, parse error, config error, etc.) |
 | `2` | Local mode only: review returned `REQUEST_CHANGES` (blocks commit) |
 
 ## Appendix D: Review State Logic
 
-```
+```python
 if verdict == "NEGATIVE" || security_issues > 0 || critical_bugs > 2:
     state = REQUEST_CHANGES
 else if critical_bugs == 0 && security_issues == 0:
@@ -1012,7 +1114,7 @@ The root `LICENSE` file is **MIT** (Copyright 2026 Nebula Ideas). Earlier versio
 Record of architectural and design decisions made during implementation.
 
 | Date | Decision | Option Chosen | Rationale |
-|------|----------|---------------|-----------|
+| ------ | ---------- | --------------- | ----------- |
 | 2026-06-07 | P0.1: Exit signal mechanism | `PipelineResult` enum | Keeps `run_pipeline` testable; semantically clear vs `anyhow::Result<i32>` or error variant abuse |
 | 2026-06-07 | P0.3: Testing print functions | Refactor to `impl Write` | Enables fast, deterministic buffer-based testing; small refactor cost |
 | 2026-06-07 | 3.1: Cache location | `.diffguard/cache/` (project-local) | Per-project isolation; auto-gitignore for convenience |
@@ -1029,6 +1131,3 @@ Record of architectural and design decisions made during implementation.
 | 2026-06-07 | Code Review: Chunking warning consistency | Show warning in both CI and local modes | Consistent user experience; users should know when diff is truncated |
 | 2026-06-07 | Code Review: CI dependency caching | `Swatinem/rust-cache@v2` | Significantly speeds up CI builds by caching dependencies |
 | 2026-06-07 | P0.6: DRY diff-fetch handling | **Deferred** | Three diff sources have different behavior (CI submits GitHub comment); extraction would add complexity |
-| 2026-06-07 | 3.4: Truncation defaults | 50 head / 50 tail lines | Reasonable balance for most model context windows (~8K tokens) |
-| 2026-06-07 | 3.5: Benchmark library | Criterion (0.5) with HTML reports | Industry standard, stable Rust support, detailed output |
-| 2026-06-07 | 3.5: Docs deploy | GitHub Pages via `actions/deploy-pages@v4` | Free, zero-config, auto-updates on push to main |

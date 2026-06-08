@@ -186,14 +186,19 @@ pub async fn run_pipeline(
     let estimated_tokens_in = (config.prompt.len() + diff_content.len()) / 4; // rough: ~4 chars/token
 
     // Check cache before calling the LLM (keyed on original content, not chunked)
-    let llm_response = if let Some(cached) = cache.get(&diff_result.content) {
+    let llm_response = if let Some(cached) = cache.get(
+        &diff_result.content,
+        &config.prompt,
+        &config.provider,
+        &config.model,
+        config.temperature,
+    ) {
         log::info!("Cache hit — using cached LLM response");
         cached
     } else {
         log::info!("Calling {} ({})...", config.provider, config.model);
-        let provider =
-            create_provider(&config.provider, &config.api_key, &config.provider_config)
-                .context("Failed to create LLM provider")?;
+        let provider = create_provider(&config.provider, &config.api_key, &config.provider_config)
+            .context("Failed to create LLM provider")?;
 
         let response = provider
             .chat_completion(&config.prompt, &diff_content, config.temperature)
@@ -201,7 +206,14 @@ pub async fn run_pipeline(
             .context("LLM API call failed")?;
 
         log::info!("Caching LLM response for future runs");
-        if let Err(e) = cache.set(&diff_result.content, &response) {
+        if let Err(e) = cache.set(
+            &diff_result.content,
+            &config.prompt,
+            &config.provider,
+            &config.model,
+            config.temperature,
+            &response,
+        ) {
             log::warn!("Failed to cache LLM response: {}", e);
         }
 
@@ -325,8 +337,14 @@ pub async fn run_pipeline(
             );
         }
 
-        print_colored_summary(&sanitized_response, &verdict, &state, &review_config, &mut std::io::stdout())
-            .context("Failed to print review summary")?;
+        print_colored_summary(
+            &sanitized_response,
+            &verdict,
+            &state,
+            &review_config,
+            &mut std::io::stdout(),
+        )
+        .context("Failed to print review summary")?;
 
         if state == ReviewState::RequestChanges {
             Ok(PipelineResult::ReviewBlocked)
@@ -342,12 +360,12 @@ pub async fn run_pipeline(
 fn estimate_cost_cents(provider: &str, tokens_in: u64, tokens_out: u64) -> u64 {
     // Prices in cents per million tokens
     let (price_in_cents, price_out_cents) = match provider {
-        "deepseek" => (7, 27),   // DeepSeek-V4: $0.07/M in, $0.27/M out
-        "kimi" => (12, 70),      // Kimi K2.5: approximate
-        "qwen" => (8, 20),       // Qwen-Plus: approximate
+        "deepseek" => (7, 27),    // DeepSeek-V4: $0.07/M in, $0.27/M out
+        "kimi" => (12, 70),       // Kimi K2.5: approximate
+        "qwen" => (8, 20),        // Qwen-Plus: approximate
         "openrouter" => (15, 60), // OpenRouter avg: approximate
-        "openai" => (15, 60),    // GPT-4o-mini: $0.15/M in, $0.60/M out
-        _ => (10, 30),           // Default fallback
+        "openai" => (15, 60),     // GPT-4o-mini: $0.15/M in, $0.60/M out
+        _ => (10, 30),            // Default fallback
     };
     let cost_in = (tokens_in * price_in_cents) / 1_000_000;
     let cost_out = (tokens_out * price_out_cents) / 1_000_000;

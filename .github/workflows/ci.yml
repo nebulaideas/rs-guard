@@ -87,9 +87,3 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo bench --bench verdict -- --quick
-      - name: Check benchmark exit code
-        run: |
-          if [ $? -ne 0 ]; then
-            echo "Benchmark failed"
-            exit 1
-          fi

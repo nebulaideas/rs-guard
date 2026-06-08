@@ -20,7 +20,9 @@ const USER_AGENT: &str = concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VE
 /// # Errors
 ///
 /// Returns [`DiffguardError::Config`] if the TLS backend fails to initialise.
-pub fn build_github_http_client(timeout: std::time::Duration) -> Result<reqwest::Client, DiffguardError> {
+pub fn build_github_http_client(
+    timeout: std::time::Duration,
+) -> Result<reqwest::Client, DiffguardError> {
     reqwest::Client::builder()
         .timeout(timeout)
         .build()

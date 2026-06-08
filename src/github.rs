@@ -431,7 +431,9 @@ mod tests {
             .await;
 
         Mock::given(method("PUT"))
-            .and(path_regex(r"/repos/owner/repo/pulls/\d+/reviews/\d+/dismissals"))
+            .and(path_regex(
+                r"/repos/owner/repo/pulls/\d+/reviews/\d+/dismissals",
+            ))
             .respond_with(ResponseTemplate::new(200))
             .mount(&mock_server)
             .await;
@@ -503,7 +505,9 @@ mod tests {
             .await;
 
         Mock::given(method("PUT"))
-            .and(path_regex(r"/repos/owner/repo/pulls/\d+/reviews/\d+/dismissals"))
+            .and(path_regex(
+                r"/repos/owner/repo/pulls/\d+/reviews/\d+/dismissals",
+            ))
             .respond_with(ResponseTemplate::new(500).set_body_string("Internal Server"))
             .up_to_n_times(4) // retries up to 3 times + initial
             .mount(&mock_server)
@@ -517,14 +521,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_dismiss_previous_reviews_invalid_base_url() {
-        let result = dismiss_previous_reviews(
-            "https://evil.example.com",
-            "owner",
-            "repo",
-            1,
-            "token",
-        )
-        .await;
+        let result =
+            dismiss_previous_reviews("https://evil.example.com", "owner", "repo", 1, "token").await;
 
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("allowlist"));
