@@ -4,8 +4,9 @@
 //! and [`fetch_local_diff`] for reading `git diff --cached` output.
 
 use crate::error::DiffguardError;
-use crate::http::{github_diff_headers, validate_github_base_url};
-use crate::retry::with_retry;
+use crate::http::{build_github_http_client, github_diff_headers, validate_github_base_url};
+use crate::retry::with_retry_simple;
+use std::borrow::Cow;
 
 /// Maximum allowed diff size in bytes (100 KB).
 const MAX_DIFF_BYTES: usize = 100 * 1024;
@@ -15,6 +16,15 @@ const MAX_DIFF_LINES: usize = 1500;
 
 /// HTTP request timeout for diff fetching.
 const REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// Number of lines to preserve from the head when chunking a large diff.
+const CHUNK_HEAD_LINES: usize = 50;
+
+/// Number of lines to preserve from the tail when chunking a large diff.
+const CHUNK_TAIL_LINES: usize = 50;
+
+/// Placeholder inserted in place of chunked middle lines.
+const CHUNK_PLACEHOLDER: &str = "\n# ... [diff truncated: {removed} lines omitted] ...\n";
 
 /// Result of a successful diff fetch operation.
 #[derive(Debug, Clone)]
@@ -58,6 +68,64 @@ fn validate_diff_content(content: &str) -> Result<(), DiffguardError> {
     Ok(())
 }
 
+/// Chunks a large diff by preserving the first N and last N lines.
+///
+/// When a diff exceeds [`CHUNK_HEAD_LINES`] + [`CHUNK_TAIL_LINES`], the middle
+/// section is replaced with a placeholder indicating how many lines were removed.
+/// This keeps review context windows manageable for very large diffs.
+///
+/// Returns the original diff unchanged (as a borrowed reference) if it is already
+/// small enough, avoiding unnecessary allocations.
+///
+/// # Arguments
+///
+/// * `content` — The full diff content.
+///
+/// # Returns
+///
+/// A tuple of (chunked_content, was_truncated, removed_lines).
+/// The chunked_content is a `Cow<str>` to avoid allocation when no chunking is needed.
+pub fn chunk_diff(content: &str) -> (Cow<'_, str>, bool, usize) {
+    // Detect line ending style from the original content
+    let has_crlf = content.contains("\r\n");
+    let line_ending = if has_crlf { "\r\n" } else { "\n" };
+    let ends_with_newline = content.ends_with('\n') || content.ends_with("\r\n");
+
+    let lines: Vec<&str> = content.lines().collect();
+    let total = lines.len();
+    let threshold = CHUNK_HEAD_LINES + CHUNK_TAIL_LINES;
+
+    if total <= threshold {
+        return (Cow::Borrowed(content), false, 0);
+    }
+
+    let head = &lines[..CHUNK_HEAD_LINES];
+    let tail = &lines[total - CHUNK_TAIL_LINES..];
+    let removed = total - CHUNK_HEAD_LINES - CHUNK_TAIL_LINES;
+    let placeholder = CHUNK_PLACEHOLDER.replace("{removed}", &removed.to_string());
+
+    let mut result = String::with_capacity(content.len() / 2);
+
+    // Add head lines with detected line endings
+    for line in head {
+        result.push_str(line);
+        result.push_str(line_ending);
+    }
+
+    result.push_str(&placeholder);
+
+    // Add tail lines with detected line endings
+    for (i, line) in tail.iter().enumerate() {
+        result.push_str(line);
+        // Add line ending after each tail line except the last one if original didn't end with newline
+        if i < tail.len() - 1 || ends_with_newline {
+            result.push_str(line_ending);
+        }
+    }
+
+    (Cow::Owned(result), true, removed)
+}
+
 /// Fetches the diff for a GitHub Pull Request.
 ///
 /// Sends a GET request to the GitHub API with the `application/vnd.github.v3.diff`
@@ -90,15 +158,12 @@ pub async fn fetch_pr_diff(
 ) -> Result<DiffResult, DiffguardError> {
     validate_github_base_url(base_url)?;
 
-    let client = reqwest::Client::builder()
-        .timeout(REQUEST_TIMEOUT)
-        .build()
-        .map_err(|e| DiffguardError::Config(format!("Failed to build HTTP client: {}", e)))?;
+    let client = build_github_http_client(REQUEST_TIMEOUT)?;
 
     let url = format!("{}/repos/{}/{}/pulls/{}", base_url, owner, repo, pr_number);
     let headers = github_diff_headers(token)?;
 
-    let response = with_retry(|| async {
+    let response = with_retry_simple(|| async {
         let resp = client
             .get(&url)
             .headers(headers.clone())
@@ -339,5 +404,135 @@ mod tests {
     #[test]
     fn test_validate_diff_content_no_markers() {
         assert!(validate_diff_content("just some random text\nwith no diff markers").is_err());
+    }
+
+    #[test]
+    fn test_chunk_diff_small_diff_unchanged() {
+        let content = "line1\nline2\nline3";
+        let (result, truncated, _) = chunk_diff(content);
+        assert!(!truncated);
+        assert_eq!(result.as_ref(), content);
+    }
+
+    #[test]
+    fn test_chunk_diff_truncates_large_diff() {
+        // Generate 200 lines
+        let lines: Vec<String> = (0..200).map(|i| format!("line {}", i)).collect();
+        let content = lines.join("\n");
+
+        let (result, truncated, removed) = chunk_diff(&content);
+        assert!(truncated);
+        // 200 - 50 - 50 = 100 removed
+        assert_eq!(removed, 100);
+        // Result should have head + placeholder + tail
+        assert!(result.contains("line 0"));
+        assert!(result.contains("line 49"));
+        assert!(result.contains("line 150"));
+        assert!(result.contains("line 199"));
+        assert!(result.contains("100 lines omitted"));
+        // Middle lines should NOT be present
+        assert!(!result.contains("line 100"));
+    }
+
+    #[test]
+    fn test_chunk_diff_exactly_at_threshold_unchanged() {
+        // 100 lines = exactly threshold (50 + 50)
+        let lines: Vec<String> = (0..100).map(|i| format!("line {}", i)).collect();
+        let content = lines.join("\n");
+
+        let (result, truncated, _) = chunk_diff(&content);
+        assert!(!truncated);
+        assert_eq!(result.as_ref(), content);
+    }
+
+    #[test]
+    fn test_chunk_diff_preserves_head_and_tail_order() {
+        let lines: Vec<String> = (0..150).map(|i| format!("line {}", i)).collect();
+        let content = lines.join("\n");
+
+        let (result, truncated, _) = chunk_diff(&content);
+        assert!(truncated);
+
+        // Head lines should appear before the placeholder
+        let head_pos = result.find("line 0").unwrap();
+        let placeholder_pos = result.find("lines omitted").unwrap();
+        let tail_pos = result.find("line 100").unwrap();
+
+        assert!(head_pos < placeholder_pos);
+        assert!(placeholder_pos < tail_pos);
+    }
+
+    #[test]
+    fn test_chunk_diff_preserves_line_endings() {
+        // Test with content that has trailing newline
+        let lines: Vec<String> = (0..150).map(|i| format!("line {}", i)).collect();
+        let content = lines.join("\n") + "\n";
+
+        let (result, truncated, _) = chunk_diff(&content);
+        assert!(truncated);
+        assert!(result.ends_with('\n'));
+    }
+
+    #[test]
+    fn test_chunk_diff_no_allocation_when_small() {
+        // Verify that small diffs don't allocate (Cow::Borrowed)
+        let content = "line1\nline2\nline3";
+        let (result, truncated, _) = chunk_diff(content);
+        assert!(!truncated);
+        // This would fail to compile if result was not Cow
+        assert!(matches!(result, Cow::Borrowed(_)));
+    }
+
+    #[test]
+    fn test_fetch_file_diff_valid() {
+        let dir = tempfile::tempdir().unwrap();
+        let diff_path = dir.path().join("test.diff");
+        let diff_content =
+            "diff --git a/f.rs b/f.rs\n--- a/f.rs\n+++ b/f.rs\n@@ -1 +1,2 @@\n+line1\n line0";
+        std::fs::write(&diff_path, diff_content).unwrap();
+
+        let result = fetch_file_diff(diff_path.to_str().unwrap()).unwrap();
+        assert_eq!(result.content, diff_content);
+        assert!(result.size_bytes > 0);
+        assert!(result.line_count > 0);
+    }
+
+    #[test]
+    fn test_fetch_file_diff_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        let diff_path = dir.path().join("empty.diff");
+        std::fs::write(&diff_path, "").unwrap();
+
+        let result = fetch_file_diff(diff_path.to_str().unwrap());
+        assert!(matches!(result, Err(DiffguardError::EmptyDiff)));
+    }
+
+    #[test]
+    fn test_fetch_file_diff_invalid_content() {
+        let dir = tempfile::tempdir().unwrap();
+        let diff_path = dir.path().join("invalid.diff");
+        std::fs::write(&diff_path, "not a diff").unwrap();
+
+        let result = fetch_file_diff(diff_path.to_str().unwrap());
+        assert!(matches!(result, Err(DiffguardError::InvalidDiffContent)));
+    }
+
+    #[test]
+    fn test_fetch_file_diff_too_large() {
+        let dir = tempfile::tempdir().unwrap();
+        let diff_path = dir.path().join("large.diff");
+        // Create a valid diff header followed by large content to exceed MAX_DIFF_BYTES (100KB)
+        let diff_header = "diff --git a/f.rs b/f.rs\n--- a/f.rs\n+++ b/f.rs\n@@ -1 +1,2 @@\n";
+        let large_content = format!("{}{}", diff_header, "+line\n".repeat(200 * 1024));
+        std::fs::write(&diff_path, &large_content).unwrap();
+
+        let result = fetch_file_diff(diff_path.to_str().unwrap());
+        assert!(matches!(result, Err(DiffguardError::DiffTooLarge { .. })));
+    }
+
+    #[test]
+    fn test_fetch_file_diff_not_found() {
+        let result = fetch_file_diff("/nonexistent/path.diff");
+        assert!(matches!(result, Err(DiffguardError::Config(_))));
     }
 }

@@ -246,9 +246,42 @@ pub struct Config {
     /// When `false` and the provider changes, the model resets to the new provider's default.
     /// Env/TOML model values are NOT carried across provider changes.
     model_set_via_cli: bool,
+    /// Bypass the response cache, forcing an LLM API call.
+    pub no_cache: bool,
 }
 
 impl Config {
+    /// Creates a minimal config for integration tests.
+    ///
+    /// This constructor is marked `#[doc(hidden)]` and should only be used
+    /// in test code. It provides minimal defaults that satisfy the type's
+    /// invariants but are not meaningful for production use.
+    ///
+    /// # Note
+    ///
+    /// This does NOT derive from `Default` to avoid accidental use in
+    /// production code where proper configuration resolution is required.
+    #[doc(hidden)]
+    pub fn empty() -> Self {
+        Self {
+            provider: String::new(),
+            model: String::new(),
+            temperature: 0.1,
+            api_key: String::new(),
+            github_token: None,
+            pr_number: None,
+            repo_owner: None,
+            repo_name: None,
+            prompt: String::new(),
+            is_ci: false,
+            github_base_url: String::new(),
+            provider_config: ProviderConfig::default(),
+            toml_providers: HashMap::new(),
+            model_set_via_cli: false,
+            no_cache: false,
+        }
+    }
+
     /// Builds configuration from environment variables with optional TOML defaults.
     ///
     /// Resolution order: Environment variables > TOML file > Hardcoded defaults.
@@ -366,6 +399,7 @@ impl Config {
             provider_config,
             toml_providers,
             model_set_via_cli: false,
+            no_cache: false,
         })
     }
 
@@ -440,6 +474,9 @@ impl Config {
         }
         if let Some(max_tokens) = args.max_tokens {
             self.provider_config.max_tokens = Some(max_tokens);
+        }
+        if args.no_cache {
+            self.no_cache = true;
         }
 
         Ok(())
@@ -567,5 +604,41 @@ mod tests {
         let providers = HashMap::new();
         let result = resolve_api_key_env_var("deepseek", Some(&providers)).unwrap();
         assert_eq!(result, "DEEPSEEK_API_KEY");
+    }
+
+    #[test]
+    fn test_validate_local_provider_base_url_http_warns() {
+        // This test verifies that HTTP URLs are warned about but still accepted in local mode
+        // The function logs warnings but returns Ok()
+        let result = validate_local_provider_base_url("http://api.example.com/v1");
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_validate_local_provider_base_url_loopback_warns() {
+        // This test verifies that loopback addresses are warned about but still accepted in local mode
+        let result = validate_local_provider_base_url("http://127.0.0.1:11434/v1");
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_validate_local_provider_base_url_unknown_host_warns() {
+        // This test verifies that non-allowlisted hosts are warned about but still accepted in local mode
+        let result = validate_local_provider_base_url("https://custom-llm.example.com/v1");
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_validate_local_provider_base_url_malformed_errors() {
+        let result = validate_local_provider_base_url("not-a-url");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("malformed"));
+    }
+
+    #[test]
+    fn test_validate_local_provider_base_url_known_host_ok() {
+        // Known hosts should not warn
+        let result = validate_local_provider_base_url("https://api.deepseek.com/v1");
+        assert!(result.is_ok());
     }
 }

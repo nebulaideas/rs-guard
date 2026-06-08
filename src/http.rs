@@ -12,6 +12,25 @@ use url::Url;
 /// User-Agent string derived from package metadata at compile time.
 const USER_AGENT: &str = concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION"));
 
+/// Builds a [`reqwest::Client`] with a standard timeout.
+///
+/// Shared helper to avoid duplicating client construction across modules
+/// that communicate with the GitHub API.
+///
+/// Note: User-Agent is added per-request via [`github_headers()`].
+///
+/// # Errors
+///
+/// Returns [`DiffguardError::Config`] if the TLS backend fails to initialise.
+pub fn build_github_http_client(
+    timeout: std::time::Duration,
+) -> Result<reqwest::Client, DiffguardError> {
+    reqwest::Client::builder()
+        .timeout(timeout)
+        .build()
+        .map_err(|e| DiffguardError::Config(format!("Failed to build HTTP client: {}", e)))
+}
+
 /// Allowed GitHub API base URLs.
 ///
 /// Only HTTPS URLs matching these patterns are permitted. This prevents

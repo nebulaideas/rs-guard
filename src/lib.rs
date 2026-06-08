@@ -1,3 +1,4 @@
+#![deny(missing_docs)]
 //! diffguard — AI-powered code review CLI for GitHub Pull Requests.
 //!
 //! This crate provides the core functionality for fetching PR diffs,
@@ -18,6 +19,7 @@
 //! - [`retry`] — Transient failure retry logic
 //! - [`verdict`] — Verdict parsing and review state determination
 
+pub mod cache;
 pub mod cli;
 pub mod config;
 pub mod diff;
@@ -26,6 +28,7 @@ pub mod github;
 pub mod http;
 pub mod llm;
 pub mod output;
+pub mod pipeline;
 pub mod redact;
 pub mod retry;
 pub mod verdict;

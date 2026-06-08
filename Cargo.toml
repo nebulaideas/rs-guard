@@ -26,11 +26,21 @@ async-trait = "0.1"
 tokio = { version = "1.42", features = ["full"] }
 toml = "0.8"
 url = "2.5"
+sha2 = "0.10"
+hex = "0.4"
 
 [dev-dependencies]
 serial_test = "3.5.0"
 tempfile = "3.14"
 wiremock = "0.6"
+
+[dev-dependencies.criterion]
+version = "0.5"
+features = ["html_reports"]
+
+[[bench]]
+name = "verdict"
+harness = false
 
 [profile.release]
 opt-level = 3

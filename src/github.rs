@@ -4,8 +4,8 @@
 //! and [`dismiss_previous_reviews`] for cleaning up outdated bot reviews.
 
 use crate::error::DiffguardError;
-use crate::http::{github_headers, validate_github_base_url};
-use crate::retry::with_retry;
+use crate::http::{build_github_http_client, github_headers, validate_github_base_url};
+use crate::retry::with_retry_simple;
 use crate::verdict::ReviewState;
 use serde_json::json;
 
@@ -25,10 +25,7 @@ async fn submit_review_inner(
     message: &str,
     token: &str,
 ) -> Result<(), DiffguardError> {
-    let client = reqwest::Client::builder()
-        .timeout(REQUEST_TIMEOUT)
-        .build()
-        .map_err(|e| DiffguardError::Config(format!("Failed to build HTTP client: {}", e)))?;
+    let client = build_github_http_client(REQUEST_TIMEOUT)?;
 
     let url = format!(
         "{}/repos/{}/{}/pulls/{}/reviews",
@@ -42,7 +39,7 @@ async fn submit_review_inner(
         "event": state.as_github_state(),
     });
 
-    with_retry(|| async {
+    with_retry_simple(|| async {
         let resp = client
             .post(&url)
             .headers(headers.clone())
@@ -152,10 +149,7 @@ pub async fn dismiss_previous_reviews(
 ) -> Result<(), DiffguardError> {
     validate_github_base_url(base_url)?;
 
-    let client = reqwest::Client::builder()
-        .timeout(REQUEST_TIMEOUT)
-        .build()
-        .map_err(|e| DiffguardError::Config(format!("Failed to build HTTP client: {}", e)))?;
+    let client = build_github_http_client(REQUEST_TIMEOUT)?;
 
     let url = format!(
         "{}/repos/{}/{}/pulls/{}/reviews",
@@ -164,7 +158,7 @@ pub async fn dismiss_previous_reviews(
 
     let headers = github_headers(token)?;
 
-    let reviews: Vec<serde_json::Value> = with_retry(|| async {
+    let reviews: Vec<serde_json::Value> = with_retry_simple(|| async {
         let resp = client
             .get(&url)
             .headers(headers.clone())
@@ -210,7 +204,7 @@ pub async fn dismiss_previous_reviews(
                     "message": "Outdated — new review submitted",
                 });
 
-                if let Err(e) = with_retry(|| async {
+                if let Err(e) = with_retry_simple(|| async {
                     let resp = client
                         .put(&dismiss_url)
                         .headers(headers.clone())
@@ -245,4 +239,309 @@ pub async fn dismiss_previous_reviews(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+    use wiremock::matchers::{method, path_regex};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    #[tokio::test]
+    async fn test_submit_review_success() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path_regex(r"/repos/owner/repo/pulls/\d+/reviews"))
+            .respond_with(ResponseTemplate::new(200))
+            .mount(&mock_server)
+            .await;
+
+        let result = submit_review(
+            &mock_server.uri(),
+            "owner",
+            "repo",
+            1,
+            ReviewState::Approve,
+            "looks good",
+            "token",
+        )
+        .await;
+
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_submit_review_retryable_then_success() {
+        let mock_server = MockServer::start().await;
+
+        // First request fails with 503
+        Mock::given(method("POST"))
+            .and(path_regex(r"/repos/owner/repo/pulls/\d+/reviews"))
+            .respond_with(ResponseTemplate::new(503).set_body_string("Service Unavailable"))
+            .up_to_n_times(1)
+            .mount(&mock_server)
+            .await;
+
+        // Second request succeeds
+        Mock::given(method("POST"))
+            .and(path_regex(r"/repos/owner/repo/pulls/\d+/reviews"))
+            .respond_with(ResponseTemplate::new(200))
+            .mount(&mock_server)
+            .await;
+
+        let result = submit_review(
+            &mock_server.uri(),
+            "owner",
+            "repo",
+            1,
+            ReviewState::Comment,
+            "ok",
+            "token",
+        )
+        .await;
+
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_submit_review_permission_fallback_to_comment() {
+        let mock_server = MockServer::start().await;
+
+        // First call: APPROVE fails with 403
+        Mock::given(method("POST"))
+            .and(path_regex(r"/repos/owner/repo/pulls/\d+/reviews"))
+            .respond_with(ResponseTemplate::new(403).set_body_string("Forbidden"))
+            .up_to_n_times(1)
+            .mount(&mock_server)
+            .await;
+
+        // Second call: should be COMMENT fallback — verify via the mock server
+        Mock::given(method("POST"))
+            .and(path_regex(r"/repos/owner/repo/pulls/\d+/reviews"))
+            .respond_with(ResponseTemplate::new(200))
+            .mount(&mock_server)
+            .await;
+
+        let result = submit_review(
+            &mock_server.uri(),
+            "owner",
+            "repo",
+            1,
+            ReviewState::Approve,
+            "my review",
+            "token",
+        )
+        .await;
+
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_submit_review_no_fallback_on_permission_denied_for_comment() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path_regex(r"/repos/owner/repo/pulls/\d+/reviews"))
+            .respond_with(ResponseTemplate::new(403).set_body_string("Forbidden"))
+            .mount(&mock_server)
+            .await;
+
+        let result = submit_review(
+            &mock_server.uri(),
+            "owner",
+            "repo",
+            1,
+            ReviewState::Comment,
+            "my comment",
+            "token",
+        )
+        .await;
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().is_permission_denied());
+    }
+
+    #[tokio::test]
+    async fn test_submit_review_invalid_base_url() {
+        let result = submit_review(
+            "https://evil.example.com",
+            "owner",
+            "repo",
+            1,
+            ReviewState::Comment,
+            "msg",
+            "token",
+        )
+        .await;
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("allowlist"));
+    }
+
+    #[tokio::test]
+    async fn test_submit_review_invalid_token() {
+        let result = submit_review(
+            "http://127.0.0.1:1",
+            "owner",
+            "repo",
+            1,
+            ReviewState::Comment,
+            "msg",
+            "token\x00withnull",
+        )
+        .await;
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("token"));
+    }
+
+    #[tokio::test]
+    async fn test_dismiss_previous_reviews_no_reviews() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path_regex(r"/repos/owner/repo/pulls/\d+/reviews"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
+            .mount(&mock_server)
+            .await;
+
+        let result =
+            dismiss_previous_reviews(&mock_server.uri(), "owner", "repo", 1, "token").await;
+
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_dismiss_previous_reviews_dismisses_bot_request_changes() {
+        let mock_server = MockServer::start().await;
+
+        let bot_review = json!({
+            "id": 42,
+            "state": "CHANGES_REQUESTED",
+            "body": "Some review\n\n<!-- diffguard-bot -->"
+        });
+
+        Mock::given(method("GET"))
+            .and(path_regex(r"/repos/owner/repo/pulls/\d+/reviews"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!([bot_review])))
+            .mount(&mock_server)
+            .await;
+
+        Mock::given(method("PUT"))
+            .and(path_regex(
+                r"/repos/owner/repo/pulls/\d+/reviews/\d+/dismissals",
+            ))
+            .respond_with(ResponseTemplate::new(200))
+            .mount(&mock_server)
+            .await;
+
+        let result =
+            dismiss_previous_reviews(&mock_server.uri(), "owner", "repo", 1, "token").await;
+
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_dismiss_previous_reviews_skips_non_bot_reviews() {
+        let mock_server = MockServer::start().await;
+
+        let human_review = json!({
+            "id": 99,
+            "state": "CHANGES_REQUESTED",
+            "body": "Please fix this issue"
+        });
+
+        Mock::given(method("GET"))
+            .and(path_regex(r"/repos/owner/repo/pulls/\d+/reviews"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!([human_review])))
+            .mount(&mock_server)
+            .await;
+
+        let result =
+            dismiss_previous_reviews(&mock_server.uri(), "owner", "repo", 1, "token").await;
+
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_dismiss_previous_reviews_skips_approved_reviews() {
+        let mock_server = MockServer::start().await;
+
+        let approved_review = json!({
+            "id": 55,
+            "state": "APPROVED",
+            "body": "<!-- diffguard-bot -->\nLGTM"
+        });
+
+        Mock::given(method("GET"))
+            .and(path_regex(r"/repos/owner/repo/pulls/\d+/reviews"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!([approved_review])))
+            .mount(&mock_server)
+            .await;
+
+        let result =
+            dismiss_previous_reviews(&mock_server.uri(), "owner", "repo", 1, "token").await;
+
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_dismiss_previous_reviews_handles_dismissal_error() {
+        let mock_server = MockServer::start().await;
+
+        let bot_review = json!({
+            "id": 42,
+            "state": "CHANGES_REQUESTED",
+            "body": "<!-- diffguard-bot -->\nReview"
+        });
+
+        Mock::given(method("GET"))
+            .and(path_regex(r"/repos/owner/repo/pulls/\d+/reviews"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!([bot_review])))
+            .mount(&mock_server)
+            .await;
+
+        Mock::given(method("PUT"))
+            .and(path_regex(
+                r"/repos/owner/repo/pulls/\d+/reviews/\d+/dismissals",
+            ))
+            .respond_with(ResponseTemplate::new(500).set_body_string("Internal Server"))
+            .up_to_n_times(4) // retries up to 3 times + initial
+            .mount(&mock_server)
+            .await;
+
+        let result =
+            dismiss_previous_reviews(&mock_server.uri(), "owner", "repo", 1, "token").await;
+
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_dismiss_previous_reviews_invalid_base_url() {
+        let result =
+            dismiss_previous_reviews("https://evil.example.com", "owner", "repo", 1, "token").await;
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("allowlist"));
+    }
+
+    #[tokio::test]
+    async fn test_dismiss_previous_reviews_handles_get_error() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path_regex(r"/repos/owner/repo/pulls/\d+/reviews"))
+            .respond_with(ResponseTemplate::new(500).set_body_string("Server Error"))
+            .mount(&mock_server)
+            .await;
+
+        let result =
+            dismiss_previous_reviews(&mock_server.uri(), "owner", "repo", 1, "token").await;
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("500"));
+    }
 }
