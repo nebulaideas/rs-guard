@@ -273,8 +273,8 @@ pub async fn run_pipeline(
         state: state.to_string(),
     };
 
-    let metrics_path = std::env::var("DIFFGUARD_METRICS_PATH")
-        .unwrap_or_else(|_| METRICS_FILENAME.to_string());
+    let metrics_path =
+        std::env::var("DIFFGUARD_METRICS_PATH").unwrap_or_else(|_| METRICS_FILENAME.to_string());
     if let Err(e) = write_metrics(&metrics, &metrics_path) {
         log::warn!("Failed to write metrics: {}", e);
     }

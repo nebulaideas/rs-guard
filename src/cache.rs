@@ -425,9 +425,9 @@ impl DiffCache {
         match fs::read_to_string(gitignore_path) {
             Ok(content) => {
                 // Check for exact line match (with or without trailing slash)
-                let has_entry = content.lines().any(|line| {
-                    line == cache_dir_str || line == format!("{}/", cache_dir_str)
-                });
+                let has_entry = content
+                    .lines()
+                    .any(|line| line == cache_dir_str || line == format!("{}/", cache_dir_str));
                 if has_entry {
                     return;
                 }
