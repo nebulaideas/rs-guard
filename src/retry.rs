@@ -227,7 +227,7 @@ fn backoff_delay(attempt: u32) -> Duration {
 /// Executes an async operation with automatic retry on transient failures.
 ///
 /// Uses exponential backoff (1s, 2s, 4s) with ±25% jitter.
-/// Retries up to [`MAX_RETRIES`] times for retryable errors.
+/// Retries up to `MAX_RETRIES` times for retryable errors.
 /// Non-retryable errors are returned immediately.
 ///
 /// # Arguments

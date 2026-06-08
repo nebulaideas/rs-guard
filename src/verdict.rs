@@ -3,20 +3,21 @@
 //! Parses structured metadata from LLM responses to determine the appropriate
 //! GitHub review state (`APPROVE`, `REQUEST_CHANGES`, or `COMMENT`).
 //!
-//! The parser first attempts to extract a `[RS_GUARD_VERDICT_METADATA]` block.
-//! If no metadata block is found, it falls back to counting `[Critical Bug]`
-//! and `[Security]` tags in the response text.
+//! The parser first attempts to extract a `[RS_GUARD_VERDICT_METADATA]` block
+//! via substring scanning. If no metadata block is found, it falls back to
+//! counting `[Critical Bug]` and `[Security]` tags in the response text.
 
 use crate::error::RsGuardError;
 use regex::Regex;
 use std::sync::LazyLock;
 
-/// Compiled regex for extracting the verdict metadata block.
-static METADATA_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(
-        r"\[RS_GUARD_VERDICT_METADATA\][\s\S]*?Verdict:\s*(\w+)[\s\S]*?CriticalBugs:\s*(\d+)[\s\S]*?SecurityIssues:\s*(\d+)"
-    ).expect("metadata regex is valid")
-});
+/// Maximum bytes to scan after the metadata marker for fields.
+/// Prevents scanning the entire LLM response (which can be 10KB+) when
+/// the marker appears near the end.
+const METADATA_SCAN_WINDOW: usize = 1024;
+
+/// Marker string that identifies the verdict metadata block.
+const METADATA_MARKER: &str = "[RS_GUARD_VERDICT_METADATA]";
 
 /// Compiled regex for counting critical bug tags.
 static CRITICAL_RE: LazyLock<Regex> = LazyLock::new(|| {
@@ -82,15 +83,45 @@ impl std::fmt::Display for Verdict {
     }
 }
 
-/// Attempts to extract a `[RS_GUARD_VERDICT_METADATA]` block from the response.
+/// Extracts a named field value from the metadata section.
 ///
-/// Returns `None` if the metadata block is not present or cannot be parsed.
+/// Searches for `label:` in `section`, extracts the value until end-of-line,
+/// and returns the trimmed result. Fields may appear in any order.
+fn extract_field<'a>(section: &'a str, label: &str) -> Option<&'a str> {
+    let pos = section.find(label)?;
+    let value = section[pos + label.len()..].trim_start();
+    let end = value.find(['\n', '\r']).unwrap_or(value.len());
+    let result = value[..end].trim();
+    if result.is_empty() {
+        None
+    } else {
+        Some(result)
+    }
+}
+
+/// Attempts to extract a `[RS_GUARD_VERDICT_METADATA]` block from the response
+/// using fast substring scanning instead of regex.
+///
+/// Returns `None` if the metadata block is not present or any field cannot be parsed.
 pub fn parse_metadata_block(response: &str) -> Option<Verdict> {
-    let caps = METADATA_RE.captures(response)?;
+    let marker_pos = response.find(METADATA_MARKER)?;
+    let section_start = marker_pos + METADATA_MARKER.len();
+    let section = &response[section_start..];
+    // Only scan a limited window after the marker — the metadata block is small
+    let scan_window = &section[..METADATA_SCAN_WINDOW.min(section.len())];
+
+    let verdict = extract_field(scan_window, "Verdict:")?;
+    let critical_bugs: u32 = extract_field(scan_window, "CriticalBugs:")?
+        .parse()
+        .unwrap_or(0);
+    let security_issues: u32 = extract_field(scan_window, "SecurityIssues:")?
+        .parse()
+        .unwrap_or(0);
+
     Some(Verdict {
-        verdict: caps.get(1)?.as_str().to_string(),
-        critical_bugs: caps.get(2)?.as_str().parse().unwrap_or(0),
-        security_issues: caps.get(3)?.as_str().parse().unwrap_or(0),
+        verdict: verdict.to_string(),
+        critical_bugs,
+        security_issues,
     })
 }
 

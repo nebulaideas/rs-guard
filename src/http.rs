@@ -40,7 +40,7 @@ const ALLOWED_BASE_URLS: &[&str] = &["https://api.github.com"];
 /// Validates that a GitHub API base URL is on the allowlist.
 ///
 /// Accepts:
-/// - Exact match against [`ALLOWED_BASE_URLS`] (e.g. `https://api.github.com`)
+/// - Exact match against `ALLOWED_BASE_URLS` (e.g. `https://api.github.com`)
 /// - GitHub Enterprise pattern: `https://{host}/api/v3` where `{host}` is
 ///   any valid hostname
 /// - Loopback addresses (`http://127.0.0.1`, `http://localhost`) for testing

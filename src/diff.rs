@@ -70,7 +70,7 @@ fn validate_diff_content(content: &str) -> Result<(), RsGuardError> {
 
 /// Chunks a large diff by preserving the first N and last N lines.
 ///
-/// When a diff exceeds [`CHUNK_HEAD_LINES`] + [`CHUNK_TAIL_LINES`], the middle
+/// When a diff exceeds `CHUNK_HEAD_LINES` + `CHUNK_TAIL_LINES`, the middle
 /// section is replaced with a placeholder indicating how many lines were removed.
 /// This keeps review context windows manageable for very large diffs.
 ///

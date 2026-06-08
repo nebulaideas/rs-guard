@@ -131,7 +131,7 @@ pub async fn submit_review(
 /// Dismisses previous rs-guard `CHANGES_REQUESTED` reviews on a Pull Request.
 ///
 /// Queries all reviews on the PR, identifies those with state `CHANGES_REQUESTED`
-/// that contain the [`BOT_SIGNATURE`] marker, and dismisses each one with the
+/// that contain the `BOT_SIGNATURE` marker, and dismisses each one with the
 /// message "Outdated — new review submitted".
 ///
 /// Individual dismissal failures are logged as warnings but do not cause this
