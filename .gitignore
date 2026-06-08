@@ -21,3 +21,4 @@ target
 #.idea/
 .diffguard/cache/
 diffguard-metrics.json
+review-result.txt

@@ -12,10 +12,12 @@ use url::Url;
 /// User-Agent string derived from package metadata at compile time.
 const USER_AGENT: &str = concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION"));
 
-/// Builds a [`reqwest::Client`] with a standard timeout and user-agent.
+/// Builds a [`reqwest::Client`] with a standard timeout.
 ///
 /// Shared helper to avoid duplicating client construction across modules
 /// that communicate with the GitHub API.
+///
+/// Note: User-Agent is added per-request via [`github_headers()`].
 ///
 /// # Errors
 ///

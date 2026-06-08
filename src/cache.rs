@@ -186,10 +186,10 @@ impl DiffCache {
     /// Returns `None` if the entry doesn't exist, is expired, or is corrupt.
     fn read_entry(&self, path: &Path) -> Option<String> {
         let content = fs::read_to_string(path).ok()?;
-        let mut lines = content.lines();
 
         // First line is the timestamp
-        let timestamp_str = lines.next()?;
+        let newline_idx = content.find('\n')?;
+        let timestamp_str = &content[..newline_idx];
         let timestamp: u64 = timestamp_str.parse().ok()?;
 
         // Check TTL (use >= so TTL=0 means immediately expired)
@@ -201,13 +201,13 @@ impl DiffCache {
             return None;
         }
 
-        // Rest is the response
-        let response: String = lines.collect::<Vec<_>>().join("\n");
+        // Rest is the response (preserve trailing newlines)
+        let response = &content[newline_idx + 1..];
         if response.is_empty() {
             return None;
         }
 
-        Some(response)
+        Some(response.to_string())
     }
 
     /// Retrieves a cached response by diff content hash.
@@ -295,7 +295,7 @@ impl DiffCache {
         // Use timestamp + random component for uniqueness to prevent symlink attacks
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
+            .unwrap_or_default()
             .as_nanos();
         let tmp_filename = format!("{}.{}.tmp", key_str, timestamp);
         let tmp_path = self.config.cache_dir.join(&tmp_filename);
@@ -408,7 +408,7 @@ impl DiffCache {
 
     /// Attempts to auto-create a `.gitignore` entry for the cache directory.
     ///
-    /// Adds `.diffguard/cache/` to the project's `.gitignore` if the file
+    /// Adds the configured cache directory to the project's `.gitignore` if the file
     /// does not already contain an entry for the cache directory.
     ///
     /// Logs a warning if the operation fails.
@@ -418,14 +418,15 @@ impl DiffCache {
         }
 
         let gitignore_path = Path::new(".gitignore");
-        let entry = format!("{}/\n", DEFAULT_CACHE_DIR);
+        let cache_dir_str = self.config.cache_dir.to_string_lossy();
+        let entry = format!("{}\n", cache_dir_str);
 
         // Check if entry already exists using exact line matching
         match fs::read_to_string(gitignore_path) {
             Ok(content) => {
                 // Check for exact line match (with or without trailing slash)
                 let has_entry = content.lines().any(|line| {
-                    line == DEFAULT_CACHE_DIR || line == format!("{}/", DEFAULT_CACHE_DIR)
+                    line == cache_dir_str || line == format!("{}/", cache_dir_str)
                 });
                 if has_entry {
                     return;

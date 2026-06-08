@@ -212,6 +212,7 @@ async fn test_full_pipeline_empty_diff() {
 }
 
 #[tokio::test]
+#[serial_test::serial]
 async fn test_full_pipeline_cache_hit() {
     // Clear cache before this test to ensure clean state
     let cache_dir = std::path::Path::new(".diffguard/cache");
@@ -283,9 +284,14 @@ async fn test_full_pipeline_chunked_diff() {
     let github = MockServer::start().await;
     let llm = MockServer::start().await;
 
-    // Generate a large diff (200 lines)
-    let large_diff: String = (0..200)
-        .map(|i| format!("diff --git a/file{}.rs b/file{}.rs\nline {}", i, i, i))
+    // Generate a large diff (20 valid unified diff blocks)
+    let large_diff: String = (0..20)
+        .map(|i| {
+            format!(
+                "diff --git a/file{}.rs b/file{}.rs\n--- a/file{}.rs\n+++ b/file{}.rs\n@@ -1,1 +1,1 @@\n-old line {}\n+new line {}\n",
+                i, i, i, i, i, i
+            )
+        })
         .collect::<Vec<_>>()
         .join("\n");
 
@@ -323,6 +329,7 @@ async fn test_full_pipeline_chunked_diff() {
 }
 
 #[tokio::test]
+#[serial_test::serial]
 async fn test_full_pipeline_metrics_file_created() {
     let github = MockServer::start().await;
     let llm = MockServer::start().await;
@@ -352,12 +359,13 @@ async fn test_full_pipeline_metrics_file_created() {
     config.provider_config.base_url = Some(llm.uri());
     config.no_cache = true; // Disable cache to avoid conflicts
 
+    // Use temp file for metrics to ensure cleanup
+    let metrics_file = tempfile::NamedTempFile::new().unwrap();
+    let metrics_path = metrics_file.path();
+    std::env::set_var("DIFFGUARD_METRICS_PATH", metrics_path);
+
     let result = run_pipeline(config, None).await;
     assert!(matches!(result, Ok(PipelineResult::Success)));
-
-    // Verify metrics file was created
-    let metrics_path = std::path::Path::new("diffguard-metrics.json");
-    assert!(metrics_path.exists(), "Metrics file should be created");
 
     // Verify metrics file contains expected fields
     let content = std::fs::read_to_string(metrics_path).unwrap();
@@ -367,8 +375,8 @@ async fn test_full_pipeline_metrics_file_created() {
     assert!(content.contains("latency_secs"));
     assert!(content.contains("estimated_cost_cents"));
 
-    // Clean up
-    let _ = std::fs::remove_file(metrics_path);
+    // Temp file is automatically cleaned up on drop
+    std::env::remove_var("DIFFGUARD_METRICS_PATH");
 }
 
 #[tokio::test]

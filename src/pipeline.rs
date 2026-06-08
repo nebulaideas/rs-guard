@@ -185,9 +185,9 @@ pub async fn run_pipeline(
     let start = std::time::Instant::now();
     let estimated_tokens_in = (config.prompt.len() + diff_content.len()) / 4; // rough: ~4 chars/token
 
-    // Check cache before calling the LLM (keyed on original content, not chunked)
+    // Check cache before calling the LLM (keyed on actual content sent to LLM)
     let llm_response = if let Some(cached) = cache.get(
-        &diff_result.content,
+        &diff_content,
         &config.prompt,
         &config.provider,
         &config.model,
@@ -207,7 +207,7 @@ pub async fn run_pipeline(
 
         log::info!("Caching LLM response for future runs");
         if let Err(e) = cache.set(
-            &diff_result.content,
+            &diff_content,
             &config.prompt,
             &config.provider,
             &config.model,
@@ -216,7 +216,6 @@ pub async fn run_pipeline(
         ) {
             log::warn!("Failed to cache LLM response: {}", e);
         }
-
         response
     };
 
@@ -274,7 +273,9 @@ pub async fn run_pipeline(
         state: state.to_string(),
     };
 
-    if let Err(e) = write_metrics(&metrics, METRICS_FILENAME) {
+    let metrics_path = std::env::var("DIFFGUARD_METRICS_PATH")
+        .unwrap_or_else(|_| METRICS_FILENAME.to_string());
+    if let Err(e) = write_metrics(&metrics, &metrics_path) {
         log::warn!("Failed to write metrics: {}", e);
     }
 
