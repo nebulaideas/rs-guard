@@ -137,4 +137,30 @@ mod tests {
     fn test_known_provider_names_count() {
         assert_eq!(known_provider_names().len(), 5);
     }
+
+    #[test]
+    fn test_all_ci_allowed_hosts_returns_entries() {
+        let hosts = all_ci_allowed_hosts();
+        assert!(!hosts.is_empty(), "CI allowed hosts should not be empty");
+    }
+
+    #[test]
+    fn test_each_provider_default_url_matches_allowed_host() {
+        for p in all_providers() {
+            let parsed = url::Url::parse(p.default_base_url)
+                .unwrap_or_else(|_| panic!("{} default_base_url should be a valid URL", p.name));
+            let host = parsed
+                .host_str()
+                .unwrap_or_else(|| panic!("{} default_base_url should have a host", p.name));
+            let scheme = parsed.scheme();
+            let allowed = p.ci_allowed_hosts.to_vec();
+            assert!(
+                allowed.contains(&(scheme, host)),
+                "{} default_base_url host ({}) not in its ci_allowed_hosts: {:?}",
+                p.name,
+                host,
+                allowed
+            );
+        }
+    }
 }

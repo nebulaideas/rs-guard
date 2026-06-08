@@ -13,6 +13,7 @@ use crate::output::{
     ARTIFACT_FILENAME, METRICS_FILENAME,
 };
 use crate::redact::{log_redacted, redact_secrets};
+use crate::retry::with_retry_simple;
 use crate::verdict::{parse_verdict, ReviewState};
 use anyhow::Context;
 
@@ -200,10 +201,13 @@ pub async fn run_pipeline(
         let provider = create_provider(&config.provider, &config.api_key, &config.provider_config)
             .context("Failed to create LLM provider")?;
 
-        let response = provider
-            .chat_completion(&config.prompt, &diff_content, config.temperature)
-            .await
-            .context("LLM API call failed")?;
+        let response = with_retry_simple(|| async {
+            provider
+                .chat_completion(&config.prompt, &diff_content, config.temperature)
+                .await
+        })
+        .await
+        .context("LLM API call failed")?;
 
         log::info!("Caching LLM response for future runs");
         if let Err(e) = cache.set(

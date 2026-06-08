@@ -317,3 +317,212 @@ pub(crate) fn build_llm_client(
         .build()
         .map_err(|e| DiffguardError::Config(format!("Failed to build HTTP client: {}", e)))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_build_llm_client_rejects_invalid_api_key() {
+        let result = build_llm_client("deepseek", "key\x00with\x01control", &[]);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("Invalid deepseek API key format"),
+            "Expected API key format error, got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_build_llm_client_rejects_invalid_extra_header_name() {
+        let result = build_llm_client("testprov", "valid-key", &[("inv@lid header name", "value")]);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("Invalid header name"),
+            "Expected header name error, got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_build_llm_client_rejects_invalid_extra_header_value() {
+        let result = build_llm_client("testprov", "valid-key", &[("X-Custom", "val\x00ue")]);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("Invalid header"),
+            "Expected header value error, got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_build_llm_client_succeeds_with_valid_inputs() {
+        let result = build_llm_client("deepseek", "valid-key-123", &[]);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_build_llm_client_succeeds_with_extra_headers() {
+        let result = build_llm_client(
+            "openrouter",
+            "valid-key",
+            &[("HTTP-Referer", "https://example.com"), ("X-Title", "test")],
+        );
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_chat_messages_ordering() {
+        let messages = chat_messages("system prompt", "user diff");
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[0].role, "system");
+        assert_eq!(messages[0].content, "system prompt");
+        assert_eq!(messages[1].role, "user");
+        assert_eq!(messages[1].content, "user diff");
+    }
+
+    #[tokio::test]
+    async fn test_send_chat_request_empty_choices() {
+        use wiremock::matchers::method;
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mock_server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "choices": []
+            })))
+            .mount(&mock_server)
+            .await;
+
+        let client = build_llm_client("testprov", "key", &[]).unwrap();
+        let request = ChatRequest {
+            model: "test-model".to_string(),
+            messages: chat_messages("system", "user"),
+            temperature: 0.1,
+            max_tokens: None,
+        };
+        let result = send_chat_request(
+            &client,
+            &format!("{}/chat/completions", mock_server.uri()),
+            &request,
+            "testprov",
+        )
+        .await;
+
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("Empty response from LLM"),
+            "Expected empty choices error, got: {}",
+            err
+        );
+    }
+
+    #[tokio::test]
+    async fn test_send_chat_request_malformed_json() {
+        use wiremock::matchers::method;
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mock_server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("this is not json"))
+            .mount(&mock_server)
+            .await;
+
+        let client = build_llm_client("testprov", "key", &[]).unwrap();
+        let request = ChatRequest {
+            model: "test-model".to_string(),
+            messages: chat_messages("system", "user"),
+            temperature: 0.1,
+            max_tokens: None,
+        };
+        let result = send_chat_request(
+            &client,
+            &format!("{}/chat/completions", mock_server.uri()),
+            &request,
+            "testprov",
+        )
+        .await;
+
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("Failed to parse response"),
+            "Expected parse error, got: {}",
+            err
+        );
+    }
+
+    #[tokio::test]
+    async fn test_send_chat_request_http_error() {
+        use wiremock::matchers::method;
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mock_server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(500).set_body_string("Internal Server Error"))
+            .mount(&mock_server)
+            .await;
+
+        let client = build_llm_client("testprov", "key", &[]).unwrap();
+        let request = ChatRequest {
+            model: "test-model".to_string(),
+            messages: chat_messages("system", "user"),
+            temperature: 0.1,
+            max_tokens: None,
+        };
+        let result = send_chat_request(
+            &client,
+            &format!("{}/chat/completions", mock_server.uri()),
+            &request,
+            "testprov",
+        )
+        .await;
+
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("500"), "Expected 500 error, got: {}", err);
+    }
+
+    #[tokio::test]
+    async fn test_send_chat_request_reasoning_content_ignored() {
+        use wiremock::matchers::method;
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mock_server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "choices": [{
+                    "message": {
+                        "content": "Review text",
+                        "reasoning_content": "Internal reasoning that should not appear in output"
+                    }
+                }]
+            })))
+            .mount(&mock_server)
+            .await;
+
+        let client = build_llm_client("testprov", "key", &[]).unwrap();
+        let request = ChatRequest {
+            model: "test-model".to_string(),
+            messages: chat_messages("system", "user"),
+            temperature: 0.1,
+            max_tokens: None,
+        };
+        let result = send_chat_request(
+            &client,
+            &format!("{}/chat/completions", mock_server.uri()),
+            &request,
+            "testprov",
+        )
+        .await;
+
+        assert!(result.is_ok());
+        let content = result.unwrap();
+        assert_eq!(content, "Review text");
+        assert!(!content.contains("Internal reasoning"));
+    }
+}
