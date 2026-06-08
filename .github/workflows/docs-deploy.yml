@@ -12,6 +12,9 @@ jobs:
   docs:
     name: Build and Deploy Documentation
     runs-on: ubuntu-latest
+    concurrency:
+      group: pages
+      cancel-in-progress: false
     permissions:
       contents: read
       pages: write

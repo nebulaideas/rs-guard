@@ -559,11 +559,12 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn test_gitignore_auto_creation() {
         let dir = tempdir().unwrap();
-        let cache_dir = dir.path().join(".diffguard/cache");
+        let cache_dir = Path::new(DEFAULT_CACHE_DIR);
         let config = CacheConfig {
-            cache_dir: cache_dir.clone(),
+            cache_dir: cache_dir.to_path_buf(),
             ttl: Duration::from_secs(3600),
             enabled: true,
             max_size_bytes: DEFAULT_MAX_SIZE_BYTES,
@@ -579,7 +580,7 @@ mod tests {
         let gitignore_path = dir.path().join(".gitignore");
         assert!(gitignore_path.exists());
         let content = std::fs::read_to_string(&gitignore_path).unwrap();
-        assert!(content.contains(DEFAULT_CACHE_DIR));
+        assert!(content.contains(".diffguard/cache"));
         let line_count_before = content.lines().count();
 
         // Second call should not duplicate the entry
@@ -594,11 +595,12 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn test_gitignore_exact_line_matching() {
         let dir = tempdir().unwrap();
-        let cache_dir = dir.path().join(".diffguard/cache");
+        let cache_dir = Path::new(DEFAULT_CACHE_DIR);
         let config = CacheConfig {
-            cache_dir: cache_dir.clone(),
+            cache_dir: cache_dir.to_path_buf(),
             ttl: Duration::from_secs(3600),
             enabled: true,
             max_size_bytes: DEFAULT_MAX_SIZE_BYTES,
@@ -616,7 +618,7 @@ mod tests {
         // Should add the entry since it's not an exact match
         cache.ensure_gitignored();
         let content = std::fs::read_to_string(&gitignore_path).unwrap();
-        assert!(content.contains(DEFAULT_CACHE_DIR));
+        assert!(content.contains(".diffguard/cache"));
 
         // Restore original directory
         std::env::set_current_dir(original_dir).unwrap();
