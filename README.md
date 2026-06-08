@@ -60,9 +60,11 @@ See [`examples/github-actions-workflow/`](examples/github-actions-workflow/) for
 
 ## Installation
 
-### Pre-built binary
+### Pre-built binary (Recommended)
 
 Download from [GitHub Releases](https://github.com/nebulaideas/diffguard-rs/releases).
+
+See [docs/INSTALLATION.md](docs/INSTALLATION.md) for platform-specific instructions (Linux, macOS, Windows).
 
 ### Build from source
 
@@ -82,6 +84,8 @@ cargo install diffguard
 ```
 
 After installation, the `diffguard` binary will be available in your `~/.cargo/bin` directory.
+
+**Note:** Requires the crate to be published on crates.io. Before publication, use "Build from source" instead.
 
 ---
 
@@ -261,6 +265,7 @@ cargo doc --no-deps --open
 
 | Document | Description |
 |---|---|
+| [docs/INSTALLATION.md](docs/INSTALLATION.md) | **Complete installation guide** for all platforms (Linux, macOS, Windows) |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | System design, Mermaid diagrams, security model |
 | [docs/USAGE.md](docs/USAGE.md) | Full CLI reference, GitHub Actions guide, troubleshooting |
 | [docs/API.md](docs/API.md) | Module API docs, custom provider implementation guide |
