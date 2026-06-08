@@ -1012,6 +1012,477 @@ If publishing to crates.io for `cargo install diffguard`:
 
 ---
 
+## Phase 7: Production Hardening & Distribution
+
+### Goal
+
+Transform diffguard-rs from a working CLI into a production-ready, high-performance tool with seamless GitHub Actions integration and cross-platform distribution.
+
+### Prerequisites Checklist
+
+Before starting Phase 7, all of the following must be complete:
+
+- [ ] Phase 6 complete (crates.io published, crates.ai registered)
+- [ ] Stable API established (no breaking changes planned for 0.x series)
+- [ ] User feedback collected from early adopters
+- [ ] Performance baseline established (current latency measurements documented)
+
+### Deliverables
+
+#### GitHub Action Wrapper (`action.yml`)
+
+Create a composite GitHub Action for one-click installation and usage:
+
+```yaml
+# action.yml
+name: 'DiffGuard AI Code Review'
+description: 'AI-powered code review for GitHub PRs using DeepSeek, Kimi, Qwen, and more'
+author: 'NebulaIdeas'
+
+inputs:
+  provider:
+    description: 'LLM provider (deepseek, kimi, qwen, openrouter, openai)'
+    required: false
+    default: 'deepseek'
+  model:
+    description: 'Model name'
+    required: false
+    default: 'deepseek-v4-flash'
+  temperature:
+    description: 'Temperature for LLM (0.0-1.0)'
+    required: false
+    default: '0.1'
+  prompt-file:
+    description: 'Custom prompt file path'
+    required: false
+    default: '.github/review-prompt.md'
+  api-key:
+    description: 'LLM API key'
+    required: true
+  github-token:
+    description: 'GitHub token for review submission'
+    required: false
+    default: ${{ github.token }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Install diffguard
+      shell: bash
+      run: |
+        curl -L https://github.com/nebulaideas/diffguard-rs/releases/latest/download/diffguard-x86_64-unknown-linux-gnu.tar.gz | tar xz
+        chmod +x diffguard
+        sudo mv diffguard /usr/local/bin/
+    
+    - name: Run code review
+      shell: bash
+      env:
+        DIFFGUARD_PROVIDER: ${{ inputs.provider }}
+        DIFFGUARD_MODEL: ${{ inputs.model }}
+        DIFFGUARD_TEMPERATURE: ${{ inputs.temperature }}
+        DIFFGUARD_PROMPT_FILE: ${{ inputs.prompt-file }}
+        DEEPSEEK_API_KEY: ${{ inputs.api-key }}
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+        REPO_FULL_NAME: ${{ github.repository }}
+      run: |
+        diffguard --provider "$DIFFGUARD_PROVIDER" \
+                  --model "$DIFFGUARD_MODEL" \
+                  --temperature "$DIFFGUARD_TEMPERATURE" \
+                  --prompt-file "$DIFFGUARD_PROMPT_FILE"
+
+branding:
+  icon: 'shield'
+  color: 'blue'
+```
+
+**Example workflow usage:**
+
+```yaml
+# .github/workflows/ai-review.yml
+name: AI Code Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: DiffGuard AI Review
+        uses: nebulaideas/diffguard-rs@main
+        with:
+          provider: deepseek
+          model: deepseek-v4-flash
+          api-key: ${{ secrets.DEEPSEEK_API_KEY }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+```
+
+#### Multi-Platform Release Builds
+
+Expand release workflow to build binaries for all major platforms:
+
+**Update `.github/workflows/release.yml`:**
+
+```yaml
+# Build matrix for multiple platforms
+strategy:
+  matrix:
+    include:
+      - os: ubuntu-latest
+        target: x86_64-unknown-linux-gnu
+        artifact_name: diffguard-x86_64-unknown-linux-gnu
+      - os: ubuntu-latest
+        target: aarch64-unknown-linux-gnu
+        artifact_name: diffguard-aarch64-unknown-linux-gnu
+      - os: macos-latest
+        target: x86_64-apple-darwin
+        artifact_name: diffguard-x86_64-apple-darwin
+      - os: macos-latest
+        target: aarch64-apple-darwin
+        artifact_name: diffguard-aarch64-apple-darwin
+      - os: windows-latest
+        target: x86_64-pc-windows-msvc
+        artifact_name: diffguard-x86_64-pc-windows-msvc.exe
+```
+
+**Cross-compilation setup for Linux ARM64:**
+
+```yaml
+# Install cross-compilation toolchain
+- name: Install cross (for Linux ARM64)
+  if: matrix.target == 'aarch64-unknown-linux-gnu'
+  run: cargo install cross
+  
+- name: Build with cross
+  if: matrix.target == 'aarch64-unknown-linux-gnu'
+  run: cross build --release --target ${{ matrix.target }}
+```
+
+#### Performance Optimizations
+
+##### Parallel PR Processing (Task 7.1)
+
+Add `--parallel` flag to process multiple files concurrently:
+
+```rust
+// src/main.rs
+use tokio::task::JoinSet;
+
+async fn review_diff_parallel(diff: &str, config: &Config) -> Result<Vec<FileReview>> {
+    let mut set = JoinSet::new();
+    let files = split_diff_by_file(diff);
+    
+    for file_chunk in files {
+        let config_clone = config.clone();
+        set.spawn(async move {
+            review_file_chunk(file_chunk, &config_clone).await
+        });
+    }
+    
+    let mut results = Vec::new();
+    while let Some(res) = set.join_next().await {
+        results.push(res??); 
+    }
+    Ok(results)
+}
+```
+
+**CLI addition:**
+
+```rust
+// src/cli.rs
+#[arg(long, help = "Process files in parallel (experimental)")]
+pub parallel: bool,
+```
+
+**Expected improvement:** 3-5x faster for large PRs with many files.
+
+##### Incremental Diff Analysis (Task 7.2)
+
+Cache verdicts per-file and only re-analyze changed portions:
+
+```rust
+// src/cache.rs
+use sha2::{Sha256, Digest};
+use std::collections::HashMap;
+
+pub struct IncrementalCache {
+    file_hashes: HashMap<String, Vec<u8>>,
+    verdicts: HashMap<String, Verdict>,
+}
+
+impl IncrementalCache {
+    pub fn should_reanalyze(&self, filepath: &str, new_content: &str) -> bool {
+        let new_hash = Sha256::digest(new_content.as_bytes());
+        match self.file_hashes.get(filepath) {
+            Some(old_hash) => old_hash != &new_hash,
+            None => true,
+        }
+    }
+    
+    pub fn update(&mut self, filepath: String, content: &str, verdict: Verdict) {
+        let hash = Sha256::digest(content.as_bytes());
+        self.file_hashes.insert(filepath, hash.to_vec());
+        self.verdicts.insert(filepath, verdict);
+    }
+}
+```
+
+**Expected improvement:** 60-80% reduction in LLM API calls for incremental PR updates.
+
+##### Streaming Response Parsing (Task 7.3)
+
+Parse verdicts as they stream from LLM to reduce perceived latency:
+
+```rust
+// src/llm/mod.rs
+use futures_util::StreamExt;
+
+pub async fn stream_chat_completion(client: &Client, request: ChatRequest) -> Result<Verdict> {
+    let mut stream = client.post(url)
+        .json(&request)
+        .send()
+        .await?
+        .bytes_stream();
+    
+    let mut buffer = String::new();
+    while let Some(chunk) = stream.next().await {
+        let chunk = String::from_utf8_lossy(&chunk?);
+        buffer.push_str(&chunk);
+        
+        // Try to parse verdict incrementally
+        if let Some(verdict) = parse_partial_verdict(&buffer) {
+            return Ok(verdict);
+        }
+    }
+    
+    parse_full_verdict(&buffer)
+}
+```
+
+**Expected improvement:** 30-50% reduction in time-to-first-verdict.
+
+#### Enhanced Smart Caching
+
+##### AST-Based Diff Caching (Task 7.4)
+
+Use syntax tree analysis instead of raw text comparison:
+
+```toml
+# Cargo.toml
+[dependencies]
+tree-sitter = "0.20"
+tree-sitter-rust = "0.20"
+tree-sitter-typescript = "0.20"
+```
+
+```rust
+// src/cache.rs
+use tree_sitter::{Parser, Tree};
+
+pub fn compute_ast_hash(code: &str, language: &str) -> Result<Vec<u8>> {
+    let mut parser = Parser::new();
+    parser.set_language(get_language(language)?)?;
+    
+    let tree = parser.parse(code, None)
+        .ok_or_else(|| CacheError::ParseFailed)?;
+    
+    // Hash the tree structure, not raw text
+    let mut hasher = Sha256::new();
+    hash_tree_node(&mut hasher, tree.root_node());
+    Ok(hasher.finalize().to_vec())
+}
+```
+
+**Benefit:** Ignores whitespace/formatting changes, focuses on semantic changes.
+
+##### Shared Team Cache (Task 7.5)
+
+Optional Redis-backed cache for team-wide knowledge sharing:
+
+```toml
+# Cargo.toml
+[dependencies]
+redis = "0.23"
+```
+
+```rust
+// src/cache.rs
+use redis::{Client, Connection};
+
+pub struct TeamCache {
+    redis: Connection,
+    prefix: String,
+}
+
+impl TeamCache {
+    pub fn new(redis_url: &str, team_id: &str) -> Result<Self> {
+        let client = Client::open(redis_url)?;
+        Ok(Self {
+            redis: client.get_connection()?,
+            prefix: format!("diffguard:{}", team_id),
+        })
+    }
+    
+    pub fn get_verdict(&mut self, file_hash: &str) -> Option<Verdict> {
+        let key = format!("{}:verdict:{}", self.prefix, file_hash);
+        let result: Option<String> = redis::cmd("GET")
+            .arg(&key)
+            .query(&mut self.redis)
+            .ok()?;
+        result.and_then(|s| serde_json::from_str(&s).ok())
+    }
+}
+```
+
+**Privacy note:** Only anonymized file hashes are stored, never actual code content.
+
+#### Enhanced Observability
+
+##### Structured JSON Logging (Task 7.6)
+
+Replace basic logging with structured `tracing` output:
+
+```toml
+# Cargo.toml
+[dependencies]
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["json", "env-filter"] }
+```
+
+```rust
+// src/main.rs
+use tracing::{info, warn, error, instrument};
+use tracing_subscriber::prelude::*;
+
+fn init_logging() {
+    let fmt_layer = tracing_subscriber::fmt::layer()
+        .json()
+        .with_target(false);
+    
+    let filter_layer = EnvFilter::try_from_default_env()
+        .or_else(|_| EnvFilter::try_new("info"))
+        .unwrap();
+    
+    tracing_subscriber::registry()
+        .with(filter_layer)
+        .with(fmt_layer)
+        .init();
+}
+
+#[instrument(skip(config), fields(provider = config.provider))]
+async fn run_pipeline(config: Config) -> Result<()> {
+    info!("Starting review pipeline");
+    // ...
+}
+```
+
+**Output example:**
+
+```json
+{"timestamp":"2026-09-15T10:30:00Z","level":"INFO","message":"Starting review pipeline","provider":"deepseek","pr_number":42}
+{"timestamp":"2026-09-15T10:30:05Z","level":"INFO","message":"Fetched diff","size_bytes":15234,"files":7}
+{"timestamp":"2026-09-15T10:30:08Z","level":"INFO","message":"LLM response received","latency_ms":2847,"tokens_used":1523}
+```
+
+##### Review Analytics Dashboard (Task 7.7)
+
+Export metrics for dashboard visualization:
+
+```rust
+// src/metrics.rs
+use std::sync::atomic::{AtomicU64, Ordering};
+
+pub struct Metrics {
+    reviews_total: AtomicU64,
+    approve_count: AtomicU64,
+    request_changes_count: AtomicU64,
+    comment_count: AtomicU64,
+    avg_latency_ms: AtomicU64,
+    cache_hit_count: AtomicU64,
+    cache_miss_count: AtomicU64,
+}
+
+impl Metrics {
+    pub fn export_json(&self) -> String {
+        serde_json::json!({
+            "reviews_total": self.reviews_total.load(Ordering::Relaxed),
+            "approve_rate": self.approve_count.load(Ordering::Relaxed) as f64 / self.reviews_total.load(Ordering::Relaxed) as f64,
+            "avg_latency_ms": self.avg_latency_ms.load(Ordering::Relaxed),
+            "cache_hit_rate": self.cache_hit_count.load(Ordering::Relaxed) as f64 / 
+                (self.cache_hit_count.load(Ordering::Relaxed) + self.cache_miss_count.load(Ordering::Relaxed)) as f64,
+        }).to_string()
+    }
+}
+```
+
+##### Dry-Run Mode (Task 7.8)
+
+Add `--dry-run` flag for testing without submitting reviews:
+
+```rust
+// src/cli.rs
+#[arg(long, help = "Run without submitting reviews (print only)")]
+pub dry_run: bool,
+```
+
+```rust
+// src/main.rs
+if config.dry_run {
+    info!("Dry-run mode: skipping review submission");
+    print_colored_report(&review, &verdict, &state);
+    return Ok(());
+}
+```
+
+### Testing Requirements
+
+- [ ] GitHub Action end-to-end test in isolated repository
+- [ ] Performance benchmark suite comparing before/after optimizations
+- [ ] Cross-platform binary testing (Linux, macOS, Windows)
+- [ ] Load testing with simulated high-volume PR scenarios
+- [ ] Cache effectiveness tests (hit rate validation)
+
+### Documentation Updates
+
+- [ ] GitHub Action usage guide with examples
+- [ ] Performance tuning guide (when to enable parallel mode, caching strategies)
+- [ ] Troubleshooting guide for common CI/CD issues
+- [ ] Migration guide for users upgrading from Phase 6
+
+### Changelog Entry — Phase 7
+
+```markdown
+## [0.7.0] — 2026-XX-XX
+
+### Added
+- GitHub Action wrapper (`action.yml`) for one-click installation
+- Multi-platform release builds (Linux x86_64/ARM64, macOS x86_64/ARM64, Windows x86_64)
+- `--parallel` flag for concurrent file processing (3-5x faster for large PRs)
+- Incremental diff caching with SHA-256 file hashing (60-80% fewer API calls)
+- Streaming response parsing for reduced latency (30-50% faster time-to-verdict)
+- AST-based semantic diff caching (ignores whitespace/formatting changes)
+- Optional Redis-backed team cache for shared knowledge
+- Structured JSON logging with `tracing` crate
+- Review analytics export (`diffguard-metrics.json`)
+- `--dry-run` mode for testing without submission
+
+### Changed
+- Release workflow now builds 5 platform targets
+- Default logging format changed to structured JSON
+- Cache layer now supports both local file and Redis backends
+
+### Fixed
+- Cross-compilation support for ARM64 architectures
+- Memory leaks in long-running parallel processing scenarios
+```
+
+---
+
 ## Reference: Future Workspace Decomposition
 
 > **When to split:** Only if concrete demand emerges for using `diffguard` components as standalone libraries (e.g., another project wants to import just the LLM provider trait, or just the verdict parser).
