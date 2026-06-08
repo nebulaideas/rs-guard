@@ -9,7 +9,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Ongoing work and future enhancements
+- 33 new tests: `fetch_local_diff`, `load_prompt_file`, `validate_for_ci` edge cases, CRLF
+  chunk diffing, `is_retryable`/`is_permission_denied` unit tests, corrupted cache file tests
+- Auto-creation of parent directories before artifact and metrics file writes
+- Temperature validation for env/TOML sources (was previously only validated for CLI)
+
+### Changed
+
+- CI pipeline now uses `cargo run --release --quiet` for binary execution (resilient to
+  package name changes on base branch)
+- Factory error message derived from `providers.rs` metadata (single source of truth)
+- `ReviewMetrics.tokens_in/out` renamed to `estimated_tokens_in/out` for clarity
+- `main.rs` error handling DRY'd with `exit_on_error()` helper
+- Release workflow: added `publish-crates` job for automatic crates.io publishing via
+  `CRATES_TOKEN` secret
+
+### Improved
+
+- **Benchmarks:** `parse_metadata_block` is 2x faster (635ns → 326ns) and
+  `parse_large_response` (10KB) is 10x faster (3.86µs → 361ns) by replacing the
+  regex-based metadata parser with manual substring scanning
+- Cache temp files use a monotonic counter for uniqueness (prevents concurrent write
+  collisions on macOS)
+- Error response bodies preserved when diagnostic info is available (replaced
+  `unwrap_or_default()` with readable fallback text)
+- CI-mode `unwrap()` calls replaced with `expect("validated in validate_for_ci()")` for
+  clear failure messages
+
+### Fixed
+
+- 5 `cargo doc` intra-doc link warnings (private const references in public docs)
+- Dead test fixture removed (`tests/test_data/sample_diff.diff`)
+- Wrong metadata marker in test data (`DIFFGUARD` → `RS_GUARD`)
+- Trailing-slash inconsistency in GitHub API URL construction
+- Silent DeepSeek model fallback replaced with explicit `expect()` (guaranteed to succeed
+  due to earlier validation)
+- Missing `# Errors` docs on provider `new()` methods (kimi, qwen, openrouter, openai)
 
 ## [0.6.0] — 2026-06-XX
 

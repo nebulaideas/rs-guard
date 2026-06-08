@@ -966,34 +966,40 @@ Before registration, all of the following must be complete:
    - docs.rs (auto-generated from `cargo doc`)
    - GitHub Pages docs site
 
-### crates.io Publishing (Optional but Recommended)
+### crates.io Publishing (Recommended)
 
-If publishing to crates.io for `cargo install rs-guard`:
+To enable `cargo install rs-guard`, publish to [crates.io](https://crates.io):
 
-1. **Verify `Cargo.toml`**:
-
-   ```toml
-   [package]
-   name = "rs-guard"
-   version = "0.5.0"
-   edition = "2021"
-   authors = ["Your Name <email@example.com>"]
-   license = "MIT"
-   description = "AI-powered code review CLI for GitHub PRs"
-   repository = "https://github.com/YOUR_ORG/rs-guard"
-   homepage = "https://github.com/YOUR_ORG/rs-guard"
-   documentation = "https://docs.rs/rs-guard"
-   readme = "README.md"
-   keywords = ["ai", "code-review", "github", "llm", "cli"]
-   categories = ["development-tools", "command-line-utilities"]
-   ```
-
-2. **Login and publish**:
-
+1. **Get a crates.io API token** at <https://crates.io/settings/tokens>
+2. **Add it as a GitHub secret**: Settings → Secrets and variables → Actions → `CRATES_TOKEN`
+3. **Tag and push a release:**
    ```bash
-   cargo login  # paste API key from crates.io
-   cargo publish
+   # Bump version in Cargo.toml
+   # Update CHANGELOG.md
+   git add Cargo.toml CHANGELOG.md
+   git commit -m "Release v0.7.0"
+   git tag v0.7.0
+   git push origin v0.7.0
    ```
+4. The release workflow will:
+   - Build and strip the binary
+   - Upload it as a GitHub Release asset
+   - Publish to crates.io via `cargo publish` (automatic, using `CRATES_TOKEN`)
+
+**To test locally before publishing:**
+```bash
+# Test local install
+cargo install --path .
+
+# Verify everything compiles for publishing
+cargo publish --dry-run
+
+# Run the installed binary
+rs-guard --help
+```
+
+The dry-run passes all the same checks as a real publish (packaging, verification build)
+without actually uploading to crates.io.
 
 ### Changelog Entry — Phase 6
 
