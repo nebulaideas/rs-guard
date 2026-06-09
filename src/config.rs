@@ -59,6 +59,26 @@ pub struct ProviderTomlConfig {
     pub http_referer: Option<String>,
 }
 
+/// Circuit breaker configuration in the TOML file.
+#[derive(Debug, Deserialize, Default, Clone)]
+pub struct CircuitBreakerTomlConfig {
+    /// Whether the circuit breaker is enabled.
+    pub enabled: bool,
+    /// Consecutive failures before opening the circuit.
+    pub threshold: Option<u32>,
+    /// Cooldown period in seconds before auto-reset.
+    pub cooldown_secs: Option<u64>,
+}
+
+/// Per-provider pricing configuration in the TOML file.
+#[derive(Debug, Deserialize, Default, Clone)]
+pub struct PricingTomlConfig {
+    /// Input price in cents per million tokens.
+    pub input_per_million: u64,
+    /// Output price in cents per million tokens.
+    pub output_per_million: u64,
+}
+
 /// Top-level TOML configuration structure.
 #[derive(Debug, Deserialize, Default, Clone)]
 pub struct TomlConfig {
@@ -74,6 +94,10 @@ pub struct TomlConfig {
     pub providers: Option<HashMap<String, ProviderTomlConfig>>,
     /// Custom cache directory path (default: git-root/.rs-guard/cache or cwd/.rs-guard/cache).
     pub cache_dir: Option<String>,
+    /// Circuit breaker configuration.
+    pub circuit_breaker: Option<CircuitBreakerTomlConfig>,
+    /// Per-provider pricing overrides.
+    pub pricing: Option<HashMap<String, PricingTomlConfig>>,
 }
 
 /// Parses a `.reviewer.toml` configuration file.
@@ -263,6 +287,10 @@ pub struct Config {
     pub dry_run: bool,
     /// Custom cache directory path.
     pub cache_dir: Option<String>,
+    /// Optional circuit breaker configuration.
+    pub circuit_breaker: Option<crate::retry::CircuitBreaker>,
+    /// Optional per-provider pricing overrides.
+    pub pricing: Option<HashMap<String, PricingTomlConfig>>,
 }
 
 impl Config {
@@ -296,6 +324,8 @@ impl Config {
             no_cache: false,
             dry_run: false,
             cache_dir: None,
+            circuit_breaker: None,
+            pricing: None,
         }
     }
 
@@ -409,6 +439,22 @@ impl Config {
 
         let cache_dir = toml.as_ref().and_then(|t| t.cache_dir.clone());
 
+        let circuit_breaker = toml
+            .as_ref()
+            .and_then(|t| t.circuit_breaker.as_ref())
+            .and_then(|cb| {
+                if cb.enabled {
+                    Some(crate::retry::CircuitBreaker::new(
+                        cb.threshold.unwrap_or(3),
+                        cb.cooldown_secs.unwrap_or(60),
+                    ))
+                } else {
+                    None
+                }
+            });
+
+        let pricing = toml.as_ref().and_then(|t| t.pricing.clone());
+
         Ok(Config {
             provider,
             model,
@@ -427,6 +473,8 @@ impl Config {
             no_cache: false,
             dry_run: false,
             cache_dir,
+            circuit_breaker,
+            pricing,
         })
     }
 

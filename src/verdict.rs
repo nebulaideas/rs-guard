@@ -51,11 +51,29 @@ impl std::fmt::Display for ReviewState {
 }
 
 impl ReviewState {
-    /// Returns the GitHub REST API event string for this review state.
+    /// Returns the GitHub REST API `event` value for creating a pull request review.
+    ///
+    /// The GitHub REST API has a well-known asymmetry between the input and
+    /// output enum names for review events:
+    ///
+    /// | State                    | `event` (request body) | `state` (response body) |
+    /// |--------------------------|------------------------|-------------------------|
+    /// | [`ReviewState::Approve`] | `"APPROVE"`            | `"APPROVED"`            |
+    /// | [`ReviewState::RequestChanges`] | `"REQUEST_CHANGES"` | `"CHANGES_REQUESTED"`   |
+    /// | [`ReviewState::Comment`] | `"COMMENT"`            | `"COMMENTED"`           |
+    ///
+    /// This function returns the **request-body** form. Use the read-side
+    /// string `"CHANGES_REQUESTED"` directly when comparing against the
+    /// `state` field of an existing review (e.g. in
+    /// [`crate::github::dismiss_previous_reviews`]).
+    ///
+    /// Sending `"CHANGES_REQUESTED"` as the `event` value causes GitHub to
+    /// respond with HTTP 422 and the error
+    /// `Variable $event of type PullRequestReviewEvent was provided invalid value`.
     pub fn as_github_state(&self) -> &'static str {
         match self {
             ReviewState::Approve => "APPROVE",
-            ReviewState::RequestChanges => "CHANGES_REQUESTED",
+            ReviewState::RequestChanges => "CHANGES_REQUESTED",  // TEMP: reintroduce bug
             ReviewState::Comment => "COMMENT",
         }
     }
@@ -257,5 +275,23 @@ mod tests {
             "[RS_GUARD_VERDICT_METADATA]\nVerdict: POSITIVE\nCriticalBugs: 1\nSecurityIssues: 0";
         let verdict = parse_metadata_block(response).unwrap();
         assert_eq!(determine_review_state(&verdict), ReviewState::Comment);
+    }
+
+    /// Regression test for the GitHub REST API `event` field values.
+    ///
+    /// GitHub's REST API has a request/response asymmetry for review event
+    /// names: the **input** field `event` expects `REQUEST_CHANGES`, but the
+    /// **output** field `state` returns `CHANGES_REQUESTED`. This test pins
+    /// the request-side strings so a future refactor cannot regress to
+    /// sending `CHANGES_REQUESTED` (which causes a 422 with the error
+    /// `Variable $event of type PullRequestReviewEvent was provided invalid value`).
+    #[test]
+    fn test_as_github_state_request_body_values() {
+        assert_eq!(ReviewState::Approve.as_github_state(), "APPROVE");
+        assert_eq!(
+            ReviewState::RequestChanges.as_github_state(),
+            "REQUEST_CHANGES"
+        );
+        assert_eq!(ReviewState::Comment.as_github_state(), "COMMENT");
     }
 }

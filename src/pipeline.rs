@@ -249,6 +249,7 @@ pub async fn run_pipeline(
         &config.provider,
         estimated_tokens_in as u64,
         estimated_tokens_out as u64,
+        config.pricing.as_ref(),
     );
 
     log::info!("Received LLM response ({} chars)", llm_response.len());
@@ -374,7 +375,7 @@ pub async fn run_pipeline(
         println!("Est. Tokens In:  {}", estimated_tokens_in);
         println!("Est. Tokens Out: {}", estimated_tokens_out);
         println!("Latency:     {:.1}s", latency.as_secs_f64());
-        println!("Est. Cost:   ${:.4}", estimated_cost_cents as f64 / 100.0);
+        println!("Est. Cost:   ${:.4}", estimated_cost_cents / 100.0);
         println!("Diff Lines:  {}", diff_result.line_count);
         println!("Verdict:     {}", verdict.verdict);
         println!("State:       {}", state);
@@ -418,20 +419,42 @@ pub async fn run_pipeline(
 
 /// Rough cost estimation based on provider pricing.
 ///
-/// Returns estimated cost in cents (USD) for a given provider's token usage.
-fn estimate_cost_cents(provider: &str, tokens_in: u64, tokens_out: u64) -> u64 {
+/// Returns estimated cost in **cents** (USD) as `f64` to avoid integer
+/// truncation for small diffs. For display, divide by 100.0.
+///
+/// Pricing can be overridden via `.reviewer.toml` [pricing] sections.
+fn estimate_cost_cents(
+    provider: &str,
+    tokens_in: u64,
+    tokens_out: u64,
+    pricing_overrides: Option<&std::collections::HashMap<String, crate::config::PricingTomlConfig>>,
+) -> f64 {
     // Prices in cents per million tokens
-    let (price_in_cents, price_out_cents) = match provider {
-        "deepseek" => (7, 27),    // DeepSeek-V4: $0.07/M in, $0.27/M out
-        "kimi" => (12, 70),       // Kimi K2.5: approximate
-        "qwen" => (8, 20),        // Qwen-Plus: approximate
-        "openrouter" => (15, 60), // OpenRouter avg: approximate
-        "openai" => (15, 60),     // GPT-4o-mini: $0.15/M in, $0.60/M out
-        _ => (10, 30),            // Default fallback
+    let (price_in_cents, price_out_cents) = if let Some(pricing) = pricing_overrides {
+        if let Some(p) = pricing.get(provider) {
+            (p.input_per_million as f64, p.output_per_million as f64)
+        } else {
+            default_pricing(provider)
+        }
+    } else {
+        default_pricing(provider)
     };
-    let cost_in = (tokens_in * price_in_cents) / 1_000_000;
-    let cost_out = (tokens_out * price_out_cents) / 1_000_000;
+
+    let cost_in = (tokens_in as f64 * price_in_cents) / 1_000_000.0;
+    let cost_out = (tokens_out as f64 * price_out_cents) / 1_000_000.0;
     cost_in + cost_out
+}
+
+/// Returns hardcoded default pricing for known providers.
+fn default_pricing(provider: &str) -> (f64, f64) {
+    match provider {
+        "deepseek" => (7.0, 27.0),    // DeepSeek-V4: $0.07/M in, $0.27/M out
+        "kimi" => (12.0, 70.0),       // Kimi K2.5: approximate
+        "qwen" => (8.0, 20.0),        // Qwen-Plus: approximate
+        "openrouter" => (15.0, 60.0), // OpenRouter avg: approximate
+        "openai" => (15.0, 60.0),     // GPT-4o-mini: $0.15/M in, $0.60/M out
+        _ => (10.0, 30.0),            // Default fallback
+    }
 }
 
 #[cfg(test)]
@@ -441,43 +464,57 @@ mod tests {
     #[test]
     fn test_estimate_cost_cents_deepseek() {
         // 1M tokens in, 1M tokens out should cost 7 + 27 = 34 cents
-        let cost = estimate_cost_cents("deepseek", 1_000_000, 1_000_000);
-        assert_eq!(cost, 34);
+        let cost = estimate_cost_cents("deepseek", 1_000_000, 1_000_000, None);
+        assert!((cost - 34.0).abs() < 0.001);
     }
 
     #[test]
     fn test_estimate_cost_cents_openai() {
         // 1M tokens in, 1M tokens out should cost 15 + 60 = 75 cents
-        let cost = estimate_cost_cents("openai", 1_000_000, 1_000_000);
-        assert_eq!(cost, 75);
+        let cost = estimate_cost_cents("openai", 1_000_000, 1_000_000, None);
+        assert!((cost - 75.0).abs() < 0.001);
     }
 
     #[test]
     fn test_estimate_cost_cents_unknown_provider() {
         // Unknown provider should use default pricing: 10 + 30 = 40 cents
-        let cost = estimate_cost_cents("unknown", 1_000_000, 1_000_000);
-        assert_eq!(cost, 40);
+        let cost = estimate_cost_cents("unknown", 1_000_000, 1_000_000, None);
+        assert!((cost - 40.0).abs() < 0.001);
     }
 
     #[test]
     fn test_estimate_cost_cents_zero_tokens() {
-        let cost = estimate_cost_cents("deepseek", 0, 0);
-        assert_eq!(cost, 0);
+        let cost = estimate_cost_cents("deepseek", 0, 0, None);
+        assert_eq!(cost, 0.0);
     }
 
     #[test]
-    fn test_estimate_cost_cents_small_tokens() {
+    fn test_estimate_cost_cents_small_tokens_no_truncation() {
         // 1000 tokens in, 500 tokens out
-        // DeepSeek: (1000 * 7) / 1_000_000 + (500 * 27) / 1_000_000 = 0 + 0 = 0 cents
-        let cost = estimate_cost_cents("deepseek", 1000, 500);
-        assert_eq!(cost, 0); // Rounds down to 0
+        // DeepSeek: (1000 * 7.0) / 1_000_000 + (500 * 27.0) / 1_000_000 = 0.007 + 0.0135 = 0.0205 cents
+        let cost = estimate_cost_cents("deepseek", 1000, 500, None);
+        assert!((cost - 0.0205).abs() < 0.0001);
     }
 
     #[test]
     fn test_estimate_cost_cents_large_tokens() {
         // 10M tokens in, 5M tokens out
-        // DeepSeek: (10_000_000 * 7) / 1_000_000 + (5_000_000 * 27) / 1_000_000 = 70 + 135 = 205 cents
-        let cost = estimate_cost_cents("deepseek", 10_000_000, 5_000_000);
-        assert_eq!(cost, 205);
+        // DeepSeek: (10_000_000 * 7.0) / 1_000_000 + (5_000_000 * 27.0) / 1_000_000 = 70 + 135 = 205 cents
+        let cost = estimate_cost_cents("deepseek", 10_000_000, 5_000_000, None);
+        assert!((cost - 205.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_estimate_cost_cents_with_pricing_override() {
+        let mut pricing = std::collections::HashMap::new();
+        pricing.insert(
+            "deepseek".to_string(),
+            crate::config::PricingTomlConfig {
+                input_per_million: 10,
+                output_per_million: 50,
+            },
+        );
+        let cost = estimate_cost_cents("deepseek", 1_000_000, 1_000_000, Some(&pricing));
+        assert!((cost - 60.0).abs() < 0.001);
     }
 }

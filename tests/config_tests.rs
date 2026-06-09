@@ -177,6 +177,8 @@ fn test_provider_switch_via_apply_args() {
                 max_tokens: None,
                 providers: None,
                 cache_dir: None,
+                circuit_breaker: None,
+                pricing: None,
             });
 
             let mut config = Config::from_env(toml).unwrap();
@@ -202,6 +204,8 @@ fn test_cli_model_override() {
             max_tokens: None,
             providers: None,
             cache_dir: None,
+            circuit_breaker: None,
+            pricing: None,
         });
 
         let mut config = Config::from_env(toml).unwrap();
@@ -283,6 +287,8 @@ fn test_model_resets_on_provider_change_when_not_explicit() {
                 max_tokens: None,
                 providers: None,
                 cache_dir: None,
+                circuit_breaker: None,
+                pricing: None,
             });
 
             let mut config = Config::from_env(toml).unwrap();
@@ -313,6 +319,8 @@ fn test_toml_model_not_carried_across_provider_change() {
                 max_tokens: None,
                 providers: None,
                 cache_dir: None,
+                circuit_breaker: None,
+                pricing: None,
             });
 
             let mut config = Config::from_env(toml).unwrap();
@@ -343,6 +351,8 @@ fn test_cli_model_preserved_across_provider_change() {
                 max_tokens: None,
                 providers: None,
                 cache_dir: None,
+                circuit_breaker: None,
+                pricing: None,
             });
 
             let mut config = Config::from_env(toml).unwrap();
@@ -376,6 +386,8 @@ fn test_apply_args_respects_toml_api_key_env_on_switch() {
                 temperature: None,
                 max_tokens: None,
                 cache_dir: None,
+                circuit_breaker: None,
+                pricing: None,
                 providers: Some({
                     let mut m = HashMap::new();
                     m.insert(
@@ -421,6 +433,8 @@ fn test_ssrf_rejection_in_ci_mode() {
                 temperature: None,
                 max_tokens: None,
                 cache_dir: None,
+                circuit_breaker: None,
+                pricing: None,
                 providers: Some({
                     let mut m = HashMap::new();
                     m.insert(
@@ -463,6 +477,8 @@ fn test_ssrf_allows_known_host_in_ci() {
                 temperature: None,
                 max_tokens: None,
                 cache_dir: None,
+                circuit_breaker: None,
+                pricing: None,
                 providers: Some({
                     let mut m = HashMap::new();
                     m.insert(
@@ -496,6 +512,8 @@ fn test_ssrf_allows_any_host_in_local_mode() {
             temperature: None,
             max_tokens: None,
             cache_dir: None,
+            circuit_breaker: None,
+            pricing: None,
             providers: Some({
                 let mut m = HashMap::new();
                 m.insert(
@@ -537,6 +555,8 @@ fn test_ssrf_rejection_on_apply_args_switch_in_ci() {
                 temperature: None,
                 max_tokens: None,
                 cache_dir: None,
+                circuit_breaker: None,
+                pricing: None,
                 providers: Some({
                     let mut m = HashMap::new();
                     m.insert(
@@ -590,6 +610,8 @@ fn test_base_url_cleared_on_switch_without_toml_entry() {
                 temperature: None,
                 max_tokens: None,
                 cache_dir: None,
+                circuit_breaker: None,
+                pricing: None,
                 providers: Some({
                     let mut m = HashMap::new();
                     m.insert(
@@ -633,6 +655,8 @@ fn test_base_url_preserved_on_switch_with_toml_entry() {
                 temperature: None,
                 max_tokens: None,
                 cache_dir: None,
+                circuit_breaker: None,
+                pricing: None,
                 providers: Some({
                     let mut m = HashMap::new();
                     m.insert(
@@ -683,6 +707,8 @@ fn test_model_synced_after_switch_with_cli_model() {
                 max_tokens: None,
                 providers: None,
                 cache_dir: None,
+                circuit_breaker: None,
+                pricing: None,
             });
 
             let mut config = Config::from_env(toml).unwrap();

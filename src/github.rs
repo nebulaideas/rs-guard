@@ -291,6 +291,83 @@ mod tests {
         assert!(result.is_ok());
     }
 
+    /// Regression test for the request body sent to `POST /repos/.../reviews`.
+    ///
+    /// Asserts that `ReviewState::RequestChanges` is serialised as the request
+    /// `event` value `"REQUEST_CHANGES"` (the GitHub REST API spec), not
+    /// `"CHANGES_REQUESTED"` (which GitHub returns on the response side and
+    /// would cause a 422 with `Variable $event of type PullRequestReviewEvent
+    /// was provided invalid value`).
+    #[tokio::test]
+    async fn test_submit_review_request_changes_sends_correct_event() {
+        use wiremock::matchers::body_partial_json;
+
+        let mock_server = MockServer::start().await;
+
+        // Mock that only matches when the request body contains
+        // `"event": "REQUEST_CHANGES"`. If the bug regresses, this mock will
+        // not match and the test will fail with a 404 from wiremock.
+        Mock::given(method("POST"))
+            .and(path_regex(r"/repos/owner/repo/pulls/\d+/reviews"))
+            .and(body_partial_json(json!({"event": "REQUEST_CHANGES"})))
+            .respond_with(ResponseTemplate::new(200))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        let result = submit_review(
+            &mock_server.uri(),
+            "owner",
+            "repo",
+            1,
+            ReviewState::RequestChanges,
+            "please fix",
+            "token",
+        )
+        .await;
+
+        assert!(
+            result.is_ok(),
+            "submit_review(RequestChanges) failed: {:?}",
+            result
+        );
+    }
+
+    /// Companion test for `Approve` — ensures the correct `event` value is sent
+    /// and that no regression inverts the value to something like
+    /// `"APPROVED"` (the response-side form).
+    #[tokio::test]
+    async fn test_submit_review_approve_sends_correct_event() {
+        use wiremock::matchers::body_partial_json;
+
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path_regex(r"/repos/owner/repo/pulls/\d+/reviews"))
+            .and(body_partial_json(json!({"event": "APPROVE"})))
+            .respond_with(ResponseTemplate::new(200))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        let result = submit_review(
+            &mock_server.uri(),
+            "owner",
+            "repo",
+            1,
+            ReviewState::Approve,
+            "lgtm",
+            "token",
+        )
+        .await;
+
+        assert!(
+            result.is_ok(),
+            "submit_review(Approve) failed: {:?}",
+            result
+        );
+    }
+
     #[tokio::test]
     async fn test_submit_review_retryable_then_success() {
         let mock_server = MockServer::start().await;
