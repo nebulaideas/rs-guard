@@ -38,11 +38,21 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.base.sha }}
 
+      # Download the latest rs-guard release and verify its SHA-256.
+      # The integrity check warns (but does not fail) if the checksums
+      # file is missing from the release.
       - name: Download rs-guard
         run: |
-          curl -L -o rs-guard \
+          set -euo pipefail
+          curl -L --fail -o rs-guard \
             https://github.com/nebulaideas/rs-guard/releases/latest/download/rs-guard-x86_64-unknown-linux-gnu
           chmod +x rs-guard
+          if curl -fsSL -o rs-guard.sha256 \
+              https://github.com/nebulaideas/rs-guard/releases/latest/download/rs-guard-x86_64-unknown-linux-gnu.sha256; then
+            sha256sum -c rs-guard.sha256
+          else
+            echo "::warning::No .sha256 file published for this release; skipping integrity check."
+          fi
 
       - name: AI Code Review
         run: ./rs-guard
