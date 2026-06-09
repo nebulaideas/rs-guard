@@ -41,6 +41,34 @@ const CACHE_FILE_EXT: &str = "cache";
 
 static CACHE_WRITE_COUNTER: AtomicU64 = AtomicU64::new(0);
 
+/// Attempts to find the git repository root by running `git rev-parse --show-toplevel`.
+///
+/// Returns `None` if git is not available or we're not inside a git repository.
+pub fn find_git_root() -> Option<PathBuf> {
+    let output = std::process::Command::new("git")
+        .args(["rev-parse", "--show-toplevel"])
+        .output()
+        .ok()?;
+
+    if output.status.success() {
+        let path = String::from_utf8_lossy(&output.stdout);
+        Some(PathBuf::from(path.trim()))
+    } else {
+        None
+    }
+}
+
+/// Returns the default cache directory.
+///
+/// Uses the git repository root if available, otherwise falls back to the
+/// current working directory. This ensures cache consistency when rs-guard
+/// is invoked from subdirectories (e.g., in a monorepo).
+pub fn default_cache_dir() -> PathBuf {
+    find_git_root()
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
+        .join(DEFAULT_CACHE_DIR)
+}
+
 /// Cache configuration.
 #[derive(Debug, Clone)]
 pub struct CacheConfig {
@@ -57,7 +85,7 @@ pub struct CacheConfig {
 impl Default for CacheConfig {
     fn default() -> Self {
         Self {
-            cache_dir: PathBuf::from(DEFAULT_CACHE_DIR),
+            cache_dir: default_cache_dir(),
             ttl: Duration::from_secs(DEFAULT_TTL_SECS),
             enabled: true,
             max_size_bytes: DEFAULT_MAX_SIZE_BYTES,
@@ -980,5 +1008,47 @@ mod tests {
         assert!(cache
             .get("key4", "prompt", "deepseek", "model", 0.1)
             .is_none());
+    }
+
+    #[test]
+    fn test_find_git_root_in_git_repo() {
+        // This test runs inside the rs-guard repo, so git root should be found
+        let root = find_git_root();
+        assert!(root.is_some(), "should find git root in a git repository");
+        let root = root.unwrap();
+        assert!(root.exists(), "git root should exist");
+        // Should contain .git directory
+        assert!(root.join(".git").exists() || root.join(".git").is_symlink());
+    }
+
+    #[test]
+    fn test_default_cache_dir_uses_git_root() {
+        let cache_dir = default_cache_dir();
+        // Should end with .rs-guard/cache
+        assert!(
+            cache_dir.to_string_lossy().ends_with(".rs-guard/cache"),
+            "cache dir should end with .rs-guard/cache, got: {:?}",
+            cache_dir
+        );
+    }
+
+    #[test]
+    fn test_cache_config_with_custom_dir() {
+        let dir = tempdir().unwrap();
+        let custom_dir = dir.path().join("custom/cache");
+        let config = CacheConfig {
+            cache_dir: custom_dir.clone(),
+            ttl: Duration::from_secs(3600),
+            enabled: true,
+            max_size_bytes: DEFAULT_MAX_SIZE_BYTES,
+        };
+        let cache = DiffCache::new(config).unwrap();
+        assert!(custom_dir.exists(), "custom cache dir should be created");
+
+        cache
+            .set("key", "prompt", "deepseek", "model", 0.1, "value")
+            .unwrap();
+        let result = cache.get("key", "prompt", "deepseek", "model", 0.1);
+        assert_eq!(result, Some("value".to_string()));
     }
 }

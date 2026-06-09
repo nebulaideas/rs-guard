@@ -72,6 +72,8 @@ pub struct TomlConfig {
     pub max_tokens: Option<u32>,
     /// Per-provider configuration sections.
     pub providers: Option<HashMap<String, ProviderTomlConfig>>,
+    /// Custom cache directory path (default: git-root/.rs-guard/cache or cwd/.rs-guard/cache).
+    pub cache_dir: Option<String>,
 }
 
 /// Parses a `.reviewer.toml` configuration file.
@@ -257,6 +259,10 @@ pub struct Config {
     model_set_via_cli: bool,
     /// Bypass the response cache, forcing an LLM API call.
     pub no_cache: bool,
+    /// Dry-run mode: run pipeline without submitting or blocking.
+    pub dry_run: bool,
+    /// Custom cache directory path.
+    pub cache_dir: Option<String>,
 }
 
 impl Config {
@@ -288,6 +294,8 @@ impl Config {
             toml_providers: HashMap::new(),
             model_set_via_cli: false,
             no_cache: false,
+            dry_run: false,
+            cache_dir: None,
         }
     }
 
@@ -399,6 +407,8 @@ impl Config {
             model: model.clone(),
         };
 
+        let cache_dir = toml.as_ref().and_then(|t| t.cache_dir.clone());
+
         Ok(Config {
             provider,
             model,
@@ -415,6 +425,8 @@ impl Config {
             toml_providers,
             model_set_via_cli: false,
             no_cache: false,
+            dry_run: false,
+            cache_dir,
         })
     }
 
@@ -492,6 +504,9 @@ impl Config {
         }
         if args.no_cache {
             self.no_cache = true;
+        }
+        if args.dry_run {
+            self.dry_run = true;
         }
 
         Ok(())
@@ -791,5 +806,28 @@ mod tests {
         // On Unix, unreadable files should error; on other platforms, may succeed
         #[cfg(unix)]
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_config_empty_has_dry_run_false() {
+        let config = Config::empty();
+        assert!(!config.dry_run);
+    }
+
+    #[test]
+    fn test_config_empty_has_cache_dir_none() {
+        let config = Config::empty();
+        assert!(config.cache_dir.is_none());
+    }
+
+    #[test]
+    fn test_apply_args_sets_dry_run() {
+        use clap::Parser;
+        let mut config = Config::empty();
+        assert!(!config.dry_run);
+
+        let args = crate::cli::Args::parse_from(["rs-guard", "--dry-run"]);
+        config.apply_args(&args).unwrap();
+        assert!(config.dry_run);
     }
 }

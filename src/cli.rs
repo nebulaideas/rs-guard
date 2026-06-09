@@ -72,6 +72,13 @@ pub struct Args {
     /// Bypass the response cache, forcing an LLM API call.
     #[arg(long, help = "Bypass response cache and force LLM API call")]
     pub no_cache: bool,
+
+    /// Run the full pipeline but do not submit reviews or block commits.
+    ///
+    /// Useful for testing configuration and prompt changes without affecting
+    /// the repository. Always exits with code 0.
+    #[arg(long, help = "Dry-run mode: review without submitting or blocking")]
+    pub dry_run: bool,
 }
 
 /// Validates that a temperature value is within the OpenAI-compatible range (0.0 - 2.0).
@@ -111,5 +118,17 @@ mod tests {
     fn test_parse_temperature_invalid_string() {
         assert!(parse_temperature("not-a-number").is_err());
         assert!(parse_temperature("").is_err());
+    }
+
+    #[test]
+    fn test_dry_run_flag_parsing() {
+        let args = Args::parse_from(["rs-guard", "--dry-run"]);
+        assert!(args.dry_run);
+    }
+
+    #[test]
+    fn test_dry_run_flag_default_false() {
+        let args = Args::parse_from(["rs-guard"]);
+        assert!(!args.dry_run);
     }
 }

@@ -16,6 +16,7 @@ use crate::redact::{log_redacted, redact_secrets};
 use crate::retry::with_retry_simple;
 use crate::verdict::{parse_verdict, ReviewState};
 use anyhow::Context;
+use std::path::PathBuf;
 
 /// Signals from the pipeline to the entry point about how to exit.
 ///
@@ -185,13 +186,21 @@ pub async fn run_pipeline(
         diff_result.content.clone()
     };
 
-    let cache = DiffCache::new(CacheConfig {
+    let cache_config = CacheConfig {
         enabled: !config.no_cache,
+        cache_dir: config
+            .cache_dir
+            .as_ref()
+            .map(PathBuf::from)
+            .unwrap_or_else(|| CacheConfig::default().cache_dir),
         ..CacheConfig::default()
-    })
-    .context("Failed to initialize response cache")?;
+    };
+    let cache = DiffCache::new(cache_config).context("Failed to initialize response cache")?;
 
-    cache.ensure_gitignored();
+    // Only auto-add to .gitignore in local mode — CI environments are often read-only
+    if !config.is_ci {
+        cache.ensure_gitignored();
+    }
 
     // --- Metrics collection ---
     let start = std::time::Instant::now();
@@ -328,28 +337,37 @@ pub async fn run_pipeline(
             sanitized_response.clone()
         };
 
-        submit_review(
-            &base_url,
-            owner,
-            repo,
-            pr,
-            state.clone(),
-            &review_body,
-            token,
-        )
-        .await
-        .context("Failed to submit review")?;
+        if config.dry_run {
+            println!("🔍 DRY RUN — would submit review: {}", state);
+            log::info!("Dry-run mode: skipping GitHub review submission");
+        } else {
+            submit_review(
+                &base_url,
+                owner,
+                repo,
+                pr,
+                state.clone(),
+                &review_body,
+                token,
+            )
+            .await
+            .context("Failed to submit review")?;
 
-        log::info!("Review submitted: {}", state);
+            log::info!("Review submitted: {}", state);
 
-        if state != ReviewState::RequestChanges {
-            log::info!("Dismissing previous blocker reviews...");
-            if let Err(e) = dismiss_previous_reviews(&base_url, owner, repo, pr, token).await {
-                log::warn!("Failed to dismiss previous reviews: {}", e);
+            if state != ReviewState::RequestChanges {
+                log::info!("Dismissing previous blocker reviews...");
+                if let Err(e) = dismiss_previous_reviews(&base_url, owner, repo, pr, token).await {
+                    log::warn!("Failed to dismiss previous reviews: {}", e);
+                }
             }
         }
 
         println!("rs-guard Review Complete");
+        if config.dry_run {
+            println!("============================");
+            println!("🔍 DRY RUN — no changes submitted");
+        }
         println!("============================");
         println!("Provider:    {}", config.provider);
         println!("Model:       {}", config.model);
@@ -380,7 +398,17 @@ pub async fn run_pipeline(
         )
         .context("Failed to print review summary")?;
 
-        if state == ReviewState::RequestChanges {
+        if config.dry_run {
+            println!(
+                "\n🔍 DRY RUN — would exit with: {}",
+                if state == ReviewState::RequestChanges {
+                    "2 (ReviewBlocked)"
+                } else {
+                    "0 (Success)"
+                }
+            );
+            Ok(PipelineResult::Success)
+        } else if state == ReviewState::RequestChanges {
             Ok(PipelineResult::ReviewBlocked)
         } else {
             Ok(PipelineResult::Success)
