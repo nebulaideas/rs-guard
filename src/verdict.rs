@@ -73,7 +73,7 @@ impl ReviewState {
     pub fn as_github_state(&self) -> &'static str {
         match self {
             ReviewState::Approve => "APPROVE",
-            ReviewState::RequestChanges => "CHANGES_REQUESTED",  // TEMP: reintroduce bug
+            ReviewState::RequestChanges => "REQUEST_CHANGES",
             ReviewState::Comment => "COMMENT",
         }
     }
