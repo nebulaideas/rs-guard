@@ -1,18 +1,24 @@
-name: AI Code Review
+name: AI Code Review (Rails)
 
 on:
   pull_request:
     types: [opened, synchronize, reopened]
+    # Only review PRs that touch application code.
+    paths:
+      - 'app/**'
+      - 'lib/**'
+      - 'config/**'
+      - 'db/**'
+      - 'spec/**'
+      - 'test/**'
+      - 'Gemfile*'
 
-# Only run one review per PR at a time.
-# New pushes cancel in-progress reviews so the latest commit is always reviewed.
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
 jobs:
   review:
-    # Skip draft PRs to avoid wasting tokens on work-in-progress.
     if: github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     permissions:
@@ -21,19 +27,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Download the latest rs-guard release.
-      # Pin to a specific version for reproducibility in production.
       - name: Download rs-guard
         run: |
           curl -L -o rs-guard \
             https://github.com/nebulaideas/rs-guard/releases/latest/download/rs-guard-x86_64-unknown-linux-gnu
           chmod +x rs-guard
 
-      # Run the AI code review.
-      # The tool reads the diff from the PR, sends it to the configured LLM,
-      # parses the structured verdict, and posts the review back to GitHub.
+      # Use a Rails-specific prompt for deeper domain context.
       - name: AI Code Review
-        run: ./rs-guard
+        run: ./rs-guard --prompt-file .github/rails-review-prompt.md
         env:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

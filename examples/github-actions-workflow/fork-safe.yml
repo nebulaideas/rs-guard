@@ -1,0 +1,53 @@
+# ⚠️  SECURITY WARNING
+#
+# `pull_request_target` runs in the context of the BASE branch and has
+# access to repository secrets. Only use this workflow if:
+#
+# 1. You trust all contributors with push access to forks, OR
+# 2. You do not execute untrusted code (rs-guard only analyzes diffs,
+#    it does not build or run the PR code), OR
+# 3. You restrict execution to organization members (see `if:` condition).
+#
+# For public repos that accept untrusted forks, consider using the standard
+# `pull_request` event with a comment-based trigger instead.
+
+name: AI Code Review (Fork-Safe)
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    # Only run for non-draft PRs from the same repository.
+    # For trusted external contributors, add them to a team and adjust this condition.
+    if: |
+      github.event.pull_request.draft == false &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      # Checkout the BASE branch (not the PR branch) for security.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+
+      - name: Download rs-guard
+        run: |
+          curl -L -o rs-guard \
+            https://github.com/nebulaideas/rs-guard/releases/latest/download/rs-guard-x86_64-unknown-linux-gnu
+          chmod +x rs-guard
+
+      - name: AI Code Review
+        run: ./rs-guard
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO_FULL_NAME: ${{ github.repository }}
