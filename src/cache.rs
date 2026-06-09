@@ -44,7 +44,7 @@ static CACHE_WRITE_COUNTER: AtomicU64 = AtomicU64::new(0);
 /// Attempts to find the git repository root by running `git rev-parse --show-toplevel`.
 ///
 /// Returns `None` if git is not available or we're not inside a git repository.
-pub fn find_git_root() -> Option<PathBuf> {
+fn find_git_root() -> Option<PathBuf> {
     let output = std::process::Command::new("git")
         .args(["rev-parse", "--show-toplevel"])
         .output()
@@ -63,7 +63,7 @@ pub fn find_git_root() -> Option<PathBuf> {
 /// Uses the git repository root if available, otherwise falls back to the
 /// current working directory. This ensures cache consistency when rs-guard
 /// is invoked from subdirectories (e.g., in a monorepo).
-pub fn default_cache_dir() -> PathBuf {
+fn default_cache_dir() -> PathBuf {
     find_git_root()
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
         .join(DEFAULT_CACHE_DIR)
@@ -1011,6 +1011,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn test_find_git_root_in_git_repo() {
         // This test runs inside the rs-guard repo, so git root should be found
         let root = find_git_root();
@@ -1022,6 +1023,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn test_default_cache_dir_uses_git_root() {
         let cache_dir = default_cache_dir();
         // Should end with .rs-guard/cache

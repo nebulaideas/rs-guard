@@ -5,7 +5,7 @@
 
 use crate::cache::{CacheConfig, DiffCache};
 use crate::config::Config;
-use crate::diff::{chunk_diff, fetch_file_diff, fetch_local_diff, fetch_pr_diff};
+use crate::diff::{chunk_diff_with_params, fetch_file_diff, fetch_local_diff, fetch_pr_diff};
 use crate::github::{dismiss_previous_reviews, submit_review};
 use crate::llm::factory::create_provider;
 use crate::output::{
@@ -13,8 +13,8 @@ use crate::output::{
     ARTIFACT_FILENAME, METRICS_FILENAME,
 };
 use crate::redact::{log_redacted, redact_secrets};
-use crate::retry::with_retry_simple;
-use crate::verdict::{parse_verdict, ReviewState};
+use crate::retry::with_retry;
+use crate::verdict::{parse_metadata_block, parse_verdict, ReviewState};
 use anyhow::Context;
 use std::path::PathBuf;
 
@@ -44,8 +44,6 @@ pub async fn run_pipeline(
     config: Config,
     diff_file: Option<&str>,
 ) -> anyhow::Result<PipelineResult> {
-    let base_url = config.github_base_url.clone();
-
     let diff_result = if let Some(path) = diff_file {
         log::info!("Reading diff from file: {}", path);
         match fetch_file_diff(path) {
@@ -79,23 +77,19 @@ pub async fn run_pipeline(
         }
     } else if config.is_ci {
         log::info!("CI mode detected. Fetching PR diff...");
-        let owner = config
-            .repo_owner
-            .as_ref()
-            .expect("repo_owner validated in validate_for_ci()");
-        let repo = config
-            .repo_name
-            .as_ref()
-            .expect("repo_name validated in validate_for_ci()");
-        let pr = config
-            .pr_number
-            .expect("pr_number validated in validate_for_ci()");
-        let token = config
-            .github_token
-            .as_ref()
-            .expect("github_token validated in validate_for_ci()");
+        let ci_config = config
+            .validate_for_ci()
+            .context("CI configuration validation failed")?;
 
-        match fetch_pr_diff(&base_url, owner, repo, pr, token).await {
+        match fetch_pr_diff(
+            &ci_config.github_base_url,
+            &ci_config.repo_owner,
+            &ci_config.repo_name,
+            ci_config.pr_number,
+            &ci_config.github_token,
+        )
+        .await
+        {
             Ok(diff) => {
                 log::info!(
                     "Fetched diff: {} lines ({} bytes)",
@@ -122,13 +116,13 @@ pub async fn run_pipeline(
                         line_count, size_bytes
                     );
                     submit_review(
-                        &base_url,
-                        owner,
-                        repo,
-                        pr,
+                        &ci_config.github_base_url,
+                        &ci_config.repo_owner,
+                        &ci_config.repo_name,
+                        ci_config.pr_number,
                         ReviewState::Comment,
                         &msg,
-                        token,
+                        &ci_config.github_token,
                     )
                     .await
                     .context("Failed to submit size-limit comment")?;
@@ -175,7 +169,11 @@ pub async fn run_pipeline(
     };
 
     // Chunk large diffs to fit within model context windows
-    let (chunked_content, was_chunked, removed_lines) = chunk_diff(&diff_result.content);
+    let (chunked_content, was_chunked, removed_lines) = chunk_diff_with_params(
+        &diff_result.content,
+        config.chunk_head_lines,
+        config.chunk_tail_lines,
+    );
     let diff_content = if was_chunked {
         log::warn!(
             "Diff chunked: omitted {} middle lines for model context window",
@@ -221,11 +219,14 @@ pub async fn run_pipeline(
         let provider = create_provider(&config.provider, &config.api_key, &config.provider_config)
             .context("Failed to create LLM provider")?;
 
-        let response = with_retry_simple(|| async {
-            provider
-                .chat_completion(&config.prompt, &diff_content, config.temperature)
-                .await
-        })
+        let response = with_retry(
+            || async {
+                provider
+                    .chat_completion(&config.prompt, &diff_content, config.temperature)
+                    .await
+            },
+            config.circuit_breaker.as_ref(),
+        )
         .await
         .context("LLM API call failed")?;
 
@@ -259,6 +260,18 @@ pub async fn run_pipeline(
         log::warn!(
             "LLM response is suspiciously short ({} chars), may indicate an API error",
             llm_response.len()
+        );
+    }
+
+    // Warn when the structured metadata block is absent — the fallback tag-counting
+    // path activates, which may produce incorrect APPROVE verdicts on truncated
+    // responses.  A missing metadata block usually means the LLM output was cut
+    // short before it could write the verdict footer.
+    if parse_metadata_block(&llm_response).is_none() {
+        log::warn!(
+            "LLM response missing [RS_GUARD_VERDICT_METADATA] block — \
+             falling back to tag-counting. Response may have been truncated. \
+             Consider setting a higher max_tokens value."
         );
     }
 
@@ -312,21 +325,9 @@ pub async fn run_pipeline(
     }
 
     if config.is_ci {
-        let owner = config
-            .repo_owner
-            .as_ref()
-            .expect("repo_owner validated in validate_for_ci()");
-        let repo = config
-            .repo_name
-            .as_ref()
-            .expect("repo_name validated in validate_for_ci()");
-        let pr = config
-            .pr_number
-            .expect("pr_number validated in validate_for_ci()");
-        let token = config
-            .github_token
-            .as_ref()
-            .expect("github_token validated in validate_for_ci()");
+        let ci_config = config
+            .validate_for_ci()
+            .context("CI configuration validation failed")?;
 
         let review_body = if was_chunked {
             format!(
@@ -343,13 +344,13 @@ pub async fn run_pipeline(
             log::info!("Dry-run mode: skipping GitHub review submission");
         } else {
             submit_review(
-                &base_url,
-                owner,
-                repo,
-                pr,
+                &ci_config.github_base_url,
+                &ci_config.repo_owner,
+                &ci_config.repo_name,
+                ci_config.pr_number,
                 state.clone(),
                 &review_body,
-                token,
+                &ci_config.github_token,
             )
             .await
             .context("Failed to submit review")?;
@@ -358,7 +359,15 @@ pub async fn run_pipeline(
 
             if state != ReviewState::RequestChanges {
                 log::info!("Dismissing previous blocker reviews...");
-                if let Err(e) = dismiss_previous_reviews(&base_url, owner, repo, pr, token).await {
+                if let Err(e) = dismiss_previous_reviews(
+                    &ci_config.github_base_url,
+                    &ci_config.repo_owner,
+                    &ci_config.repo_name,
+                    ci_config.pr_number,
+                    &ci_config.github_token,
+                )
+                .await
+                {
                     log::warn!("Failed to dismiss previous reviews: {}", e);
                 }
             }

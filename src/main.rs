@@ -38,10 +38,12 @@ async fn main() {
         "Failed to load prompt file",
     );
 
-    config.validate_for_ci().unwrap_or_else(|e| {
-        eprintln!("Configuration validation failed: {}", e);
-        process::exit(1);
-    });
+    if config.is_ci {
+        config.validate_for_ci().unwrap_or_else(|e| {
+            eprintln!("Configuration validation failed: {}", e);
+            process::exit(1);
+        });
+    }
 
     let diff_file = args.diff_file.as_deref();
 

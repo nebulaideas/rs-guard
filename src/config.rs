@@ -14,6 +14,13 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use std::path::Path;
 
+/// Default maximum tokens for LLM responses.
+///
+/// Ensures the verdict metadata block is never truncated. 4096 tokens is
+/// sufficient for a thorough structured review while fitting within the
+/// output limits of every supported provider.
+pub const DEFAULT_MAX_TOKENS: u32 = 4096;
+
 /// Default system prompt embedded in the binary.
 ///
 /// Used when no `--prompt-file` is specified or the file does not exist.
@@ -90,6 +97,14 @@ pub struct TomlConfig {
     pub temperature: Option<f32>,
     /// Maximum tokens for LLM completions.
     pub max_tokens: Option<u32>,
+    /// Lines to preserve from the start of the diff when chunking.
+    ///
+    /// Overrides [`crate::diff::DEFAULT_CHUNK_HEAD_LINES`].
+    pub chunk_head_lines: Option<usize>,
+    /// Lines to preserve from the end of the diff when chunking.
+    ///
+    /// Overrides [`crate::diff::DEFAULT_CHUNK_TAIL_LINES`].
+    pub chunk_tail_lines: Option<usize>,
     /// Per-provider configuration sections.
     pub providers: Option<HashMap<String, ProviderTomlConfig>>,
     /// Custom cache directory path (default: git-root/.rs-guard/cache or cwd/.rs-guard/cache).
@@ -248,6 +263,25 @@ fn resolve_api_key_env_var(
     standard_api_key_env_var(provider).map(|s| s.to_string())
 }
 
+/// Validated CI configuration with all required fields present.
+///
+/// Created by [`Config::validate_for_ci()`] when running in CI mode.
+/// This struct guarantees that all CI-required fields are present,
+/// eliminating the need for `.expect()` calls in the pipeline.
+#[derive(Debug, Clone)]
+pub struct CiConfig {
+    /// GitHub authentication token.
+    pub github_token: String,
+    /// Pull request number.
+    pub pr_number: u64,
+    /// Repository owner (e.g., "nebulaideas").
+    pub repo_owner: String,
+    /// Repository name (e.g., "rs-guard").
+    pub repo_name: String,
+    /// GitHub API base URL.
+    pub github_base_url: String,
+}
+
 /// Resolved application configuration.
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -291,12 +325,16 @@ pub struct Config {
     pub circuit_breaker: Option<crate::retry::CircuitBreaker>,
     /// Optional per-provider pricing overrides.
     pub pricing: Option<HashMap<String, PricingTomlConfig>>,
+    /// Lines to preserve from the start of the diff when chunking.
+    pub chunk_head_lines: usize,
+    /// Lines to preserve from the end of the diff when chunking.
+    pub chunk_tail_lines: usize,
 }
 
 impl Config {
     /// Creates a minimal config for integration tests.
     ///
-    /// This constructor is marked `#[doc(hidden)]` and should only be used
+    /// This constructor is marked `#[doc(hidden)]` and only intended for use
     /// in test code. It provides minimal defaults that satisfy the type's
     /// invariants but are not meaningful for production use.
     ///
@@ -326,6 +364,8 @@ impl Config {
             cache_dir: None,
             circuit_breaker: None,
             pricing: None,
+            chunk_head_lines: crate::diff::DEFAULT_CHUNK_HEAD_LINES,
+            chunk_tail_lines: crate::diff::DEFAULT_CHUNK_TAIL_LINES,
         }
     }
 
@@ -400,11 +440,18 @@ impl Config {
         });
 
         // Temperature: env > toml > default (validated to [0.0, 2.0])
-        let temperature = std::env::var("RS_GUARD_TEMPERATURE")
-            .ok()
-            .and_then(|s| s.parse().ok())
-            .or(toml.as_ref().and_then(|t| t.temperature))
-            .unwrap_or(0.1);
+        // An unparseable RS_GUARD_TEMPERATURE value is an explicit configuration
+        // error — it is never silently ignored so that misconfiguration is caught
+        // early rather than producing unexpected reviews.
+        let temperature = match std::env::var("RS_GUARD_TEMPERATURE") {
+            Ok(val) => val.parse::<f32>().map_err(|_| {
+                RsGuardError::Config(format!(
+                    "Invalid RS_GUARD_TEMPERATURE '{}': must be a number between 0.0 and 2.0",
+                    val
+                ))
+            })?,
+            Err(_) => toml.as_ref().and_then(|t| t.temperature).unwrap_or(0.1),
+        };
         if !(0.0..=2.0).contains(&temperature) {
             return Err(RsGuardError::Config(format!(
                 "Temperature must be between 0.0 and 2.0, got: {}",
@@ -412,11 +459,27 @@ impl Config {
             )));
         }
 
-        // Max tokens: env > toml > none (single source of truth in provider_config)
-        let max_tokens = std::env::var("RS_GUARD_MAX_TOKENS")
+        // Max tokens: env > toml > DEFAULT_MAX_TOKENS (4096)
+        //
+        // Never allow None here — a None max_tokens lets the provider truncate
+        // the response before the [RS_GUARD_VERDICT_METADATA] block, which causes
+        // the fallback tag-counting path to activate and may produce incorrect
+        // APPROVE verdicts on clean diffs.
+        let max_tokens: Option<u32> = std::env::var("RS_GUARD_MAX_TOKENS")
             .ok()
             .and_then(|s| s.parse().ok())
-            .or(toml.as_ref().and_then(|t| t.max_tokens));
+            .or(toml.as_ref().and_then(|t| t.max_tokens))
+            .or(Some(DEFAULT_MAX_TOKENS));
+
+        // Chunking thresholds: toml > default
+        let chunk_head_lines = toml
+            .as_ref()
+            .and_then(|t| t.chunk_head_lines)
+            .unwrap_or(crate::diff::DEFAULT_CHUNK_HEAD_LINES);
+        let chunk_tail_lines = toml
+            .as_ref()
+            .and_then(|t| t.chunk_tail_lines)
+            .unwrap_or(crate::diff::DEFAULT_CHUNK_TAIL_LINES);
 
         // Provider config from TOML — validate base_url against SSRF allowlist in CI
         // In local mode, warn about potentially dangerous URLs to prevent accidental token exfiltration
@@ -475,6 +538,8 @@ impl Config {
             cache_dir,
             circuit_breaker,
             pricing,
+            chunk_head_lines,
+            chunk_tail_lines,
         })
     }
 
@@ -585,27 +650,42 @@ impl Config {
     /// # Errors
     ///
     /// Returns [`RsGuardError::Config`] if validation fails.
-    pub fn validate_for_ci(&self) -> Result<(), RsGuardError> {
+    pub fn validate_for_ci(&self) -> Result<CiConfig, RsGuardError> {
         validate_github_base_url(&self.github_base_url)?;
 
-        if self.is_ci {
-            if self.github_token.is_none() {
-                return Err(RsGuardError::Config(
-                    "GITHUB_TOKEN is required in CI mode".to_string(),
-                ));
-            }
-            if self.pr_number.is_none() {
-                return Err(RsGuardError::Config(
-                    "PR_NUMBER is required in CI mode".to_string(),
-                ));
-            }
-            if self.repo_owner.is_none() || self.repo_name.is_none() {
-                return Err(RsGuardError::Config(
-                    "REPO_FULL_NAME is required in CI mode (format: owner/repo)".to_string(),
-                ));
-            }
+        if !self.is_ci {
+            return Err(RsGuardError::Config(
+                "validate_for_ci() called but not in CI mode".to_string(),
+            ));
         }
-        Ok(())
+
+        let github_token = self.github_token.clone().ok_or_else(|| {
+            RsGuardError::Config("GITHUB_TOKEN is required in CI mode".to_string())
+        })?;
+
+        let pr_number = self
+            .pr_number
+            .ok_or_else(|| RsGuardError::Config("PR_NUMBER is required in CI mode".to_string()))?;
+
+        let repo_owner = self.repo_owner.clone().ok_or_else(|| {
+            RsGuardError::Config(
+                "REPO_FULL_NAME is required in CI mode (format: owner/repo)".to_string(),
+            )
+        })?;
+
+        let repo_name = self.repo_name.clone().ok_or_else(|| {
+            RsGuardError::Config(
+                "REPO_FULL_NAME is required in CI mode (format: owner/repo)".to_string(),
+            )
+        })?;
+
+        Ok(CiConfig {
+            github_token,
+            pr_number,
+            repo_owner,
+            repo_name,
+            github_base_url: self.github_base_url.clone(),
+        })
     }
 }
 
@@ -724,7 +804,9 @@ mod tests {
         let mut config = Config::empty();
         config.is_ci = false;
         config.github_base_url = "https://api.github.com".to_string();
-        assert!(config.validate_for_ci().is_ok());
+        // In local mode, validate_for_ci() should return an error
+        // because CI-specific fields are not available
+        assert!(config.validate_for_ci().is_err());
     }
 
     #[test]
@@ -806,6 +888,35 @@ mod tests {
         config.repo_name = Some("repo".to_string());
         let result = config.validate_for_ci();
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_validate_for_ci_returns_ci_config() {
+        let mut config = Config::empty();
+        config.is_ci = true;
+        config.github_token = Some("test-token".to_string());
+        config.pr_number = Some(42);
+        config.repo_owner = Some("owner".to_string());
+        config.repo_name = Some("repo".to_string());
+        config.github_base_url = "https://api.github.com".to_string();
+
+        let ci_config = config.validate_for_ci().expect("should validate");
+        assert_eq!(ci_config.github_token, "test-token");
+        assert_eq!(ci_config.pr_number, 42);
+        assert_eq!(ci_config.repo_owner, "owner");
+        assert_eq!(ci_config.repo_name, "repo");
+        assert_eq!(ci_config.github_base_url, "https://api.github.com");
+    }
+
+    #[test]
+    fn test_validate_for_ci_not_in_ci_mode_returns_error() {
+        let mut config = Config::empty();
+        config.is_ci = false;
+        config.github_base_url = "https://api.github.com".to_string();
+
+        let result = config.validate_for_ci();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("not in CI mode"));
     }
 
     #[test]
