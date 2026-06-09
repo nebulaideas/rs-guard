@@ -362,11 +362,18 @@ impl Config {
         });
 
         // Temperature: env > toml > default (validated to [0.0, 2.0])
-        let temperature = std::env::var("RS_GUARD_TEMPERATURE")
-            .ok()
-            .and_then(|s| s.parse().ok())
-            .or(toml.as_ref().and_then(|t| t.temperature))
-            .unwrap_or(0.1);
+        // An unparseable RS_GUARD_TEMPERATURE value is an explicit configuration
+        // error — it is never silently ignored so that misconfiguration is caught
+        // early rather than producing unexpected reviews.
+        let temperature = match std::env::var("RS_GUARD_TEMPERATURE") {
+            Ok(val) => val.parse::<f32>().map_err(|_| {
+                RsGuardError::Config(format!(
+                    "Invalid RS_GUARD_TEMPERATURE '{}': must be a number between 0.0 and 2.0",
+                    val
+                ))
+            })?,
+            Err(_) => toml.as_ref().and_then(|t| t.temperature).unwrap_or(0.1),
+        };
         if !(0.0..=2.0).contains(&temperature) {
             return Err(RsGuardError::Config(format!(
                 "Temperature must be between 0.0 and 2.0, got: {}",
