@@ -270,7 +270,9 @@ pub fn fetch_file_diff(path: &str) -> Result<DiffResult, RsGuardError> {
 /// # Errors
 ///
 /// Returns [`RsGuardError::Io`] if the git command fails,
+/// [`RsGuardError::Config`] if `git diff --cached` exits with a non-zero status,
 /// [`RsGuardError::EmptyDiff`] if there are no staged changes,
+/// [`RsGuardError::InvalidDiffContent`] if the output does not look like a diff,
 /// or [`RsGuardError::DiffTooLarge`] if the diff exceeds size limits.
 pub fn fetch_local_diff() -> Result<DiffResult, RsGuardError> {
     let output = std::process::Command::new("git")
@@ -287,10 +289,24 @@ pub fn fetch_local_diff() -> Result<DiffResult, RsGuardError> {
     }
 
     let content = String::from_utf8_lossy(&output.stdout).to_string();
+    build_local_diff_result(content)
+}
 
+/// Builds a [`DiffResult`] from already-validated local diff content.
+///
+/// Extracted from [`fetch_local_diff`] to enable unit testing of content
+/// validation without spawning a git process.
+///
+/// # Errors
+///
+/// Returns [`RsGuardError::EmptyDiff`], [`RsGuardError::InvalidDiffContent`],
+/// or [`RsGuardError::DiffTooLarge`] based on the content.
+pub(crate) fn build_local_diff_result(content: String) -> Result<DiffResult, RsGuardError> {
     if content.is_empty() {
         return Err(RsGuardError::EmptyDiff);
     }
+
+    validate_diff_content(&content)?;
 
     let size_bytes = content.len();
     let line_count = content.lines().count();
@@ -580,5 +596,54 @@ mod tests {
         assert!(result.is_err(), "expected error, got Ok");
 
         let _ = std::env::set_current_dir(&original_dir);
+    }
+
+    // --- build_local_diff_result unit tests (issue #8) ---
+
+    #[test]
+    fn test_build_local_diff_result_rejects_invalid_content() {
+        // Non-diff content (e.g. corrupted git output) must be rejected
+        let result = build_local_diff_result("this is not a diff at all".to_string());
+        assert!(
+            matches!(result, Err(RsGuardError::InvalidDiffContent)),
+            "expected InvalidDiffContent, got {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_build_local_diff_result_rejects_json_content() {
+        // JSON error bodies from git should be rejected (e.g. corrupt stdout)
+        let result = build_local_diff_result(r#"{"error": "something went wrong"}"#.to_string());
+        assert!(
+            matches!(result, Err(RsGuardError::InvalidDiffContent)),
+            "expected InvalidDiffContent, got {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_build_local_diff_result_rejects_empty() {
+        let result = build_local_diff_result(String::new());
+        assert!(matches!(result, Err(RsGuardError::EmptyDiff)));
+    }
+
+    #[test]
+    fn test_build_local_diff_result_accepts_valid_diff() {
+        let content = "diff --git a/src/main.rs b/src/main.rs\n--- a/src/main.rs\n+++ b/src/main.rs\n@@ -1 +1,2 @@\n+new line\n old line".to_string();
+        let result = build_local_diff_result(content.clone());
+        assert!(result.is_ok(), "expected Ok, got {:?}", result);
+        let diff = result.unwrap();
+        assert_eq!(diff.content, content);
+        assert!(diff.size_bytes > 0);
+        assert!(diff.line_count > 0);
+    }
+
+    #[test]
+    fn test_build_local_diff_result_rejects_too_large() {
+        let header = "diff --git a/f.rs b/f.rs\n--- a/f.rs\n+++ b/f.rs\n@@ -1 +1,2 @@\n";
+        let huge = format!("{}{}", header, "+line\n".repeat(200 * 1024));
+        let result = build_local_diff_result(huge);
+        assert!(matches!(result, Err(RsGuardError::DiffTooLarge { .. })));
     }
 }
