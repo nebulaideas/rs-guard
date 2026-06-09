@@ -689,3 +689,92 @@ fn test_model_synced_after_switch_with_cli_model() {
         },
     );
 }
+
+// ---------------------------------------------------------------------------
+// Issue #9 — RS_GUARD_TEMPERATURE env var validation
+// ---------------------------------------------------------------------------
+
+#[test]
+#[serial]
+fn test_invalid_temperature_env_var_returns_error() {
+    // RS_GUARD_TEMPERATURE=abc must return a Config error, not silently fall back to 0.1
+    with_env(
+        &[
+            ("DEEPSEEK_API_KEY", "test-deepseek-key"),
+            ("RS_GUARD_TEMPERATURE", "abc"),
+        ],
+        || {
+            let result = Config::from_env(None);
+            assert!(
+                result.is_err(),
+                "expected error for invalid temperature 'abc', got Ok"
+            );
+            let err = result.unwrap_err().to_string();
+            assert!(
+                err.contains("RS_GUARD_TEMPERATURE") || err.contains("temperature"),
+                "expected temperature-related error, got: {}",
+                err
+            );
+        },
+    );
+}
+
+#[test]
+#[serial]
+fn test_temperature_env_var_out_of_range_returns_error() {
+    // RS_GUARD_TEMPERATURE=3.0 must return a Config error (range is [0.0, 2.0])
+    with_env(
+        &[
+            ("DEEPSEEK_API_KEY", "test-deepseek-key"),
+            ("RS_GUARD_TEMPERATURE", "3.0"),
+        ],
+        || {
+            let result = Config::from_env(None);
+            assert!(
+                result.is_err(),
+                "expected error for out-of-range temperature 3.0, got Ok"
+            );
+            let err = result.unwrap_err().to_string();
+            assert!(
+                err.contains("Temperature") || err.contains("temperature"),
+                "expected temperature-related error, got: {}",
+                err
+            );
+        },
+    );
+}
+
+#[test]
+#[serial]
+fn test_valid_temperature_env_var_accepted() {
+    with_env(
+        &[
+            ("DEEPSEEK_API_KEY", "test-deepseek-key"),
+            ("RS_GUARD_TEMPERATURE", "0.7"),
+        ],
+        || {
+            let result = Config::from_env(None);
+            assert!(result.is_ok(), "expected Ok for valid temperature 0.7");
+            assert!((result.unwrap().temperature - 0.7).abs() < f32::EPSILON);
+        },
+    );
+}
+
+#[test]
+#[serial]
+fn test_temperature_env_var_negative_returns_error() {
+    // Negative temperatures are out of range
+    with_env(
+        &[
+            ("DEEPSEEK_API_KEY", "test-deepseek-key"),
+            ("RS_GUARD_TEMPERATURE", "-0.1"),
+        ],
+        || {
+            let result = Config::from_env(None);
+            assert!(
+                result.is_err(),
+                "expected error for negative temperature -0.1, got Ok"
+            );
+        },
+    );
+}
