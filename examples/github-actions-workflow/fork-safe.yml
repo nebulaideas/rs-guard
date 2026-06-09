@@ -44,15 +44,16 @@ jobs:
       - name: Download rs-guard
         run: |
           set -euo pipefail
-          curl -L --fail -o rs-guard \
+          curl -L --fail -o rs-guard-x86_64-unknown-linux-gnu \
             https://github.com/nebulaideas/rs-guard/releases/latest/download/rs-guard-x86_64-unknown-linux-gnu
-          chmod +x rs-guard
-          if curl -fsSL -o rs-guard.sha256 \
+          if curl -fsSL -o rs-guard-x86_64-unknown-linux-gnu.sha256 \
               https://github.com/nebulaideas/rs-guard/releases/latest/download/rs-guard-x86_64-unknown-linux-gnu.sha256; then
-            sha256sum -c rs-guard.sha256
+            sha256sum -c rs-guard-x86_64-unknown-linux-gnu.sha256
           else
             echo "::warning::No .sha256 file published for this release; skipping integrity check."
           fi
+          chmod +x rs-guard-x86_64-unknown-linux-gnu
+          mv rs-guard-x86_64-unknown-linux-gnu rs-guard
 
       - name: AI Code Review
         run: ./rs-guard

@@ -48,7 +48,9 @@ The example workflows use the following security defaults:
   the default `write-all` token scope.
 - **Concurrency groups** — Prevents stale reviews and resource waste.
 - **SHA-256 verification** — The `Download rs-guard` step downloads the
-  release's `*.sha256` file (if published) and verifies the binary. If the
+  release binary with its original filename (e.g., `rs-guard-x86_64-unknown-linux-gnu`),
+  fetches the corresponding `*.sha256` file (if published), and verifies the binary.
+  The downloaded file is then renamed to `rs-guard` for subsequent steps. If the
   checksums file is missing, a warning is emitted and the workflow continues —
   tighten this in production by failing the build when no `*.sha256` is
   available, or by switching to a pinned release tag with a hard-coded hash.

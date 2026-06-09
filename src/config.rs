@@ -1008,19 +1008,16 @@ mod tests {
             ..Default::default()
         };
 
-        let circuit_breaker = toml
-            .circuit_breaker
-            .as_ref()
-            .and_then(|cb| {
-                if cb.enabled {
-                    Some(crate::retry::CircuitBreaker::new(
-                        cb.threshold.unwrap_or(3),
-                        cb.cooldown_secs.unwrap_or(60),
-                    ))
-                } else {
-                    None
-                }
-            });
+        let circuit_breaker = toml.circuit_breaker.as_ref().and_then(|cb| {
+            if cb.enabled {
+                Some(crate::retry::CircuitBreaker::new(
+                    cb.threshold.unwrap_or(3),
+                    cb.cooldown_secs.unwrap_or(60),
+                ))
+            } else {
+                None
+            }
+        });
 
         assert!(
             circuit_breaker.is_none(),
@@ -1039,19 +1036,16 @@ mod tests {
             ..Default::default()
         };
 
-        let circuit_breaker = toml
-            .circuit_breaker
-            .as_ref()
-            .and_then(|cb| {
-                if cb.enabled {
-                    Some(crate::retry::CircuitBreaker::new(
-                        cb.threshold.unwrap_or(3),
-                        cb.cooldown_secs.unwrap_or(60),
-                    ))
-                } else {
-                    None
-                }
-            });
+        let circuit_breaker = toml.circuit_breaker.as_ref().and_then(|cb| {
+            if cb.enabled {
+                Some(crate::retry::CircuitBreaker::new(
+                    cb.threshold.unwrap_or(3),
+                    cb.cooldown_secs.unwrap_or(60),
+                ))
+            } else {
+                None
+            }
+        });
 
         assert!(
             circuit_breaker.is_some(),

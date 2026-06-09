@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `--dry-run` CLI flag to run the full pipeline without submitting reviews or blocking commits
+- `cache_dir` config field for custom cache directory path
+- `circuit_breaker` config field for optional circuit breaker configuration
+- `pricing` config field for per-provider pricing overrides
+- `chunk_head_lines` and `chunk_tail_lines` config fields for diff chunking control
 - `auto_gitignore` config option to control `.gitignore` auto-modification behavior
 - Hybrid ASCII/non-ASCII token estimation (`estimate_tokens`) for more accurate cost estimates
 - User-facing progress indicators in local mode (🤖 before LLM call, ✅ after)
