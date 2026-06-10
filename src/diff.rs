@@ -509,9 +509,10 @@ mod tests {
         let mock_server = MockServer::start().await;
 
         // Create a diff with 1501 lines
+        // diff_header has 4 lines, so we need 1497 more lines
         let diff_header =
             "diff --git a/file.rs b/file.rs\n--- a/file.rs\n+++ b/file.rs\n@@ -1,2 +1,3 @@\n";
-        let lines: Vec<String> = (0..1498).map(|i| format!("+line {}", i)).collect();
+        let lines: Vec<String> = (0..1497).map(|i| format!("+line {}", i)).collect();
         let diff_content = format!("{}{}", diff_header, lines.join("\n"));
 
         Mock::given(method("GET"))
