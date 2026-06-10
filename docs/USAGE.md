@@ -741,6 +741,14 @@ The diff exceeds 100 KB / 1500 lines. In CI: an explanatory `COMMENT` is posted.
 
 The diff was truncated (400 head + 400 tail preserved). Expected for large PRs.
 
+### `Review body exceeds GitHub's character limit`
+
+GitHub has a 65536 character limit for review bodies. If your review exceeds this:
+
+- Use a shorter prompt (e.g., remove detailed instructions)
+- The diff will be chunked automatically for large PRs
+- Consider using `--max-tokens` to limit LLM output length
+
 ### `Cache hit — using cached LLM response`
 
 The same diff+prompt+provider+model+temperature combination was cached within the 24-hour TTL. Pass `--no-cache` for a fresh call.

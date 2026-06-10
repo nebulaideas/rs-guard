@@ -439,6 +439,101 @@ mod tests {
             .contains("not appear to be a diff"));
     }
 
+    // --- Issue #24: Boundary tests for fetch_pr_diff at 100KB ---
+
+    #[tokio::test]
+    async fn test_fetch_pr_diff_exactly_100kb_passes() {
+        let mock_server = MockServer::start().await;
+
+        // Create a diff that is exactly 100KB
+        let diff_header =
+            "diff --git a/file.rs b/file.rs\n--- a/file.rs\n+++ b/file.rs\n@@ -1,2 +1,3 @@\n";
+        let header_bytes = diff_header.len();
+        let content_bytes = 100 * 1024 - header_bytes;
+        let diff_content = format!("{}{}", diff_header, "+".repeat(content_bytes));
+
+        Mock::given(method("GET"))
+            .and(path("/repos/test-owner/test-repo/pulls/42"))
+            .and(header("Accept", "application/vnd.github.v3.diff"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(diff_content))
+            .mount(&mock_server)
+            .await;
+
+        let result = fetch_pr_diff(
+            &mock_server.uri(),
+            "test-owner",
+            "test-repo",
+            42,
+            "test-token",
+        )
+        .await;
+
+        assert!(result.is_ok(), "Exactly 100KB diff should pass");
+        let diff = result.unwrap();
+        assert_eq!(diff.size_bytes, 100 * 1024);
+    }
+
+    #[tokio::test]
+    async fn test_fetch_pr_diff_100kb_plus_1_fails() {
+        let mock_server = MockServer::start().await;
+
+        // Create a diff that is 100KB + 1 byte
+        let diff_header =
+            "diff --git a/file.rs b/file.rs\n--- a/file.rs\n+++ b/file.rs\n@@ -1,2 +1,3 @@\n";
+        let header_bytes = diff_header.len();
+        let content_bytes = 100 * 1024 - header_bytes + 1;
+        let diff_content = format!("{}{}", diff_header, "+".repeat(content_bytes));
+
+        Mock::given(method("GET"))
+            .and(path("/repos/test-owner/test-repo/pulls/42"))
+            .and(header("Accept", "application/vnd.github.v3.diff"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(diff_content))
+            .mount(&mock_server)
+            .await;
+
+        let result = fetch_pr_diff(
+            &mock_server.uri(),
+            "test-owner",
+            "test-repo",
+            42,
+            "test-token",
+        )
+        .await;
+
+        assert!(result.is_err(), "100KB + 1 byte diff should fail");
+        assert!(matches!(result, Err(RsGuardError::DiffTooLarge { .. })));
+    }
+
+    #[tokio::test]
+    async fn test_fetch_pr_diff_1501_lines_fails() {
+        let mock_server = MockServer::start().await;
+
+        // Create a diff with 1501 lines
+        let diff_header =
+            "diff --git a/file.rs b/file.rs\n--- a/file.rs\n+++ b/file.rs\n@@ -1,2 +1,3 @@\n";
+        let lines: Vec<String> = (0..1498).map(|i| format!("+line {}", i)).collect();
+        let diff_content = format!("{}{}", diff_header, lines.join("\n"));
+
+        Mock::given(method("GET"))
+            .and(path("/repos/test-owner/test-repo/pulls/42"))
+            .and(header("Accept", "application/vnd.github.v3.diff"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(diff_content))
+            .mount(&mock_server)
+            .await;
+
+        let result = fetch_pr_diff(
+            &mock_server.uri(),
+            "test-owner",
+            "test-repo",
+            42,
+            "test-token",
+        )
+        .await;
+
+        assert!(result.is_err(), "1501 lines should fail");
+        assert!(matches!(result, Err(RsGuardError::DiffTooLarge { .. })));
+    }
+
     #[test]
     fn test_validate_diff_content_valid() {
         assert!(validate_diff_content("diff --git a/f.rs b/f.rs\n").is_ok());
@@ -738,5 +833,63 @@ mod tests {
         let huge = format!("{}{}", header, "+line\n".repeat(200 * 1024));
         let result = build_local_diff_result(huge);
         assert!(matches!(result, Err(RsGuardError::DiffTooLarge { .. })));
+    }
+
+    // --- Issue #20: Boundary tests for chunk_diff ---
+
+    #[test]
+    fn test_chunk_diff_101_lines_truncates() {
+        // With 50/50 params, threshold is 100 lines, so 101 should truncate
+        let lines: Vec<String> = (0..101).map(|i| format!("line {}", i)).collect();
+        let content = lines.join("\n");
+
+        let (result, truncated, removed) = chunk_diff_with_params(&content, 50, 50);
+        assert!(truncated, "101 lines should truncate with 50/50 params");
+        assert_eq!(removed, 1); // 101 - 50 - 50 = 1
+        assert!(result.contains("1 lines omitted"));
+        assert!(result.contains("line 0"));
+        assert!(result.contains("line 49"));
+        assert!(result.contains("line 51"));
+        assert!(result.contains("line 100"));
+    }
+
+    #[test]
+    fn test_chunk_diff_100_lines_no_truncate() {
+        // With 50/50 params, threshold is 100 lines, so 100 should NOT truncate
+        let lines: Vec<String> = (0..100).map(|i| format!("line {}", i)).collect();
+        let content = lines.join("\n");
+
+        let (result, truncated, removed) = chunk_diff_with_params(&content, 50, 50);
+        assert!(
+            !truncated,
+            "100 lines should not truncate with 50/50 params"
+        );
+        assert_eq!(removed, 0);
+        assert!(!result.contains("lines omitted"));
+        assert_eq!(result.as_ref(), content);
+    }
+
+    // --- Issue #21: Non-UTF8 output in fetch_local_diff ---
+
+    #[test]
+    #[serial_test::serial]
+    fn test_build_local_diff_result_handles_non_utf8_lossy() {
+        // Create a diff with non-UTF8 bytes (simulating binary file diff)
+        let mut content = "diff --git a/binary.bin b/binary.bin\n--- a/binary.bin\n+++ b/binary.bin\n@@ -1 +1,2 @@\n".as_bytes().to_vec();
+        // Append some non-UTF8 bytes
+        content.extend_from_slice(&[0xFF, 0xFE, 0xFD]);
+        content.extend_from_slice(b"+some content\n");
+
+        // Convert to String using lossy conversion
+        let lossy_string = String::from_utf8_lossy(&content).to_string();
+
+        // The result should be accepted (lossy conversion allows it to proceed)
+        // In practice, git diff outputs UTF-8, but we handle binary gracefully
+        let result = build_local_diff_result(lossy_string);
+        // Should succeed because the diff markers are present
+        assert!(
+            result.is_ok(),
+            "non-UTF8 diff with valid markers should be accepted"
+        );
     }
 }

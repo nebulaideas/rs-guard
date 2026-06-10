@@ -53,7 +53,7 @@ jobs:
 
       # Use a frontend-specific prompt for React/Vite context.
       - name: AI Code Review
-        run: ./rs-guard --prompt-file .github/frontend-review-prompt.md
+        run: ./rs-guard --prompt-file .github/review-prompt.md
         env:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

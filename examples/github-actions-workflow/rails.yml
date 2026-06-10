@@ -46,7 +46,7 @@ jobs:
 
       # Use a Rails-specific prompt for deeper domain context.
       - name: AI Code Review
-        run: ./rs-guard --prompt-file .github/rails-review-prompt.md
+        run: ./rs-guard --prompt-file .github/review-prompt.md
         env:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -54,7 +54,7 @@ export DEEPSEEK_API_KEY="your-api-key"
     REPO_FULL_NAME: ${{ github.repository }}
 ```
 
-See [`examples/github-actions-workflow/`](examples/github-actions-workflow/) for full workflow files.
+See [`examples/github-actions-workflow/`](examples/github-actions-workflow/) for full workflow files, including framework-specific examples for React/Vite and Rails.
 
 ---
 
@@ -116,7 +116,7 @@ cp examples/local-review/pre-commit-hook.sh .git/hooks/pre-commit
 chmod +x .git/hooks/pre-commit
 ```
 
-See [docs/LOCAL_MODE.md](docs/LOCAL_MODE.md) for full setup instructions.
+See [docs/LOCAL_MODE.md](docs/LOCAL_MODE.md) for full setup instructions, including Husky and Lefthook integration for JS/TS projects.
 
 ### CLI Reference
 

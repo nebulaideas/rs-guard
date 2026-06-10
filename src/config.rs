@@ -420,14 +420,32 @@ impl Config {
         let (repo_owner, repo_name) = match repo_full_name {
             Some(full) => {
                 let parts: Vec<&str> = full.splitn(2, '/').collect();
-                if parts.len() == 2 && !parts[0].is_empty() && !parts[1].is_empty() {
-                    (Some(parts[0].to_string()), Some(parts[1].to_string()))
-                } else {
+                if parts.len() != 2 {
                     return Err(RsGuardError::Config(format!(
                         "REPO_FULL_NAME must be in 'owner/repo' format, got: '{}'",
                         full
                     )));
                 }
+                let owner = parts[0];
+                let repo = parts[1];
+
+                // Validate non-empty
+                if owner.is_empty() || repo.is_empty() {
+                    return Err(RsGuardError::Config(format!(
+                        "REPO_FULL_NAME owner and repo cannot be empty, got: '{}'",
+                        full
+                    )));
+                }
+
+                // Validate no additional slashes in either part
+                if owner.contains('/') || repo.contains('/') {
+                    return Err(RsGuardError::Config(format!(
+                        "REPO_FULL_NAME must be in 'owner/repo' format (no additional slashes), got: '{}'",
+                        full
+                    )));
+                }
+
+                (Some(owner.to_string()), Some(repo.to_string()))
             }
             None => (None, None),
         };
@@ -1051,5 +1069,54 @@ mod tests {
             circuit_breaker.is_some(),
             "circuit_breaker should be Some when enabled=true"
         );
+    }
+
+    #[test]
+    fn test_repo_full_name_with_multiple_slashes() {
+        std::env::set_var("DEEPSEEK_API_KEY", "test-key");
+        std::env::set_var("REPO_FULL_NAME", "owner/repo/subpath");
+        let result = Config::from_env(None);
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("no additional slashes"));
+        std::env::remove_var("DEEPSEEK_API_KEY");
+        std::env::remove_var("REPO_FULL_NAME");
+    }
+
+    #[test]
+    fn test_repo_full_name_empty_owner() {
+        std::env::set_var("DEEPSEEK_API_KEY", "test-key");
+        std::env::set_var("REPO_FULL_NAME", "/repo");
+        let result = Config::from_env(None);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("cannot be empty"));
+        std::env::remove_var("DEEPSEEK_API_KEY");
+        std::env::remove_var("REPO_FULL_NAME");
+    }
+
+    #[test]
+    fn test_repo_full_name_empty_repo() {
+        std::env::set_var("DEEPSEEK_API_KEY", "test-key");
+        std::env::set_var("REPO_FULL_NAME", "owner/");
+        let result = Config::from_env(None);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("cannot be empty"));
+        std::env::remove_var("DEEPSEEK_API_KEY");
+        std::env::remove_var("REPO_FULL_NAME");
+    }
+
+    #[test]
+    fn test_repo_full_name_valid_format() {
+        std::env::set_var("DEEPSEEK_API_KEY", "test-key");
+        std::env::set_var("REPO_FULL_NAME", "owner/repo");
+        let result = Config::from_env(None);
+        assert!(result.is_ok());
+        let config = result.unwrap();
+        assert_eq!(config.repo_owner, Some("owner".to_string()));
+        assert_eq!(config.repo_name, Some("repo".to_string()));
+        std::env::remove_var("DEEPSEEK_API_KEY");
+        std::env::remove_var("REPO_FULL_NAME");
     }
 }

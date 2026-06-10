@@ -46,15 +46,52 @@ cp examples/local-review/pre-commit-hook.sh .git/hooks/pre-commit
 chmod +x .git/hooks/pre-commit
 ```
 
-### Option 2: Manual Hook
+The example hook includes:
+
+- Automatic API key detection (checks for all supported providers)
+- Optional config file loading from `~/.config/rs-guard/env`
+- Helpful error messages if no API key is found
+- Security warnings about not hardcoding keys
+
+### Option 2: Config File (Recommended for Security)
+
+Create a config file at `~/.config/rs-guard/env`:
+
+```bash
+mkdir -p ~/.config/rs-guard
+cat > ~/.config/rs-guard/env << 'EOF'
+# rs-guard API key configuration
+# Add this file to your .gitignore if it contains secrets
+
+export DEEPSEEK_API_KEY="your-api-key"
+# Or use another provider:
+# export KIMI_API_KEY="your-api-key"
+# export DASHSCOPE_API_KEY="your-api-key"
+# export OPENROUTER_API_KEY="your-api-key"
+# export OPENAI_API_KEY="your-api-key"
+EOF
+```
+
+Add to your `.gitignore` (if the config file is in your repo):
+
+```bash
+echo "~/.config/rs-guard/env" >> .gitignore
+```
+
+### Option 3: Manual Hook
 
 Create `.git/hooks/pre-commit`:
 
 ```bash
 #!/bin/sh
 
-# Required: set your API key
-export DEEPSEEK_API_KEY="your-api-key"
+# Load optional config file
+if [ -f ~/.config/rs-guard/env ]; then
+    . ~/.config/rs-guard/env
+fi
+
+# Required: set your API key (if not in config file)
+# export DEEPSEEK_API_KEY="your-api-key"
 
 # Optional: override provider/model
 export RS_GUARD_PROVIDER="deepseek"
@@ -81,6 +118,15 @@ Make it executable:
 ```bash
 chmod +x .git/hooks/pre-commit
 ```
+
+### Security Best Practices
+
+⚠️ **IMPORTANT**: Never hardcode API keys in your pre-commit hook or commit them to git.
+
+- Use environment variables or the `~/.config/rs-guard/env` config file
+- Add config files containing secrets to your `.gitignore`
+- Rotate API keys if they're accidentally committed
+- Use different API keys for different projects when possible
 
 ### Bypassing the Hook
 
@@ -121,7 +167,7 @@ rs-guard --no-cache
 
 Local mode prints a color-coded summary:
 
-```
+```text
 rs-guard Review
 
 ✓ State: APPROVE
@@ -153,4 +199,6 @@ States are color-coded:
 - **Diff too large?** Local mode warns and exits `0` (does not block).
 - **Want a custom prompt?** Use `--prompt-file` or create `.github/review-prompt.md`.
 - **Need faster reviews?** Use a smaller/faster model like `deepseek-v4-flash`.
-- **Progress indicators** — In local mode, rs-guard prints `🤖 Calling {provider} ({model})...` before the LLM call and `✅ Response received (N chars)` after, so you know the tool is working.
+- **Progress indicators** — In local mode, rs-guard prints
+  `🤖 Calling {provider} ({model})...` before the LLM call and
+  `✅ Response received (N chars)` after, so you know the tool is working.

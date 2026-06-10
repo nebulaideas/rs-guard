@@ -15,6 +15,9 @@ const REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 /// HTML comment signature used to identify rs-guard bot reviews.
 const BOT_SIGNATURE: &str = "<!-- rs-guard-bot -->";
 
+/// GitHub's maximum character limit for review body.
+const GITHUB_REVIEW_BODY_LIMIT: usize = 65536;
+
 /// Submits a review to a GitHub Pull Request without permission fallback.
 async fn submit_review_inner(
     base_url: &str,
@@ -63,6 +66,17 @@ async fn submit_review_inner(
                 .text()
                 .await
                 .unwrap_or_else(|e| format!("[failed to read response body: {}]", e));
+
+            // Explicit handling for 422 "body is too long" error
+            if status.as_u16() == 422 && body_text.contains("body is too long") {
+                return Err(RsGuardError::GitHubApi {
+                    status: status.as_u16(),
+                    message: "Review body exceeds GitHub's character limit. \
+                        Consider using a shorter prompt or chunking the diff."
+                        .to_string(),
+                });
+            }
+
             return Err(RsGuardError::GitHubApi {
                 status: status.as_u16(),
                 message: body_text,
@@ -101,6 +115,19 @@ pub async fn submit_review(
     token: &str,
 ) -> Result<(), RsGuardError> {
     validate_github_base_url(base_url)?;
+
+    // Validate review body length before submission
+    let full_body = format!("{}\n\n{}", message, BOT_SIGNATURE);
+    if full_body.len() > GITHUB_REVIEW_BODY_LIMIT {
+        return Err(RsGuardError::GitHubApi {
+            status: 0,
+            message: format!(
+                "Review body exceeds GitHub's character limit ({} chars). \
+                Consider using a shorter prompt or chunking the diff.",
+                GITHUB_REVIEW_BODY_LIMIT
+            ),
+        });
+    }
 
     let result =
         submit_review_inner(base_url, owner, repo, pr_number, &state, message, token).await;
@@ -528,6 +555,88 @@ mod tests {
 
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("token"));
+    }
+
+    #[tokio::test]
+    async fn test_submit_review_body_too_long() {
+        let mock_server = MockServer::start().await;
+
+        // Create a message that exceeds the limit
+        let long_message = "x".repeat(GITHUB_REVIEW_BODY_LIMIT + 100);
+
+        let result = submit_review(
+            &mock_server.uri(),
+            "owner",
+            "repo",
+            1,
+            ReviewState::Comment,
+            &long_message,
+            "token",
+        )
+        .await;
+
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("exceeds GitHub's character limit"));
+    }
+
+    #[tokio::test]
+    async fn test_submit_review_body_at_limit() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path_regex(r"/repos/owner/repo/pulls/\d+/reviews"))
+            .respond_with(ResponseTemplate::new(200))
+            .mount(&mock_server)
+            .await;
+
+        // Create a message that is exactly at the limit (minus signature)
+        let message = "x".repeat(GITHUB_REVIEW_BODY_LIMIT - BOT_SIGNATURE.len() - 2);
+
+        let result = submit_review(
+            &mock_server.uri(),
+            "owner",
+            "repo",
+            1,
+            ReviewState::Comment,
+            &message,
+            "token",
+        )
+        .await;
+
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_submit_review_422_body_too_long_error() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path_regex(r"/repos/owner/repo/pulls/\d+/reviews"))
+            .respond_with(ResponseTemplate::new(422).set_body_string(
+                r#"{"message":"Unprocessable Entity","errors":["body is too long"]}"#,
+            ))
+            .mount(&mock_server)
+            .await;
+
+        let result = submit_review(
+            &mock_server.uri(),
+            "owner",
+            "repo",
+            1,
+            ReviewState::Comment,
+            "test message",
+            "token",
+        )
+        .await;
+
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("exceeds GitHub's character limit"));
     }
 
     #[tokio::test]

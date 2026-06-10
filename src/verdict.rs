@@ -12,9 +12,10 @@ use regex::Regex;
 use std::sync::LazyLock;
 
 /// Maximum bytes to scan after the metadata marker for fields.
-/// Prevents scanning the entire LLM response (which can be 10KB+) when
-/// the marker appears near the end.
-const METADATA_SCAN_WINDOW: usize = 1024;
+/// Increased to 4096 to handle large LLM responses where the metadata block
+/// may appear near the end. This prevents silent fallback to tag counting
+/// which can produce incorrect verdicts.
+const METADATA_SCAN_WINDOW: usize = 4096;
 
 /// Marker string that identifies the verdict metadata block.
 const METADATA_MARKER: &str = "[RS_GUARD_VERDICT_METADATA]";
@@ -181,14 +182,23 @@ pub fn determine_review_state(verdict: &Verdict) -> ReviewState {
 
 /// Parses an LLM response into a verdict and corresponding review state.
 ///
-/// First attempts structured metadata extraction, falls back to tag counting,
-/// then validates the verdict value and computes the review state.
+/// First validates the response is not empty or whitespace-only, then attempts
+/// structured metadata extraction, falls back to tag counting, validates the
+/// verdict value, and computes the review state.
 ///
 /// # Errors
 ///
-/// Returns [`RsGuardError::VerdictParse`] if the verdict value is neither
-/// `"POSITIVE"` nor `"NEGATIVE"`.
+/// Returns [`RsGuardError::VerdictParse`] if:
+/// - The response is empty or whitespace-only
+/// - The verdict value is neither `"POSITIVE"` nor `"NEGATIVE"`
 pub fn parse_verdict(response: &str) -> Result<(Verdict, ReviewState), RsGuardError> {
+    // Validate response is not empty or whitespace-only
+    if response.trim().is_empty() {
+        return Err(RsGuardError::VerdictParse(
+            "LLM response is empty or whitespace-only. Cannot determine verdict.".to_string(),
+        ));
+    }
+
     let verdict = parse_metadata_block(response).unwrap_or_else(|| evaluate_by_tags(response));
 
     if verdict.verdict != "POSITIVE" && verdict.verdict != "NEGATIVE" {
@@ -293,5 +303,113 @@ mod tests {
             "REQUEST_CHANGES"
         );
         assert_eq!(ReviewState::Comment.as_github_state(), "COMMENT");
+    }
+
+    #[test]
+    fn test_metadata_block_at_end_of_large_response() {
+        // Create a large response with metadata at the end
+        let padding = "x".repeat(3000);
+        let response = format!(
+            "{}\n[RS_GUARD_VERDICT_METADATA]\nVerdict: POSITIVE\nCriticalBugs: 0\nSecurityIssues: 0",
+            padding
+        );
+        let verdict = parse_metadata_block(&response).unwrap();
+        assert_eq!(verdict.verdict, "POSITIVE");
+        assert_eq!(verdict.critical_bugs, 0);
+        assert_eq!(verdict.security_issues, 0);
+    }
+
+    #[test]
+    fn test_metadata_block_near_boundary() {
+        // Create a response where metadata is near the 4096 byte window boundary
+        let padding = "x".repeat(3500);
+        let response = format!(
+            "{}\n[RS_GUARD_VERDICT_METADATA]\nVerdict: NEGATIVE\nCriticalBugs: 1\nSecurityIssues: 0",
+            padding
+        );
+        let verdict = parse_metadata_block(&response).unwrap();
+        assert_eq!(verdict.verdict, "NEGATIVE");
+        assert_eq!(verdict.critical_bugs, 1);
+        assert_eq!(verdict.security_issues, 0);
+    }
+
+    #[test]
+    fn test_metadata_block_beyond_window_fallback_to_tags() {
+        // Create a response where metadata fields are beyond the scan window
+        // With 4096 window, we need more than 4096 chars between marker and fields
+        let padding = "x".repeat(5000);
+        let response = format!(
+            "[RS_GUARD_VERDICT_METADATA]\n{}\nVerdict: POSITIVE\nCriticalBugs: 0\nSecurityIssues: 0",
+            padding
+        );
+        let verdict = parse_metadata_block(&response);
+        // Should return None since fields are beyond the window
+        assert!(verdict.is_none());
+    }
+
+    #[test]
+    fn test_empty_response_returns_error() {
+        let response = "";
+        let result = parse_verdict(response);
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("empty or whitespace-only"));
+    }
+
+    #[test]
+    fn test_whitespace_only_response_returns_error() {
+        let response = "   \n\t  \n  ";
+        let result = parse_verdict(response);
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("empty or whitespace-only"));
+    }
+
+    #[test]
+    fn test_valid_response_parses_successfully() {
+        let response = "Some review text\n\n[RS_GUARD_VERDICT_METADATA]\nVerdict: POSITIVE\nCriticalBugs: 0\nSecurityIssues: 0";
+        let result = parse_verdict(response);
+        assert!(result.is_ok());
+        let (verdict, state) = result.unwrap();
+        assert_eq!(verdict.verdict, "POSITIVE");
+        assert_eq!(state, ReviewState::Approve);
+    }
+
+    // --- Issue #22: Metadata block with non-standard field order ---
+
+    #[test]
+    fn test_metadata_block_reversed_field_order() {
+        // Fields in reverse order should still parse correctly
+        let response =
+            "[RS_GUARD_VERDICT_METADATA]\nSecurityIssues: 0\nCriticalBugs: 1\nVerdict: NEGATIVE";
+        let verdict = parse_metadata_block(response).unwrap();
+        assert_eq!(verdict.verdict, "NEGATIVE");
+        assert_eq!(verdict.critical_bugs, 1);
+        assert_eq!(verdict.security_issues, 0);
+    }
+
+    #[test]
+    fn test_metadata_block_fields_with_content_between() {
+        // Content between fields should not affect parsing
+        let response = "[RS_GUARD_VERDICT_METADATA]\nVerdict: POSITIVE\nSome extra text here\nCriticalBugs: 0\nMore text\nSecurityIssues: 0";
+        let verdict = parse_metadata_block(response).unwrap();
+        assert_eq!(verdict.verdict, "POSITIVE");
+        assert_eq!(verdict.critical_bugs, 0);
+        assert_eq!(verdict.security_issues, 0);
+    }
+
+    #[test]
+    fn test_metadata_block_random_field_order() {
+        // Random field order should work
+        let response =
+            "[RS_GUARD_VERDICT_METADATA]\nCriticalBugs: 2\nVerdict: NEGATIVE\nSecurityIssues: 1";
+        let verdict = parse_metadata_block(response).unwrap();
+        assert_eq!(verdict.verdict, "NEGATIVE");
+        assert_eq!(verdict.critical_bugs, 2);
+        assert_eq!(verdict.security_issues, 1);
     }
 }

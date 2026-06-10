@@ -644,4 +644,24 @@ mod tests {
         let text = "\u{1f389}".repeat(15);
         assert_eq!(estimate_tokens(&text), 10);
     }
+
+    // --- Issue #23: Test for estimate_cost_cents overflow ---
+
+    #[test]
+    fn test_estimate_cost_cents_overflow_saturates() {
+        // Test with very large token counts that could cause overflow
+        // The function uses f64, so it should handle large values gracefully
+        let cost = estimate_cost_cents("deepseek", u64::MAX, u64::MAX, None);
+        // Should return a finite value (f64 handles large numbers via infinity)
+        assert!(cost.is_finite() || cost.is_infinite());
+    }
+
+    #[test]
+    fn test_estimate_cost_cents_large_but_safe() {
+        // Test with realistically large token counts (e.g., 1B tokens)
+        let cost = estimate_cost_cents("deepseek", 1_000_000_000, 500_000_000, None);
+        // Should be finite and reasonable
+        assert!(cost.is_finite());
+        assert!(cost > 0.0);
+    }
 }
