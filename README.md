@@ -258,6 +258,7 @@ cargo bench --bench verdict
 
 # Security audits
 cargo deny check
+cargo install cargo-audit --locked  # one-time setup
 cargo audit
 
 # Documentation
