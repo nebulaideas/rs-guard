@@ -155,6 +155,7 @@ cargo bench --bench verdict -- --quick
 
 # Security audits
 cargo deny check
+cargo install cargo-audit --locked  # one-time setup
 cargo audit
 ```
 
@@ -288,6 +289,7 @@ cargo fmt --all -- --check
 cargo deny check --config deny.toml
 
 # No known vulnerabilities
+cargo install cargo-audit --locked  # one-time setup
 cargo audit
 ```
 

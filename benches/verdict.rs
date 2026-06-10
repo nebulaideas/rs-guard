@@ -59,12 +59,15 @@ fn bench_large_diff_parsing(c: &mut Criterion) {
     });
 }
 
-criterion_group!(
-    benches,
-    bench_parse_metadata_block,
-    bench_evaluate_by_tags,
-    bench_parse_no_metadata,
-    bench_determine_review_state,
-    bench_large_diff_parsing,
-);
+criterion_group! {
+    name = benches;
+    config = Criterion::default()
+        .warm_up_time(std::time::Duration::from_secs(3))
+        .measurement_time(std::time::Duration::from_secs(10));
+    targets = bench_parse_metadata_block,
+              bench_evaluate_by_tags,
+              bench_parse_no_metadata,
+              bench_determine_review_state,
+              bench_large_diff_parsing,
+}
 criterion_main!(benches);
