@@ -18,6 +18,11 @@ on:
       - 'db/**'
       - 'migrations/**'
       - 'config/**'
+      # Include all common test directory conventions:
+      #   tests/ — Rust, Python, Node.js
+      #   test/  — Java, Ruby (Rails)
+      #   spec/  — Ruby (RSpec), Elixir
+      # Remove the entries that don't apply to your project.
       - 'tests/**'
       - 'test/**'
       - 'spec/**'
