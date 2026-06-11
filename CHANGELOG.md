@@ -58,6 +58,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Example GitHub Actions workflows pinned to `v1.0.0` release (previously used `latest`)
 - All documentation updated to reflect five-axis review, four-field metadata block, and the
   new prompt template library; framework-specific inline examples removed from `docs/USAGE.md`
+- **BREAKING:** `ReviewMetrics::estimated_cost_cents` changed from `u64` to `f64` to avoid
+  integer truncation for small diffs. Consumers parsing `rs-guard-metrics.json` must update
+  their type expectations.
 
 ### Removed / Deprecated
 
@@ -65,12 +68,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   one release cycle for backward compatibility; `CriticalBugs` will be removed in `v1.1.0`.
 - Framework-specific inline prompt templates (React/TypeScript, Rails) removed from
   `docs/USAGE.md`; use the templates in `examples/prompts/` instead.
-
-### Fixed
-
-- **BREAKING:** `ReviewMetrics::estimated_cost_cents` changed from `u64` to `f64` to avoid
-  integer truncation for small diffs. Consumers parsing `rs-guard-metrics.json` must update
-  their type expectations.
 
 ## [0.7.1] - 2026-06-08
 
