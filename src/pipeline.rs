@@ -295,10 +295,12 @@ pub async fn run_pipeline(
         parse_verdict(&llm_response).context("Failed to parse verdict from LLM response")?;
 
     log::info!(
-        "Verdict: {} (CriticalIssues: {}, SecurityIssues: {}) -> State: {}",
+        "Verdict: {} (CriticalIssues: {}, SecurityIssues: {}, ImportantIssues: {}, Suggestions: {}) -> State: {}",
         verdict.verdict,
         verdict.critical_issues,
         verdict.security_issues,
+        verdict.important_issues,
+        verdict.suggestions,
         state
     );
 
