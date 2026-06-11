@@ -468,6 +468,22 @@ async fn test_full_pipeline_ci_important_issues_yield_comment_not_blocked() {
     config.no_cache = true;
 
     let result = run_pipeline(config, None).await;
-    // Act / Assert: pipeline succeeds — important issues produce COMMENT, not ReviewBlocked
+    // Assert: pipeline succeeds — important issues produce COMMENT, not ReviewBlocked
     assert!(matches!(result, Ok(PipelineResult::Success)));
+
+    // Assert: the review POST body sent to GitHub contains event=COMMENT, not APPROVE or
+    // REQUEST_CHANGES — verifying that the correct review state was actually submitted.
+    let requests = github.received_requests().await.unwrap_or_default();
+    let review_request = requests
+        .iter()
+        .find(|r| r.method == wiremock::http::Method::POST && r.url.path().ends_with("/reviews"))
+        .expect("expected a POST to /reviews");
+    let body: serde_json::Value =
+        serde_json::from_slice(&review_request.body).expect("review body is valid JSON");
+    assert_eq!(
+        body["event"].as_str(),
+        Some("COMMENT"),
+        "expected COMMENT event, got: {}",
+        body["event"]
+    );
 }

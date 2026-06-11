@@ -362,23 +362,28 @@ fn test_parse_verdict_full_four_field_block_round_trip() {
 }
 
 #[test]
-fn test_parse_verdict_important_issues_eq_1_yields_comment() {
-    // Arrange: exactly 1 important issue — below threshold, yields COMMENT not REQUEST_CHANGES
-    let response = "[RS_GUARD_VERDICT_METADATA]\nVerdict: POSITIVE\nCriticalIssues: 0\nSecurityIssues: 0\nImportantIssues: 1\nSuggestions: 0";
-    // Act
-    let (_verdict, state) = parse_verdict(response).unwrap();
-    // Assert
-    assert_eq!(state, ReviewState::Comment);
-}
-
-#[test]
-fn test_parse_verdict_important_issues_eq_3_yields_request_changes() {
-    // Arrange: exactly 3 important issues — at threshold, yields REQUEST_CHANGES
-    let response = "[RS_GUARD_VERDICT_METADATA]\nVerdict: POSITIVE\nCriticalIssues: 0\nSecurityIssues: 0\nImportantIssues: 3\nSuggestions: 0";
-    // Act
-    let (_verdict, state) = parse_verdict(response).unwrap();
-    // Assert
-    assert_eq!(state, ReviewState::RequestChanges);
+fn test_parse_verdict_important_issues_threshold_table() {
+    // Table-driven: (important_issues count, expected ReviewState).
+    // Threshold constant is 3 — below yields Comment, at/above yields RequestChanges.
+    let cases: &[(u32, ReviewState)] = &[
+        (1, ReviewState::Comment),        // below threshold: COMMENT
+        (2, ReviewState::Comment),        // below threshold: COMMENT
+        (3, ReviewState::RequestChanges), // at threshold: REQUEST_CHANGES
+        (4, ReviewState::RequestChanges), // above threshold: REQUEST_CHANGES
+    ];
+    for (count, expected_state) in cases {
+        // Arrange
+        let response = format!(
+            "[RS_GUARD_VERDICT_METADATA]\nVerdict: POSITIVE\nCriticalIssues: 0\nSecurityIssues: 0\nImportantIssues: {count}\nSuggestions: 0"
+        );
+        // Act
+        let (_verdict, state) = parse_verdict(&response).unwrap();
+        // Assert
+        assert_eq!(
+            state, *expected_state,
+            "ImportantIssues: {count} should yield {expected_state:?}"
+        );
+    }
 }
 
 #[test]
@@ -399,16 +404,6 @@ fn test_review_state_display() {
     assert_eq!(ReviewState::Approve.to_string(), "APPROVE");
     assert_eq!(ReviewState::RequestChanges.to_string(), "REQUEST_CHANGES");
     assert_eq!(ReviewState::Comment.to_string(), "COMMENT");
-}
-
-#[test]
-fn test_parse_verdict_important_issues_eq_4_yields_request_changes() {
-    // Arrange: 4 important issues — above threshold, must still yield REQUEST_CHANGES
-    let response = "[RS_GUARD_VERDICT_METADATA]\nVerdict: POSITIVE\nCriticalIssues: 0\nSecurityIssues: 0\nImportantIssues: 4\nSuggestions: 0";
-    // Act
-    let (_verdict, state) = parse_verdict(response).unwrap();
-    // Assert
-    assert_eq!(state, ReviewState::RequestChanges);
 }
 
 #[test]
