@@ -120,7 +120,7 @@ See [docs/LOCAL_MODE.md](docs/LOCAL_MODE.md) for full setup instructions, includ
 
 ### CLI Reference
 
-```
+```text
 rs-guard [OPTIONS]
 
 Options:
@@ -189,7 +189,7 @@ See [docs/CONFIGURATION.md](docs/CONFIGURATION.md) for the full schema reference
 
 ## Review State Logic
 
-```
+```bash
 if verdict == "NEGATIVE" or security_issues > 0 or critical_bugs > 2:
     → REQUEST_CHANGES
 else if critical_bugs == 0 and security_issues == 0:
