@@ -150,13 +150,14 @@ git commit -m "chore: add rs-guard lefthook configuration"
 
 ---
 
-## Framework-Specific Prompts
+## Prompt Templates
 
-For best results, use a prompt tailored to your framework:
+For best results, use a prompt tailored to your domain:
 
-- **React/Vite**: See [`examples/prompts/react-vite.md`](../prompts/react-vite.md)
-- **Rails**: See [`examples/prompts/rails.md`](../prompts/rails.md)
-- **General**: See [`examples/prompts/general-code-review.md`](../prompts/general-code-review.md)
+- **Backend / API**: See [`examples/prompts/backend-api.md`](../prompts/backend-api.md)
+- **Frontend SPA**: See [`examples/prompts/frontend-spa.md`](../prompts/frontend-spa.md)
+- **CLI / Systems**: See [`examples/prompts/cli-tooling.md`](../prompts/cli-tooling.md)
+- **General (any language)**: See [`examples/prompts/general-code-review.md`](../prompts/general-code-review.md)
 
 To use a custom prompt:
 

@@ -1,17 +1,29 @@
-name: AI Code Review (Rails)
+name: AI Code Review (Frontend / SPA)
+
+# Agnostic frontend and SPA workflow.
+# Triggers on PRs that touch client-side source, config, or package manifests.
+#
+# ## Customize path filters
+# Adjust the paths below to match your project's directory layout.
+# GitHub Actions path filters use minimatch (no brace expansion — each glob is a separate entry).
 
 on:
   pull_request:
     types: [opened, synchronize, reopened]
-    # Only review PRs that touch application code.
     paths:
+      - 'src/**'
+      - 'components/**'
+      - 'pages/**'
       - 'app/**'
-      - 'lib/**'
-      - 'config/**'
-      - 'db/**'
-      - 'spec/**'
-      - 'test/**'
-      - 'Gemfile*'
+      - 'hooks/**'
+      - 'stores/**'
+      - 'styles/**'
+      - 'public/**'
+      - '*.config.ts'
+      - '*.config.js'
+      - '*.config.mjs'
+      - 'tsconfig*.json'
+      - 'package*.json'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
@@ -44,7 +56,9 @@ jobs:
           chmod +x rs-guard-x86_64-unknown-linux-gnu
           mv rs-guard-x86_64-unknown-linux-gnu rs-guard
 
-      # Use a Rails-specific prompt for deeper domain context.
+      # Use the frontend/SPA prompt for deeper domain context.
+      # Copy examples/prompts/frontend-spa.md to .github/review-prompt.md in your repo,
+      # then customize the "## Project-Specific Focus" section for your framework.
       - name: AI Code Review
         run: ./rs-guard --prompt-file .github/review-prompt.md
         env:

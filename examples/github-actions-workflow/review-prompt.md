@@ -70,9 +70,11 @@ production immediately.
 - **NEGATIVE** if any Critical signal pattern is found, or there is a logic bug that
   would cause incorrect behavior at runtime.
 
-At the end of your response, include exactly this metadata block:
+At the end of your response, include exactly this metadata block (do not modify the format):
 
 [RS_GUARD_VERDICT_METADATA]
 Verdict: POSITIVE or NEGATIVE
-CriticalBugs: <count>
+CriticalIssues: <count>
 SecurityIssues: <count>
+ImportantIssues: <count>
+Suggestions: <count>

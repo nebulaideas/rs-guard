@@ -1,24 +1,26 @@
-name: AI Code Review (React + Vite)
+name: AI Code Review (Backend / API)
+
+# Agnostic backend and API workflow.
+# Triggers on PRs that touch server-side source, database migrations, config, or tests.
+#
+# ## Customize path filters
+# Adjust the paths below to match your project's directory layout.
+# GitHub Actions path filters use minimatch (no brace expansion — each glob is a separate entry).
 
 on:
   pull_request:
     types: [opened, synchronize, reopened]
-    # Only review PRs that touch frontend code.
-    # NOTE: GitHub Actions path filters use minimatch, which does NOT support
-    # brace expansion. Each glob must be a separate pattern.
     paths:
       - 'src/**'
-      - 'components/**'
-      - 'pages/**'
-      - 'hooks/**'
-      - 'styles/**'
-      - '*.config.ts'
-      - '*.config.js'
-      - '*.config.mjs'
-      - 'tsconfig*.json'
-      - 'tailwind.config.*'
-      - 'postcss.config.*'
-      - 'package*.json'
+      - 'lib/**'
+      - 'app/**'
+      - 'api/**'
+      - 'db/**'
+      - 'migrations/**'
+      - 'config/**'
+      - 'tests/**'
+      - 'test/**'
+      - 'spec/**'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
@@ -51,7 +53,9 @@ jobs:
           chmod +x rs-guard-x86_64-unknown-linux-gnu
           mv rs-guard-x86_64-unknown-linux-gnu rs-guard
 
-      # Use a frontend-specific prompt for React/Vite context.
+      # Use the backend/API prompt for deeper domain context.
+      # Copy examples/prompts/backend-api.md to .github/review-prompt.md in your repo,
+      # then customize the "## Project-Specific Focus" section for your stack.
       - name: AI Code Review
         run: ./rs-guard --prompt-file .github/review-prompt.md
         env:

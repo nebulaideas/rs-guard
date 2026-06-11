@@ -1,51 +1,70 @@
-# Framework-Specific Review Prompts
+# Review Prompt Templates
 
-This directory contains custom review prompts tailored to specific frameworks and use cases.
+This directory contains language-agnostic review prompt templates for rs-guard.
+Each template implements the five-axis review format used by the built-in default prompt,
+and includes a `## Project-Specific Focus` section for customization.
 
 ## Available Prompts
 
-- **[react-vite.md](react-vite.md)** — React + Vite projects
-  - Focuses on React best practices, TypeScript safety, performance, and Vite configuration
-  - Covers hooks, dependency arrays, memoization, bundle size, and security
+- **[general-code-review.md](general-code-review.md)** — Canonical agnostic baseline
+  - Mirrors the rs-guard built-in `DEFAULT_PROMPT` exactly
+  - Suitable for any language or framework
+  - Start here if you are unsure which template to use
 
-- **[rails.md](rails.md)** — Ruby on Rails applications
-  - Focuses on Rails conventions, database safety, security, and performance
-  - Covers ActiveRecord, migrations, background jobs, and testing
+- **[backend-api.md](backend-api.md)** — Backend services and APIs
+  - Database safety, migrations, transactions, background jobs
+  - API contracts, idempotency, HTTP semantics
+  - Suitable for REST/GraphQL/gRPC services in any language
 
-- **[general-code-review.md](general-code-review.md)** — General-purpose code review
-  - Suitable for any programming language or framework
-  - Focuses on correctness, security, error handling, and code quality
+- **[frontend-spa.md](frontend-spa.md)** — Frontend single-page applications
+  - Reactivity, stale closures, component lifecycle, bundle size
+  - Client-side security (XSS, token storage), accessibility basics
+  - Suitable for React, Vue, Svelte, Angular, or any SPA framework
+
+- **[cli-tooling.md](cli-tooling.md)** — CLI tools and systems programs
+  - Panics, unwrap discipline, resource cleanup, signal handling
+  - CLI UX consistency, destructive-operation guards
+  - Suitable for Rust, Go, C/C++, Python CLI tools, and daemons
 
 ## Usage
 
-Copy the appropriate prompt to your repository:
+Copy the appropriate template to your repository:
 
 ```bash
-# For React + Vite
-cp examples/prompts/react-vite.md .github/review-prompt.md
-
-# For Rails
-cp examples/prompts/rails.md .github/review-prompt.md
-
-# For general use
+# General-purpose (any language/framework)
 cp examples/prompts/general-code-review.md .github/review-prompt.md
+
+# Backend / API service
+cp examples/prompts/backend-api.md .github/review-prompt.md
+
+# Frontend SPA
+cp examples/prompts/frontend-spa.md .github/review-prompt.md
+
+# CLI tool or system program
+cp examples/prompts/cli-tooling.md .github/review-prompt.md
 ```
 
-Then customize it to match your project's specific rules and patterns.
+Then open the copied file and fill in the `## Project-Specific Focus` section with your
+project's conventions, coding standards, and framework-specific rules.
 
 ## Customizing Prompts
 
-Edit the copied prompt to add:
-- Project-specific conventions
-- Custom severity guidelines
-- Framework-specific focus areas
-- Team-specific coding standards
+Each template ends with a `## Project-Specific Focus` section containing commented examples.
+Uncomment and adapt the examples to add:
+
+- Project-specific conventions (naming, error handling patterns)
+- Required tooling (ORM, test framework, linter rules)
+- Architecture constraints (module boundaries, banned patterns)
+- Team-specific quality gates (doc coverage, migration rules)
 
 ## Integration
 
-The prompt will be automatically used by rs-guard when:
-- Running in CI mode (GitHub Actions)
-- Running in local mode with pre-commit hooks
-- Running with `--prompt-file .github/review-prompt.md`
+The prompt is used by rs-guard when:
+
+- Running in CI mode (GitHub Actions) with `--prompt-file .github/review-prompt.md`
+- Running in local mode with a pre-commit hook passing `--prompt-file`
+- Running manually: `rs-guard --prompt-file .github/review-prompt.md`
+
+If the referenced file does not exist, rs-guard falls back to its built-in default prompt.
 
 For pre-commit hook setup with Husky or Lefthook, see [`../local-review/husky-setup.md`](../local-review/husky-setup.md).

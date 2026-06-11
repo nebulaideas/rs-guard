@@ -7,8 +7,8 @@ This directory contains ready-to-use GitHub Actions workflows for integrating **
 | Workflow | File | Use Case |
 |----------|------|----------|
 | Basic AI Review | [`ai-review.yml`](ai-review.yml) | General-purpose review for any repository |
-| Rails | [`rails.yml`](rails.yml) | Ruby on Rails projects with path filtering |
-| React + Vite | [`react-vite.yml`](react-vite.yml) | Frontend projects with path filtering |
+| Backend / API | [`backend-api.yml`](backend-api.yml) | Backend services and APIs with path filtering |
+| Frontend / SPA | [`frontend-spa.yml`](frontend-spa.yml) | Frontend SPAs and component libraries with path filtering |
 | Fork-Safe | [`fork-safe.yml`](fork-safe.yml) | Public repos that receive fork PRs |
 
 ## Common Features
@@ -28,16 +28,26 @@ All workflows include:
 
 ## Custom Prompts
 
-Framework-specific workflows (Rails, React/Vite) reference a custom prompt file:
+The `backend-api.yml` and `frontend-spa.yml` workflows reference a custom prompt file:
 
 ```bash
-./rs-guard --prompt-file .github/rails-review-prompt.md
+./rs-guard --prompt-file .github/review-prompt.md
 ```
 
-Create this file in your repository to tailor the review focus to your stack. The
-included [`review-prompt.md`](review-prompt.md) is a Rust-focused example that
-you can copy and adapt as a starting point for your own prompt file. If the
-referenced prompt file is missing, `rs-guard` falls back to its built-in
+Create this file in your repository to tailor the review focus to your stack.
+Start from one of the templates in [`../prompts/`](../prompts/):
+
+```bash
+# Backend / API service
+cp examples/prompts/backend-api.md .github/review-prompt.md
+
+# Frontend SPA
+cp examples/prompts/frontend-spa.md .github/review-prompt.md
+```
+
+Then fill in the `## Project-Specific Focus` section with your conventions.
+The included [`review-prompt.md`](review-prompt.md) is a Rust-backend example.
+If the referenced prompt file is missing, `rs-guard` falls back to its built-in
 default prompt — the workflow will not fail.
 
 ## Security
@@ -68,8 +78,8 @@ The example workflows use the following security defaults:
 
 Public repositories that accept pull requests from forks face a trade-off:
 
-- **`pull_request`** workflows (used by `ai-review.yml`, `rails.yml`,
-  `react-vite.yml`) **cannot access secrets** because they run in the
+- **`pull_request`** workflows (used by `ai-review.yml`, `backend-api.yml`,
+  `frontend-spa.yml`) **cannot access secrets** because they run in the
   untrusted fork context. Without secrets, you cannot call the LLM API.
   This is the safest option if you can route LLM calls through a
   comment-triggered bot or a webhook.
