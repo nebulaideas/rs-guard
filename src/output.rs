@@ -58,7 +58,7 @@ pub struct ReviewConfig {
 ///
 /// The artifact includes provider metadata, the full LLM review text,
 /// and the parsed verdict metadata. The `--- Parsed Metadata ---` section
-/// renders all four verdict fields: `Verdict`, `CriticalIssues`,
+/// renders all five verdict fields: `Verdict`, `CriticalIssues`,
 /// `SecurityIssues`, `ImportantIssues`, and `Suggestions`.
 ///
 /// # Errors
@@ -118,7 +118,7 @@ Suggestions:     {}
 
 /// Prints the full review text with a color-coded state header to a writer.
 ///
-/// Renders all four verdict fields: `Verdict`, `Critical Issues`,
+/// Renders all five verdict fields: `Verdict`, `Critical Issues`,
 /// `Security Issues`, `Important Issues`, and `Suggestions`.
 /// Accepts any [`std::io::Write`] implementation for testability.
 /// The `colored` crate's ANSI codes are preserved in the output.
