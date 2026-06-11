@@ -57,7 +57,7 @@ fn test_parse_positive_with_1_critical_issue_yields_request_changes() {
 fn test_missing_metadata_block_fallback_tags() {
     let response = "I found some issues.\n[Critical Bug] Null pointer dereference\n[Critical Bug] Race condition\n[Security] XSS vulnerability";
     let (verdict, state) = parse_verdict(response).unwrap();
-    assert_eq!(verdict.critical_bugs, 2);
+    assert_eq!(verdict.critical_issues, 2);
     assert_eq!(verdict.security_issues, 1);
     assert_eq!(state, ReviewState::RequestChanges);
 }
@@ -66,7 +66,7 @@ fn test_missing_metadata_block_fallback_tags() {
 fn test_clean_response_no_tags_yields_approve() {
     let response = "Everything looks good. No issues found in this PR.";
     let (verdict, state) = parse_verdict(response).unwrap();
-    assert_eq!(verdict.critical_bugs, 0);
+    assert_eq!(verdict.critical_issues, 0);
     assert_eq!(verdict.security_issues, 0);
     assert_eq!(state, ReviewState::Approve);
 }
@@ -87,7 +87,7 @@ fn test_invalid_verdict_value() {
 fn test_evaluate_by_tags_critical_only() {
     let response = "Found a [Critical Bug] memory leak. Otherwise looks fine.";
     let verdict = evaluate_by_tags(response);
-    assert_eq!(verdict.critical_bugs, 1);
+    assert_eq!(verdict.critical_issues, 1);
     assert_eq!(verdict.security_issues, 0);
     assert_eq!(verdict.verdict, "NEGATIVE");
 }
@@ -96,7 +96,7 @@ fn test_evaluate_by_tags_critical_only() {
 fn test_evaluate_by_tags_security_only() {
     let response = "Found a [Security] issue with hardcoded password.";
     let verdict = evaluate_by_tags(response);
-    assert_eq!(verdict.critical_bugs, 0);
+    assert_eq!(verdict.critical_issues, 0);
     assert_eq!(verdict.security_issues, 1);
     assert_eq!(verdict.verdict, "NEGATIVE");
 }
@@ -105,7 +105,7 @@ fn test_evaluate_by_tags_security_only() {
 fn test_evaluate_by_tags_alternate_formats() {
     let response = "[Critical] Buffer overflow\n[Security Issue] SQL injection";
     let verdict = evaluate_by_tags(response);
-    assert_eq!(verdict.critical_bugs, 1);
+    assert_eq!(verdict.critical_issues, 1);
     assert_eq!(verdict.security_issues, 1);
 }
 
@@ -113,7 +113,7 @@ fn test_evaluate_by_tags_alternate_formats() {
 fn test_determine_review_state_negative_always_requests_changes() {
     let verdict = Verdict {
         verdict: "NEGATIVE".to_string(),
-        critical_bugs: 0,
+        critical_issues: 0,
         security_issues: 0,
         important_issues: 0,
         suggestions: 0,
@@ -128,7 +128,7 @@ fn test_determine_review_state_negative_always_requests_changes() {
 fn test_determine_review_state_positive_with_zero_counts_approves() {
     let verdict = Verdict {
         verdict: "POSITIVE".to_string(),
-        critical_bugs: 0,
+        critical_issues: 0,
         security_issues: 0,
         important_issues: 0,
         suggestions: 0,
@@ -141,7 +141,7 @@ fn test_determine_review_state_asymmetric_safety() {
     // Positive verdict but 3 critical bugs -> REQUEST_CHANGES (bugs override)
     let verdict = Verdict {
         verdict: "POSITIVE".to_string(),
-        critical_bugs: 3,
+        critical_issues: 3,
         security_issues: 0,
         important_issues: 0,
         suggestions: 0,
@@ -154,7 +154,7 @@ fn test_determine_review_state_asymmetric_safety() {
     // Negative verdict but 0 bugs -> REQUEST_CHANGES (verdict overrides)
     let verdict = Verdict {
         verdict: "NEGATIVE".to_string(),
-        critical_bugs: 0,
+        critical_issues: 0,
         security_issues: 0,
         important_issues: 0,
         suggestions: 0,
@@ -174,7 +174,7 @@ fn test_verdict_struct_has_important_issues_field() {
     // Arrange / Act: construct Verdict with all four count fields
     let verdict = Verdict {
         verdict: "POSITIVE".to_string(),
-        critical_bugs: 0,
+        critical_issues: 0,
         security_issues: 0,
         important_issues: 2,
         suggestions: 3,
@@ -212,7 +212,7 @@ fn test_determine_review_state_important_issues_lt_3_yields_comment() {
     // Arrange: 2 important issues, no critical or security — should yield COMMENT
     let verdict = Verdict {
         verdict: "POSITIVE".to_string(),
-        critical_bugs: 0,
+        critical_issues: 0,
         security_issues: 0,
         important_issues: 2,
         suggestions: 0,
@@ -226,7 +226,7 @@ fn test_determine_review_state_important_issues_eq_3_yields_request_changes() {
     // Arrange: exactly 3 important issues triggers REQUEST_CHANGES threshold
     let verdict = Verdict {
         verdict: "POSITIVE".to_string(),
-        critical_bugs: 0,
+        critical_issues: 0,
         security_issues: 0,
         important_issues: 3,
         suggestions: 0,
@@ -243,7 +243,7 @@ fn test_determine_review_state_important_issues_gt_3_yields_request_changes() {
     // Arrange: more than 3 important issues — still REQUEST_CHANGES
     let verdict = Verdict {
         verdict: "POSITIVE".to_string(),
-        critical_bugs: 0,
+        critical_issues: 0,
         security_issues: 0,
         important_issues: 5,
         suggestions: 10,
@@ -260,7 +260,7 @@ fn test_determine_review_state_suggestions_alone_do_not_block() {
     // Arrange: suggestions only — must never block merge
     let verdict = Verdict {
         verdict: "POSITIVE".to_string(),
-        critical_bugs: 0,
+        critical_issues: 0,
         security_issues: 0,
         important_issues: 0,
         suggestions: 99,
@@ -304,7 +304,7 @@ fn test_verdict_display_includes_all_four_fields() {
     // Arrange
     let verdict = Verdict {
         verdict: "POSITIVE".to_string(),
-        critical_bugs: 1,
+        critical_issues: 1,
         security_issues: 0,
         important_issues: 2,
         suggestions: 3,

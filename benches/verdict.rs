@@ -37,7 +37,7 @@ fn bench_parse_no_metadata(c: &mut Criterion) {
 fn bench_determine_review_state(c: &mut Criterion) {
     let verdict = Verdict {
         verdict: "POSITIVE".to_string(),
-        critical_bugs: 0,
+        critical_issues: 0,
         security_issues: 0,
         important_issues: 0,
         suggestions: 0,

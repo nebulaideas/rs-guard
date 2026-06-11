@@ -96,7 +96,7 @@ pub struct Verdict {
     /// The verdict string: `"POSITIVE"` or `"NEGATIVE"`.
     pub verdict: String,
     /// Count of `[Critical]` issues identified. Blocks merge unconditionally.
-    pub critical_bugs: u32,
+    pub critical_issues: u32,
     /// Count of `[Security]` issues identified. Blocks merge unconditionally.
     pub security_issues: u32,
     /// Count of `[Important]` issues identified. Blocks merge when ≥ 3.
@@ -111,7 +111,7 @@ impl std::fmt::Display for Verdict {
             f,
             "Verdict: {}, CriticalIssues: {}, SecurityIssues: {}, ImportantIssues: {}, Suggestions: {}",
             self.verdict,
-            self.critical_bugs,
+            self.critical_issues,
             self.security_issues,
             self.important_issues,
             self.suggestions
@@ -149,7 +149,7 @@ pub fn parse_metadata_block(response: &str) -> Option<Verdict> {
     let verdict = extract_field(scan_window, "Verdict:")?.to_string();
     // Accept both "CriticalIssues:" (new format) and "CriticalBugs:" (legacy format)
     // so that user-supplied prompt files using the old field name continue to work.
-    let critical_bugs: u32 = extract_field(scan_window, "CriticalIssues:")
+    let critical_issues: u32 = extract_field(scan_window, "CriticalIssues:")
         .or_else(|| extract_field(scan_window, "CriticalBugs:"))
         .and_then(|v| v.parse().ok())
         .unwrap_or(0);
@@ -165,7 +165,7 @@ pub fn parse_metadata_block(response: &str) -> Option<Verdict> {
 
     Some(Verdict {
         verdict,
-        critical_bugs,
+        critical_issues,
         security_issues,
         important_issues,
         suggestions,
@@ -177,18 +177,18 @@ pub fn parse_metadata_block(response: &str) -> Option<Verdict> {
 /// Used when the LLM response does not contain a structured metadata block.
 /// Counts `[Critical]`, `[Security]`, `[Important]`, and `[Suggestion]` tags.
 pub fn evaluate_by_tags(response: &str) -> Verdict {
-    let critical_bugs = CRITICAL_RE.find_iter(response).count() as u32;
+    let critical_issues = CRITICAL_RE.find_iter(response).count() as u32;
     let security_issues = SECURITY_RE.find_iter(response).count() as u32;
     let important_issues = IMPORTANT_RE.find_iter(response).count() as u32;
     let suggestions = SUGGESTION_RE.find_iter(response).count() as u32;
 
     Verdict {
-        verdict: if critical_bugs > 0 || security_issues > 0 {
+        verdict: if critical_issues > 0 || security_issues > 0 {
             "NEGATIVE".to_string()
         } else {
             "POSITIVE".to_string()
         },
-        critical_bugs,
+        critical_issues,
         security_issues,
         important_issues,
         suggestions,
@@ -205,16 +205,14 @@ pub fn evaluate_by_tags(response: &str) -> Verdict {
 pub fn determine_review_state(verdict: &Verdict) -> ReviewState {
     if verdict.verdict == "NEGATIVE"
         || verdict.security_issues > 0
-        || verdict.critical_bugs > 0
+        || verdict.critical_issues > 0
         || verdict.important_issues >= 3
     {
         ReviewState::RequestChanges
     } else if verdict.important_issues > 0 {
         ReviewState::Comment
-    } else if verdict.critical_bugs == 0 && verdict.security_issues == 0 {
-        ReviewState::Approve
     } else {
-        ReviewState::Comment
+        ReviewState::Approve
     }
 }
 
@@ -259,7 +257,7 @@ mod tests {
         let response = "Some review text\n\n[RS_GUARD_VERDICT_METADATA]\nVerdict: POSITIVE\nCriticalIssues: 0\nSecurityIssues: 0\nImportantIssues: 0\nSuggestions: 0";
         let verdict = parse_metadata_block(response).unwrap();
         assert_eq!(verdict.verdict, "POSITIVE");
-        assert_eq!(verdict.critical_bugs, 0);
+        assert_eq!(verdict.critical_issues, 0);
         assert_eq!(verdict.security_issues, 0);
         assert_eq!(verdict.important_issues, 0);
         assert_eq!(verdict.suggestions, 0);
@@ -302,7 +300,7 @@ mod tests {
     fn test_missing_metadata_fallback_to_tags() {
         let response = "Review found some issues.\n[Critical Bug] Race condition in handler\n[Security] SQL injection risk";
         let verdict = evaluate_by_tags(response);
-        assert_eq!(verdict.critical_bugs, 1);
+        assert_eq!(verdict.critical_issues, 1);
         assert_eq!(verdict.security_issues, 1);
         assert_eq!(
             determine_review_state(&verdict),
@@ -314,7 +312,7 @@ mod tests {
     fn test_clean_tag_fallback() {
         let response = "Everything looks good. No issues found.";
         let verdict = evaluate_by_tags(response);
-        assert_eq!(verdict.critical_bugs, 0);
+        assert_eq!(verdict.critical_issues, 0);
         assert_eq!(verdict.security_issues, 0);
         assert_eq!(verdict.important_issues, 0);
         assert_eq!(verdict.suggestions, 0);
@@ -356,7 +354,7 @@ mod tests {
         );
         let verdict = parse_metadata_block(&response).unwrap();
         assert_eq!(verdict.verdict, "POSITIVE");
-        assert_eq!(verdict.critical_bugs, 0);
+        assert_eq!(verdict.critical_issues, 0);
         assert_eq!(verdict.security_issues, 0);
     }
 
@@ -369,7 +367,7 @@ mod tests {
         );
         let verdict = parse_metadata_block(&response).unwrap();
         assert_eq!(verdict.verdict, "NEGATIVE");
-        assert_eq!(verdict.critical_bugs, 1);
+        assert_eq!(verdict.critical_issues, 1);
         assert_eq!(verdict.security_issues, 0);
     }
 
@@ -425,7 +423,7 @@ mod tests {
             "[RS_GUARD_VERDICT_METADATA]\nSuggestions: 1\nImportantIssues: 0\nSecurityIssues: 0\nCriticalIssues: 1\nVerdict: NEGATIVE";
         let verdict = parse_metadata_block(response).unwrap();
         assert_eq!(verdict.verdict, "NEGATIVE");
-        assert_eq!(verdict.critical_bugs, 1);
+        assert_eq!(verdict.critical_issues, 1);
         assert_eq!(verdict.security_issues, 0);
         assert_eq!(verdict.suggestions, 1);
     }
@@ -436,7 +434,7 @@ mod tests {
         let response = "[RS_GUARD_VERDICT_METADATA]\nVerdict: POSITIVE\nSome extra text here\nCriticalIssues: 0\nMore text\nSecurityIssues: 0\nImportantIssues: 0\nSuggestions: 0";
         let verdict = parse_metadata_block(response).unwrap();
         assert_eq!(verdict.verdict, "POSITIVE");
-        assert_eq!(verdict.critical_bugs, 0);
+        assert_eq!(verdict.critical_issues, 0);
         assert_eq!(verdict.security_issues, 0);
     }
 
@@ -447,19 +445,19 @@ mod tests {
             "[RS_GUARD_VERDICT_METADATA]\nImportantIssues: 2\nCriticalIssues: 1\nVerdict: NEGATIVE\nSecurityIssues: 0\nSuggestions: 3";
         let verdict = parse_metadata_block(response).unwrap();
         assert_eq!(verdict.verdict, "NEGATIVE");
-        assert_eq!(verdict.critical_bugs, 1);
+        assert_eq!(verdict.critical_issues, 1);
         assert_eq!(verdict.security_issues, 0);
         assert_eq!(verdict.important_issues, 2);
         assert_eq!(verdict.suggestions, 3);
     }
 
     #[test]
-    fn test_legacy_critical_bugs_field_still_parses() {
+    fn test_legacy_critical_issues_field_still_parses() {
         // Regression: user-supplied prompts using old CriticalBugs: field must keep working
         let response =
             "[RS_GUARD_VERDICT_METADATA]\nVerdict: NEGATIVE\nCriticalBugs: 2\nSecurityIssues: 1";
         let verdict = parse_metadata_block(response).unwrap();
-        assert_eq!(verdict.critical_bugs, 2);
+        assert_eq!(verdict.critical_issues, 2);
         assert_eq!(verdict.security_issues, 1);
         assert_eq!(verdict.important_issues, 0);
         assert_eq!(verdict.suggestions, 0);

@@ -295,9 +295,9 @@ pub async fn run_pipeline(
         parse_verdict(&llm_response).context("Failed to parse verdict from LLM response")?;
 
     log::info!(
-        "Verdict: {} (CriticalBugs: {}, SecurityIssues: {}) -> State: {}",
+        "Verdict: {} (CriticalIssues: {}, SecurityIssues: {}) -> State: {}",
         verdict.verdict,
-        verdict.critical_bugs,
+        verdict.critical_issues,
         verdict.security_issues,
         state
     );

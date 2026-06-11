@@ -94,7 +94,7 @@ SecurityIssues: {}
         state,
         review,
         verdict.verdict,
-        verdict.critical_bugs,
+        verdict.critical_issues,
         verdict.security_issues,
     );
 
@@ -148,7 +148,7 @@ pub fn print_colored_report(
 
     writeln!(writer)?;
     writeln!(writer, "Verdict:         {}", verdict.verdict)?;
-    writeln!(writer, "Critical Bugs:   {}", verdict.critical_bugs)?;
+    writeln!(writer, "Critical Issues: {}", verdict.critical_issues)?;
     writeln!(writer, "Security Issues: {}", verdict.security_issues)?;
     writeln!(writer)?;
     writeln!(writer, "{}", review)?;
@@ -244,7 +244,7 @@ mod tests {
 
         let verdict = Verdict {
             verdict: "POSITIVE".to_string(),
-            critical_bugs: 0,
+            critical_issues: 0,
             security_issues: 0,
             important_issues: 0,
             suggestions: 0,
@@ -275,7 +275,7 @@ mod tests {
             "test",
             &Verdict {
                 verdict: "POSITIVE".to_string(),
-                critical_bugs: 0,
+                critical_issues: 0,
                 security_issues: 0,
                 important_issues: 0,
                 suggestions: 0,
@@ -298,7 +298,7 @@ mod tests {
     fn test_print_colored_report_approve() {
         let verdict = Verdict {
             verdict: "POSITIVE".to_string(),
-            critical_bugs: 0,
+            critical_issues: 0,
             security_issues: 0,
             important_issues: 0,
             suggestions: 0,
@@ -314,7 +314,7 @@ mod tests {
     fn test_print_colored_report_request_changes() {
         let verdict = Verdict {
             verdict: "NEGATIVE".to_string(),
-            critical_bugs: 3,
+            critical_issues: 3,
             security_issues: 1,
             important_issues: 0,
             suggestions: 0,
@@ -338,7 +338,7 @@ mod tests {
     fn test_print_colored_summary_includes_metadata() {
         let verdict = Verdict {
             verdict: "POSITIVE".to_string(),
-            critical_bugs: 0,
+            critical_issues: 0,
             security_issues: 0,
             important_issues: 0,
             suggestions: 0,
