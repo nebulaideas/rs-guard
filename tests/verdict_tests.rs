@@ -166,6 +166,49 @@ fn test_determine_review_state_asymmetric_safety() {
 }
 
 // ---------------------------------------------------------------------------
+// Regression: evaluate_by_tags must count variant tag forms
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_evaluate_by_tags_counts_important_issue_variant() {
+    // [Important Issue] is an alternate form the LLM may emit
+    let response = "[Important Issue] Missing null check\n[Important] No coverage";
+    let verdict = evaluate_by_tags(response);
+    assert_eq!(verdict.important_issues, 2);
+}
+
+#[test]
+fn test_evaluate_by_tags_counts_suggestion_issue_variant() {
+    // [Suggestion Issue] is an alternate form the LLM may emit
+    let response = "[Suggestion Issue] Rename variable\n[Suggestion] Extract method";
+    let verdict = evaluate_by_tags(response);
+    assert_eq!(verdict.suggestions, 2);
+}
+
+// ---------------------------------------------------------------------------
+// Boundary: metadata scan window off-by-one
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_metadata_scan_window_exact_boundary() {
+    // Metadata fields start exactly at byte 4096 after the marker — must still parse
+    // METADATA_SCAN_WINDOW is 4096, so content of length 4095 fills the window and
+    // the fields land just inside it.
+    let fields = "\nVerdict: POSITIVE\nCriticalIssues: 0\nSecurityIssues: 0\nImportantIssues: 0\nSuggestions: 0";
+    let padding_len = 4096usize.saturating_sub(fields.len());
+    let padding = "x".repeat(padding_len);
+    let response = format!("[RS_GUARD_VERDICT_METADATA]{}{}", padding, fields);
+    // Fields land right at the boundary — should parse successfully
+    let verdict = parse_metadata_block(&response);
+    assert!(
+        verdict.is_some(),
+        "fields at scan window boundary should parse"
+    );
+    let v = verdict.unwrap();
+    assert_eq!(v.verdict, "POSITIVE");
+}
+
+// ---------------------------------------------------------------------------
 // TDD tests for Step 2: new Verdict fields + updated determine_review_state
 // ---------------------------------------------------------------------------
 
@@ -311,8 +354,21 @@ fn test_verdict_display_includes_all_four_fields() {
     };
     // Act
     let display = verdict.to_string();
-    // Assert: all four counts appear in Display output
-    assert!(display.contains("1"), "critical count missing");
-    assert!(display.contains("2"), "important count missing");
-    assert!(display.contains("3"), "suggestions count missing");
+    // Assert: all four counts appear in Display output with their labels
+    assert!(
+        display.contains("CriticalIssues: 1"),
+        "critical count missing or malformed"
+    );
+    assert!(
+        display.contains("ImportantIssues: 2"),
+        "important count missing or malformed"
+    );
+    assert!(
+        display.contains("Suggestions: 3"),
+        "suggestions count missing or malformed"
+    );
+    assert!(
+        display.contains("SecurityIssues: 0"),
+        "security count missing or malformed"
+    );
 }

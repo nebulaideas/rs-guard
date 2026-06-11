@@ -18,6 +18,10 @@ use std::sync::LazyLock;
 /// which can produce incorrect verdicts.
 const METADATA_SCAN_WINDOW: usize = 4096;
 
+/// Minimum number of `[Important]` issues required to trigger `REQUEST_CHANGES`.
+/// Below this threshold, important issues produce a `COMMENT` instead.
+const IMPORTANT_ISSUES_THRESHOLD: u32 = 3;
+
 /// Marker string that identifies the verdict metadata block.
 const METADATA_MARKER: &str = "[RS_GUARD_VERDICT_METADATA]";
 
@@ -32,12 +36,16 @@ static SECURITY_RE: LazyLock<Regex> = LazyLock::new(|| {
 });
 
 /// Compiled regex for counting important issue tags.
-static IMPORTANT_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"\[Important\]").expect("important regex is valid"));
+/// Matches `[Important]` and `[Important Issue]` for consistency with critical/security variants.
+static IMPORTANT_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"\[Important\]|\[Important Issue\]").expect("important regex is valid")
+});
 
 /// Compiled regex for counting suggestion tags.
-static SUGGESTION_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"\[Suggestion\]").expect("suggestion regex is valid"));
+/// Matches `[Suggestion]` and `[Suggestion Issue]` for consistency with critical/security variants.
+static SUGGESTION_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"\[Suggestion\]|\[Suggestion Issue\]").expect("suggestion regex is valid")
+});
 
 /// GitHub Pull Request review states.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -138,7 +146,11 @@ fn extract_field<'a>(section: &'a str, label: &str) -> Option<&'a str> {
 /// Attempts to extract a `[RS_GUARD_VERDICT_METADATA]` block from the response
 /// using fast substring scanning instead of regex.
 ///
-/// Returns `None` if the metadata block is not present or any field cannot be parsed.
+/// Returns `None` if the metadata block is not present or the `Verdict:` field is missing.
+/// All numeric fields (`CriticalIssues`, `SecurityIssues`, `ImportantIssues`, `Suggestions`)
+/// default to `0` when absent, allowing partial blocks from older prompt formats to parse
+/// successfully. This relaxed policy is intentional — a missing count is treated as zero
+/// rather than a parse failure.
 pub fn parse_metadata_block(response: &str) -> Option<Verdict> {
     let marker_pos = response.find(METADATA_MARKER)?;
     let section_start = marker_pos + METADATA_MARKER.len();
@@ -175,7 +187,8 @@ pub fn parse_metadata_block(response: &str) -> Option<Verdict> {
 /// Fallback verdict derivation by counting severity tags in the response text.
 ///
 /// Used when the LLM response does not contain a structured metadata block.
-/// Counts `[Critical]`, `[Security]`, `[Important]`, and `[Suggestion]` tags.
+/// Counts `[Critical]` / `[Critical Bug]`, `[Security]` / `[Security Issue]`,
+/// `[Important]` / `[Important Issue]`, and `[Suggestion]` / `[Suggestion Issue]` tags.
 pub fn evaluate_by_tags(response: &str) -> Verdict {
     let critical_issues = CRITICAL_RE.find_iter(response).count() as u32;
     let security_issues = SECURITY_RE.find_iter(response).count() as u32;
@@ -199,14 +212,14 @@ pub fn evaluate_by_tags(response: &str) -> Verdict {
 ///
 /// Uses an asymmetric safety model:
 /// - `NEGATIVE` verdict, any `[Security]` issues, or any `[Critical]` issues → `REQUEST_CHANGES`.
-/// - `[Important]` issues ≥ 3 → `REQUEST_CHANGES`.
+/// - `[Important]` issues ≥ `IMPORTANT_ISSUES_THRESHOLD` → `REQUEST_CHANGES`.
 /// - `[Important]` issues 1–2 → `COMMENT` (human review recommended).
 /// - All counts zero and verdict `POSITIVE` → `APPROVE`.
 pub fn determine_review_state(verdict: &Verdict) -> ReviewState {
     if verdict.verdict == "NEGATIVE"
         || verdict.security_issues > 0
         || verdict.critical_issues > 0
-        || verdict.important_issues >= 3
+        || verdict.important_issues >= IMPORTANT_ISSUES_THRESHOLD
     {
         ReviewState::RequestChanges
     } else if verdict.important_issues > 0 {
