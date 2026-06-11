@@ -9,7 +9,7 @@ repository = "https://github.com/nebulaideas/rs-guard"
 homepage = "https://github.com/nebulaideas/rs-guard"
 documentation = "https://docs.rs/rs-guard"
 readme = "README.md"
-keywords = ["ai", "code-review", "github", "llm", "cli", "devops"]
+keywords = ["ai", "code-review", "github", "llm", "cli"]
 categories = ["development-tools", "command-line-utilities"]
 rust-version = "1.82"
 
