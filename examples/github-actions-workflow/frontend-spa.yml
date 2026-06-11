@@ -42,16 +42,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Download the latest rs-guard release and verify its SHA-256.
+      # Download rs-guard v1.0.0 and verify its SHA-256.
       # The integrity check warns (but does not fail) if the checksums
       # file is missing from the release.
       - name: Download rs-guard
         run: |
           set -euo pipefail
           curl -L --fail -o rs-guard-x86_64-unknown-linux-gnu \
-            https://github.com/nebulaideas/rs-guard/releases/latest/download/rs-guard-x86_64-unknown-linux-gnu
+            https://github.com/nebulaideas/rs-guard/releases/download/v1.0.0/rs-guard-x86_64-unknown-linux-gnu
           if curl -fsSL -o rs-guard-x86_64-unknown-linux-gnu.sha256 \
-              https://github.com/nebulaideas/rs-guard/releases/latest/download/rs-guard-x86_64-unknown-linux-gnu.sha256; then
+              https://github.com/nebulaideas/rs-guard/releases/download/v1.0.0/rs-guard-x86_64-unknown-linux-gnu.sha256; then
             sha256sum -c rs-guard-x86_64-unknown-linux-gnu.sha256
           else
             echo "::warning::No .sha256 file published for this release; skipping integrity check."

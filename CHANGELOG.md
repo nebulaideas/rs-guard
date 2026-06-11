@@ -5,27 +5,72 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.0.0] - 2026-06-10
+## [1.0.0] - 2026-06-11
 
 ### Added
 
-- `--dry-run` CLI flag to run the full pipeline without submitting reviews or blocking commits
-- `cache_dir` config field for custom cache directory path
-- `circuit_breaker` config field for optional circuit breaker configuration
-- `pricing` config field for per-provider pricing overrides
-- `chunk_head_lines` and `chunk_tail_lines` config fields for diff chunking control
-- `auto_gitignore` config option to control `.gitignore` auto-modification behavior
-- Hybrid ASCII/non-ASCII token estimation (`estimate_tokens`) for more accurate cost estimates
-- User-facing progress indicators in local mode (🤖 before LLM call, ✅ after)
-- Per-provider `context_window` metadata in `ProviderMeta` (64K–128K tokens)
-- Token limit warning when estimated tokens exceed 80% of provider context window
+- **Five-axis review system** — `DEFAULT_PROMPT` now directs the LLM across five structured
+  review axes: Correctness, Security, Performance, Maintainability, and Test Coverage
+- **Four-level severity taxonomy** — `[Critical]`, `[Security]`, `[Important]`, `[Suggestion]`
+  replace the old binary critical/non-critical model; each level has defined merge implications
+- **`important_issues` field** on `Verdict` struct — counts `[Important]`-tagged findings
+- **`suggestions` field** on `Verdict` struct — counts `[Suggestion]`-tagged findings (advisory only)
+- **`IMPORTANT_ISSUES_THRESHOLD` constant** (`3`) — configures when accumulated important issues
+  escalate from COMMENT to REQUEST_CHANGES
+- **Language-agnostic example prompt library** (`examples/prompts/`):
+  - `general-code-review.md` — language/framework-agnostic template (mirrors `DEFAULT_PROMPT`)
+  - `backend-api.md` — REST/GraphQL API focused template
+  - `frontend-spa.md` — SPA/component framework focused template
+  - `cli-tooling.md` — CLI tool and systems programming focused template
+- **`--dry-run` CLI flag** — run the full pipeline without submitting reviews or blocking commits
+- **`cache_dir` config field** — custom cache directory path
+- **`circuit_breaker` config field** — optional circuit breaker configuration
+- **`pricing` config field** — per-provider pricing overrides
+- **`chunk_head_lines` and `chunk_tail_lines` config fields** — diff chunking control
+- **`auto_gitignore` config option** — control `.gitignore` auto-modification behavior
+- **Hybrid ASCII/non-ASCII token estimation** (`estimate_tokens`) for more accurate cost estimates
+- **User-facing progress indicators** in local mode (🤖 before LLM call, ✅ after)
+- **Per-provider `context_window` metadata** in `ProviderMeta` (64K–128K tokens)
+- **Token limit warning** when estimated tokens exceed 80% of provider context window
 
 ### Changed
 
+- **`determine_review_state` logic** extended with a three-tier decision tree:
+  - `NEGATIVE` verdict, any `[Critical]` or `[Security]` issue → `REQUEST_CHANGES`
+  - `important_issues >= 3` → `REQUEST_CHANGES`
+  - `important_issues` 1–2 → `COMMENT` (advisory, not blocked)
+  - Otherwise → `APPROVE`
+- **Metadata block format** updated to four fields:
+
+  ```text
+  [RS_GUARD_VERDICT_METADATA]
+  Verdict: POSITIVE
+  CriticalIssues: <count>
+  SecurityIssues: <count>
+  ImportantIssues: <count>
+  Suggestions: <count>
+  ```
+
 - `ensure_gitignored()` now returns `Result` instead of silently logging warnings
-- `ensure_gitignore()` now writes `.gitignore` at the git repository root (via `find_git_root()`) instead of the current working directory, preventing incorrect `.gitignore` creation when invoked from subdirectories
+- `ensure_gitignore()` now writes `.gitignore` at the git repository root (via `find_git_root()`)
+  instead of the current working directory
 - `CacheConfig` includes `auto_gitignore` field (default: `true`)
-- **BREAKING:** `ReviewMetrics::estimated_cost_cents` changed from `u64` to `f64` to avoid integer truncation for small diffs. Consumers parsing `rs-guard-metrics.json` must update their type expectations
+- Example GitHub Actions workflows pinned to `v1.0.0` release (previously used `latest`)
+- All documentation updated to reflect five-axis review, four-field metadata block, and the
+  new prompt template library; framework-specific inline examples removed from `docs/USAGE.md`
+
+### Removed / Deprecated
+
+- **`CriticalBugs`** metadata field — replaced by `CriticalIssues`. The parser accepts both for
+  one release cycle for backward compatibility; `CriticalBugs` will be removed in `v1.1.0`.
+- Framework-specific inline prompt templates (React/TypeScript, Rails) removed from
+  `docs/USAGE.md`; use the templates in `examples/prompts/` instead.
+
+### Fixed
+
+- **BREAKING:** `ReviewMetrics::estimated_cost_cents` changed from `u64` to `f64` to avoid
+  integer truncation for small diffs. Consumers parsing `rs-guard-metrics.json` must update
+  their type expectations.
 
 ## [0.7.1] - 2026-06-08
 
