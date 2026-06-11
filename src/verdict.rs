@@ -130,8 +130,11 @@ pub fn parse_metadata_block(response: &str) -> Option<Verdict> {
     let scan_window = &section[..METADATA_SCAN_WINDOW.min(section.len())];
 
     let verdict = extract_field(scan_window, "Verdict:")?;
-    let critical_bugs: u32 = extract_field(scan_window, "CriticalBugs:")?
-        .parse()
+    // Accept both "CriticalIssues:" (new format) and "CriticalBugs:" (legacy format)
+    // so that user-supplied prompt files using the old field name continue to work.
+    let critical_bugs: u32 = extract_field(scan_window, "CriticalIssues:")
+        .or_else(|| extract_field(scan_window, "CriticalBugs:"))
+        .and_then(|v| v.parse().ok())
         .unwrap_or(0);
     let security_issues: u32 = extract_field(scan_window, "SecurityIssues:")?
         .parse()

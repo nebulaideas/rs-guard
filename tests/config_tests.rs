@@ -987,12 +987,13 @@ fn test_default_prompt_contains_metadata_marker() {
 
 #[test]
 fn test_default_prompt_requires_positive_findings_section() {
-    // Assert: prompt must instruct the LLM to include what's done well
+    // Assert: prompt must instruct the LLM to include what's done well.
+    // Uses case-insensitive match on "done well" to avoid false positives
+    // from "POSITIVE" in the verdict guidelines section.
+    let lower = DEFAULT_PROMPT.to_lowercase();
     assert!(
-        DEFAULT_PROMPT.to_lowercase().contains("what")
-            && DEFAULT_PROMPT.to_lowercase().contains("done well")
-            || DEFAULT_PROMPT.to_lowercase().contains("positive"),
-        "DEFAULT_PROMPT must include a 'What's done well' or positive findings requirement"
+        lower.contains("what") && lower.contains("done well"),
+        "DEFAULT_PROMPT must include a 'What's Done Well' section requirement"
     );
 }
 

@@ -28,12 +28,12 @@ pub const DEFAULT_MAX_TOKENS: u32 = 4096;
 ///
 /// The default prompt implements a **five-axis review** with a **four-level severity taxonomy**:
 ///
-/// | Severity | Label | Blocks merge? |
+/// | Label | Meaning | Blocks merge? |
 /// |---|---|---|
-/// | Blocks merge unconditionally | `[Critical]` | Yes |
-/// | Blocks merge unconditionally | `[Security]` | Yes |
-/// | Blocks merge when ≥ 3 | `[Important]` | Conditional |
-/// | Advisory only | `[Suggestion]` | No |
+/// | `[Critical]` | Data loss, broken functionality, incorrect production behavior | Yes |
+/// | `[Security]` | Vulnerability, unauthorized access, injection risk, exposed secret | Yes |
+/// | `[Important]` | Missing test, wrong abstraction, poor error handling, significant tech debt | Conditional |
+/// | `[Suggestion]` | Optional improvement: naming, style, minor optimization | No |
 ///
 /// See [docs/USAGE.md](https://github.com/nebulaideas/rs-guard/blob/main/docs/USAGE.md#customizing-the-review-prompt)
 /// for the full severity guide and project-specific prompt templates.
