@@ -1,5 +1,5 @@
 use clap::Parser;
-use rs_guard::config::{load_toml_config, Config, ProviderTomlConfig, TomlConfig};
+use rs_guard::config::{load_toml_config, Config, ProviderTomlConfig, TomlConfig, DEFAULT_PROMPT};
 use serial_test::serial;
 use std::collections::HashMap;
 use std::io::Write;
@@ -902,4 +902,105 @@ max_tokens = 2048
         let config = Config::from_env(toml).unwrap();
         assert_eq!(config.provider_config.max_tokens, Some(2048));
     });
+}
+
+// ---------------------------------------------------------------------------
+// DEFAULT_PROMPT structure tests (TDD for Step 1 redesign)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_default_prompt_contains_all_five_axes() {
+    // Arrange / Act: DEFAULT_PROMPT is a compile-time constant
+    // Assert: all five review axes must be present
+    assert!(
+        DEFAULT_PROMPT.contains("Correctness"),
+        "DEFAULT_PROMPT must contain Correctness axis"
+    );
+    assert!(
+        DEFAULT_PROMPT.contains("Security"),
+        "DEFAULT_PROMPT must contain Security axis"
+    );
+    assert!(
+        DEFAULT_PROMPT.contains("Architecture"),
+        "DEFAULT_PROMPT must contain Architecture axis"
+    );
+    assert!(
+        DEFAULT_PROMPT.contains("Readability"),
+        "DEFAULT_PROMPT must contain Readability axis"
+    );
+    assert!(
+        DEFAULT_PROMPT.contains("Performance"),
+        "DEFAULT_PROMPT must contain Performance axis"
+    );
+}
+
+#[test]
+fn test_default_prompt_contains_four_severity_levels() {
+    // Assert: all four severity labels must be defined
+    assert!(
+        DEFAULT_PROMPT.contains("[Critical]"),
+        "DEFAULT_PROMPT must define [Critical] severity"
+    );
+    assert!(
+        DEFAULT_PROMPT.contains("[Security]"),
+        "DEFAULT_PROMPT must define [Security] severity"
+    );
+    assert!(
+        DEFAULT_PROMPT.contains("[Important]"),
+        "DEFAULT_PROMPT must define [Important] severity"
+    );
+    assert!(
+        DEFAULT_PROMPT.contains("[Suggestion]"),
+        "DEFAULT_PROMPT must define [Suggestion] severity"
+    );
+}
+
+#[test]
+fn test_default_prompt_contains_new_metadata_block_fields() {
+    // Assert: updated metadata block with all four count fields
+    assert!(
+        DEFAULT_PROMPT.contains("CriticalIssues:"),
+        "DEFAULT_PROMPT metadata block must contain CriticalIssues field"
+    );
+    assert!(
+        DEFAULT_PROMPT.contains("SecurityIssues:"),
+        "DEFAULT_PROMPT metadata block must contain SecurityIssues field"
+    );
+    assert!(
+        DEFAULT_PROMPT.contains("ImportantIssues:"),
+        "DEFAULT_PROMPT metadata block must contain ImportantIssues field"
+    );
+    assert!(
+        DEFAULT_PROMPT.contains("Suggestions:"),
+        "DEFAULT_PROMPT metadata block must contain Suggestions field"
+    );
+}
+
+#[test]
+fn test_default_prompt_contains_metadata_marker() {
+    // Assert: the machine-parseable marker must be present
+    assert!(
+        DEFAULT_PROMPT.contains("[RS_GUARD_VERDICT_METADATA]"),
+        "DEFAULT_PROMPT must contain [RS_GUARD_VERDICT_METADATA] marker"
+    );
+}
+
+#[test]
+fn test_default_prompt_requires_positive_findings_section() {
+    // Assert: prompt must instruct the LLM to include what's done well
+    assert!(
+        DEFAULT_PROMPT.to_lowercase().contains("what")
+            && DEFAULT_PROMPT.to_lowercase().contains("done well")
+            || DEFAULT_PROMPT.to_lowercase().contains("positive"),
+        "DEFAULT_PROMPT must include a 'What's done well' or positive findings requirement"
+    );
+}
+
+#[test]
+fn test_default_prompt_does_not_contain_old_metadata_fields() {
+    // Assert: old field names must not appear — they are replaced by new ones
+    assert!(
+        !DEFAULT_PROMPT.contains("CriticalBugs:"),
+        "DEFAULT_PROMPT must not contain legacy CriticalBugs field"
+    );
 }
