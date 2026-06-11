@@ -24,6 +24,9 @@ on:
       - '*.config.mjs'
       - 'tsconfig*.json'
       - 'package*.json'
+      # If your project uses Tailwind or PostCSS, restore these:
+      # - 'tailwind.config.*'
+      # - 'postcss.config.*'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number }}

@@ -31,6 +31,9 @@ and includes a `## Project-Specific Focus` section for customization.
 Copy the appropriate template to your repository:
 
 ```bash
+# Ensure the .github directory exists first
+mkdir -p .github
+
 # General-purpose (any language/framework)
 cp examples/prompts/general-code-review.md .github/review-prompt.md
 

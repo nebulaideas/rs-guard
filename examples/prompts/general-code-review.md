@@ -82,7 +82,7 @@ Always include at least one specific positive observation. Specific praise motiv
 - **NEGATIVE** if there are `[Critical]` or `[Security]` findings that must block merging
 
 ## Project-Specific Focus
-<!-- Add your project conventions here. Examples:
+<!-- Uncomment and adapt the examples below for your project's conventions:
 - All public functions must have doc comments.
 - Database migrations must be reversible.
 - New HTTP endpoints require an OpenAPI schema entry.

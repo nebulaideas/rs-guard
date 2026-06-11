@@ -104,7 +104,7 @@ Always include at least one specific positive observation. Specific praise motiv
 - **NEGATIVE** if there are `[Critical]` or `[Security]` findings that must block merging
 
 ## Project-Specific Focus
-<!-- Add your language and project conventions here. Examples:
+<!-- Uncomment and adapt the examples below for your language and project conventions:
 - Language: Rust — no unwrap() outside #[cfg(test)] or main(); use anyhow::Context for error chains.
 - Exit codes: 0 = success, 1 = user error, 2 = internal error (as per sysexits.h conventions).
 - Logging: structured JSON logs via <your logger>; no eprintln!() in library code.

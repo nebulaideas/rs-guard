@@ -98,7 +98,7 @@ Always include at least one specific positive observation. Specific praise motiv
 - **NEGATIVE** if there are `[Critical]` or `[Security]` findings that must block merging
 
 ## Project-Specific Focus
-<!-- Add your framework and project conventions here. Examples:
+<!-- Uncomment and adapt the examples below for your framework and project conventions:
 - Framework: React 18 with hooks; no class components.
 - State: Zustand for global state; useState/useReducer for local UI state only.
 - Data fetching: TanStack Query; no direct fetch() calls in components.

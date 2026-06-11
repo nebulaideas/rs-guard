@@ -101,7 +101,7 @@ Always include at least one specific positive observation. Specific praise motiv
 - **NEGATIVE** if there are `[Critical]` or `[Security]` findings that must block merging
 
 ## Project-Specific Focus
-<!-- Add your stack's conventions here. Examples:
+<!-- Uncomment and adapt the examples below for your stack's conventions:
 - ORM: use parameterized queries via <your ORM>; raw SQL only in migration files.
 - Migrations: every migration must have a matching rollback method.
 - Auth: every route not in the public allowlist must pass through <your auth middleware>.
