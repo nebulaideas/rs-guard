@@ -781,6 +781,16 @@ impl Config {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+
+    /// Serializes tests that mutate process-global environment variables.
+    /// Rust tests run in parallel threads by default; without this guard, tests
+    /// that call `set_var` / `remove_var` on the same key race with each other.
+    ///
+    /// Scope: unit tests in this module only. Integration tests in `tests/`
+    /// compile into a separate binary and cannot race with these; they use
+    /// `serial_test::serial` for their own isolation.
+    static ENV_MUTEX: Mutex<()> = Mutex::new(());
 
     #[test]
     fn test_standard_api_key_env_var_mapping() {
@@ -1137,50 +1147,54 @@ mod tests {
 
     #[test]
     fn test_repo_full_name_with_multiple_slashes() {
+        let _guard = ENV_MUTEX.lock().unwrap();
         std::env::set_var("DEEPSEEK_API_KEY", "test-key");
         std::env::set_var("REPO_FULL_NAME", "owner/repo/subpath");
         let result = Config::from_env(None);
+        std::env::remove_var("DEEPSEEK_API_KEY");
+        std::env::remove_var("REPO_FULL_NAME");
         assert!(result.is_err());
         assert!(result
             .unwrap_err()
             .to_string()
             .contains("no additional slashes"));
-        std::env::remove_var("DEEPSEEK_API_KEY");
-        std::env::remove_var("REPO_FULL_NAME");
     }
 
     #[test]
     fn test_repo_full_name_empty_owner() {
+        let _guard = ENV_MUTEX.lock().unwrap();
         std::env::set_var("DEEPSEEK_API_KEY", "test-key");
         std::env::set_var("REPO_FULL_NAME", "/repo");
         let result = Config::from_env(None);
-        assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("cannot be empty"));
         std::env::remove_var("DEEPSEEK_API_KEY");
         std::env::remove_var("REPO_FULL_NAME");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("cannot be empty"));
     }
 
     #[test]
     fn test_repo_full_name_empty_repo() {
+        let _guard = ENV_MUTEX.lock().unwrap();
         std::env::set_var("DEEPSEEK_API_KEY", "test-key");
         std::env::set_var("REPO_FULL_NAME", "owner/");
         let result = Config::from_env(None);
-        assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("cannot be empty"));
         std::env::remove_var("DEEPSEEK_API_KEY");
         std::env::remove_var("REPO_FULL_NAME");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("cannot be empty"));
     }
 
     #[test]
     fn test_repo_full_name_valid_format() {
+        let _guard = ENV_MUTEX.lock().unwrap();
         std::env::set_var("DEEPSEEK_API_KEY", "test-key");
         std::env::set_var("REPO_FULL_NAME", "owner/repo");
         let result = Config::from_env(None);
+        std::env::remove_var("DEEPSEEK_API_KEY");
+        std::env::remove_var("REPO_FULL_NAME");
         assert!(result.is_ok());
         let config = result.unwrap();
         assert_eq!(config.repo_owner, Some("owner".to_string()));
         assert_eq!(config.repo_name, Some("repo".to_string()));
-        std::env::remove_var("DEEPSEEK_API_KEY");
-        std::env::remove_var("REPO_FULL_NAME");
     }
 }

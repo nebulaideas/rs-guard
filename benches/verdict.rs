@@ -7,7 +7,7 @@ use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use rs_guard::verdict::{determine_review_state, evaluate_by_tags, parse_metadata_block, Verdict};
 
 fn bench_parse_metadata_block(c: &mut Criterion) {
-    let response = "Some review text with reasonable length.\n\n[RS_GUARD_VERDICT_METADATA]\nVerdict: POSITIVE\nCriticalBugs: 0\nSecurityIssues: 0";
+    let response = "Some review text with reasonable length.\n\n[RS_GUARD_VERDICT_METADATA]\nVerdict: POSITIVE\nCriticalIssues: 0\nSecurityIssues: 0\nImportantIssues: 0\nSuggestions: 0";
 
     c.bench_function("parse_metadata_block", |b| {
         b.iter(|| parse_metadata_block(black_box(response)))
@@ -37,8 +37,10 @@ fn bench_parse_no_metadata(c: &mut Criterion) {
 fn bench_determine_review_state(c: &mut Criterion) {
     let verdict = Verdict {
         verdict: "POSITIVE".to_string(),
-        critical_bugs: 0,
+        critical_issues: 0,
         security_issues: 0,
+        important_issues: 0,
+        suggestions: 0,
     };
 
     c.bench_function("determine_review_state", |b| {
@@ -50,7 +52,7 @@ fn bench_large_diff_parsing(c: &mut Criterion) {
     // Simulate a large LLM response (~10KB)
     let body = "line\n".repeat(500);
     let response = format!(
-        "Review:\n{}\n\n[RS_GUARD_VERDICT_METADATA]\nVerdict: POSITIVE\nCriticalBugs: 0\nSecurityIssues: 0",
+        "Review:\n{}\n\n[RS_GUARD_VERDICT_METADATA]\nVerdict: POSITIVE\nCriticalIssues: 0\nSecurityIssues: 0\nImportantIssues: 0\nSuggestions: 0",
         body
     );
 
