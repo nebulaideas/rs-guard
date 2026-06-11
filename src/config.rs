@@ -786,6 +786,10 @@ mod tests {
     /// Serializes tests that mutate process-global environment variables.
     /// Rust tests run in parallel threads by default; without this guard, tests
     /// that call `set_var` / `remove_var` on the same key race with each other.
+    ///
+    /// Scope: unit tests in this module only. Integration tests in `tests/`
+    /// compile into a separate binary and cannot race with these; they use
+    /// `serial_test::serial` for their own isolation.
     static ENV_MUTEX: Mutex<()> = Mutex::new(());
 
     #[test]
