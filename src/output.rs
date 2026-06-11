@@ -57,7 +57,9 @@ pub struct ReviewConfig {
 /// Writes a structured review result file for downstream CI jobs.
 ///
 /// The artifact includes provider metadata, the full LLM review text,
-/// and the parsed verdict metadata.
+/// and the parsed verdict metadata. The `--- Parsed Metadata ---` section
+/// renders all four verdict fields: `Verdict`, `CriticalIssues`,
+/// `SecurityIssues`, `ImportantIssues`, and `Suggestions`.
 ///
 /// # Errors
 ///
@@ -82,9 +84,11 @@ Review State: {}
 {}
 
 --- Parsed Metadata ---
-Verdict: {}
-CriticalBugs: {}
-SecurityIssues: {}
+Verdict:         {}
+CriticalIssues:  {}
+SecurityIssues:  {}
+ImportantIssues: {}
+Suggestions:     {}
 ",
         config.provider,
         config.model,
@@ -96,6 +100,8 @@ SecurityIssues: {}
         verdict.verdict,
         verdict.critical_issues,
         verdict.security_issues,
+        verdict.important_issues,
+        verdict.suggestions,
     );
 
     // Create parent directory if it doesn't exist
@@ -112,6 +118,8 @@ SecurityIssues: {}
 
 /// Prints the full review text with a color-coded state header to a writer.
 ///
+/// Renders all four verdict fields: `Verdict`, `Critical Issues`,
+/// `Security Issues`, `Important Issues`, and `Suggestions`.
 /// Accepts any [`std::io::Write`] implementation for testability.
 /// The `colored` crate's ANSI codes are preserved in the output.
 ///
@@ -269,6 +277,10 @@ mod tests {
         assert!(content.contains("deepseek"));
         assert!(content.contains("deepseek-v4-flash"));
         assert!(content.contains("looks good"));
+        assert!(content.contains("CriticalIssues:"));
+        assert!(content.contains("SecurityIssues:"));
+        assert!(content.contains("ImportantIssues:"));
+        assert!(content.contains("Suggestions:"));
     }
 
     #[test]
@@ -332,8 +344,8 @@ mod tests {
         let output = String::from_utf8(buf).unwrap();
         assert!(output.contains("REQUEST_CHANGES"));
         assert!(output.contains("fix these issues"));
-        assert!(output.contains("3"));
-        assert!(output.contains("1"));
+        assert!(output.contains("Critical Issues: 3"));
+        assert!(output.contains("Security Issues: 1"));
     }
 
     #[test]
@@ -368,6 +380,60 @@ mod tests {
         assert!(output.contains("0.5"));
         assert!(output.contains("25"));
         assert!(output.contains("COMMENT"));
+    }
+
+    #[test]
+    fn test_write_artifact_includes_important_and_suggestions() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("review.txt");
+        let path_str = path.to_str().unwrap();
+
+        let verdict = Verdict {
+            verdict: "POSITIVE".to_string(),
+            critical_issues: 0,
+            security_issues: 0,
+            important_issues: 2,
+            suggestions: 5,
+        };
+        let config = ReviewConfig {
+            provider: "openai".to_string(),
+            model: "gpt-4o".to_string(),
+            temperature: 0.1,
+            pr_number: None,
+            diff_size_bytes: 512,
+            diff_line_count: 20,
+        };
+
+        write_artifact("review", &verdict, &ReviewState::Comment, &config, path_str).unwrap();
+
+        let content = std::fs::read_to_string(path_str).unwrap();
+        assert!(
+            content.contains("ImportantIssues: 2"),
+            "ImportantIssues missing"
+        );
+        assert!(
+            content.contains("Suggestions:     5"),
+            "Suggestions missing"
+        );
+    }
+
+    #[test]
+    fn test_print_colored_report_shows_important_and_suggestions() {
+        let verdict = Verdict {
+            verdict: "POSITIVE".to_string(),
+            critical_issues: 0,
+            security_issues: 0,
+            important_issues: 2,
+            suggestions: 4,
+        };
+        let mut buf = Vec::new();
+        print_colored_report("ok", &verdict, &ReviewState::Comment, &mut buf).unwrap();
+        let output = String::from_utf8(buf).unwrap();
+        assert!(
+            output.contains("Important Issues: 2"),
+            "important issues missing"
+        );
+        assert!(output.contains("Suggestions:     4"), "suggestions missing");
     }
 
     #[test]
