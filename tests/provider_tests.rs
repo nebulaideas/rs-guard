@@ -26,7 +26,7 @@ async fn test_deepseek_provider_success() {
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
             "choices": [{
                 "message": {
-                    "content": "This looks good.\n\n[RS_GUARD_VERDICT_METADATA]\nVerdict: POSITIVE\nCriticalBugs: 0\nSecurityIssues: 0"
+                    "content": "This looks good.\n\n[RS_GUARD_VERDICT_METADATA]\nVerdict: POSITIVE\nCriticalIssues: 0\nSecurityIssues: 0\nImportantIssues: 0\nSuggestions: 0"
                 }
             }]
         })))

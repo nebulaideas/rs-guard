@@ -5,7 +5,7 @@ use rs_guard::verdict::{
 
 #[test]
 fn test_parse_valid_positive_clean() {
-    let response = "Review text\n\n[RS_GUARD_VERDICT_METADATA]\nVerdict: POSITIVE\nCriticalBugs: 0\nSecurityIssues: 0";
+    let response = "Review text\n\n[RS_GUARD_VERDICT_METADATA]\nVerdict: POSITIVE\nCriticalIssues: 0\nSecurityIssues: 0\nImportantIssues: 0\nSuggestions: 0";
     let (_verdict, state) = parse_verdict(response).unwrap();
     assert_eq!(state, ReviewState::Approve);
 }
@@ -13,7 +13,7 @@ fn test_parse_valid_positive_clean() {
 #[test]
 fn test_parse_negative_verdict() {
     let response =
-        "[RS_GUARD_VERDICT_METADATA]\nVerdict: NEGATIVE\nCriticalBugs: 0\nSecurityIssues: 0";
+        "[RS_GUARD_VERDICT_METADATA]\nVerdict: NEGATIVE\nCriticalIssues: 0\nSecurityIssues: 0\nImportantIssues: 0\nSuggestions: 0";
     let (_verdict, state) = parse_verdict(response).unwrap();
     assert_eq!(state, ReviewState::RequestChanges);
 }
@@ -30,7 +30,7 @@ fn test_parse_critical_issues_gt_0_blocks() {
 #[test]
 fn test_parse_security_issues_gt_0() {
     let response =
-        "[RS_GUARD_VERDICT_METADATA]\nVerdict: POSITIVE\nCriticalBugs: 0\nSecurityIssues: 3";
+        "[RS_GUARD_VERDICT_METADATA]\nVerdict: POSITIVE\nCriticalIssues: 0\nSecurityIssues: 3\nImportantIssues: 0\nSuggestions: 0";
     let (_verdict, state) = parse_verdict(response).unwrap();
     assert_eq!(state, ReviewState::RequestChanges);
 }
@@ -74,7 +74,7 @@ fn test_clean_response_no_tags_yields_approve() {
 #[test]
 fn test_invalid_verdict_value() {
     let response =
-        "[RS_GUARD_VERDICT_METADATA]\nVerdict: MAYBE\nCriticalBugs: 0\nSecurityIssues: 0";
+        "[RS_GUARD_VERDICT_METADATA]\nVerdict: MAYBE\nCriticalIssues: 0\nSecurityIssues: 0\nImportantIssues: 0\nSuggestions: 0";
     let result = parse_verdict(response);
     assert!(result.is_err());
     assert!(result
@@ -340,6 +340,95 @@ fn test_evaluate_by_tags_three_important_issues_drives_negative() {
         determine_review_state(&verdict),
         ReviewState::RequestChanges
     );
+}
+
+// ---------------------------------------------------------------------------
+// New tests: additional branch coverage for Step 5
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_parse_verdict_full_four_field_block_round_trip() {
+    // Arrange: canonical four-field block as emitted by the updated DEFAULT_PROMPT
+    let response = "Good review.\n\n[RS_GUARD_VERDICT_METADATA]\nVerdict: POSITIVE\nCriticalIssues: 0\nSecurityIssues: 0\nImportantIssues: 0\nSuggestions: 2";
+    // Act
+    let (verdict, state) = parse_verdict(response).unwrap();
+    // Assert: all fields parsed, suggestions alone never block
+    assert_eq!(verdict.verdict, "POSITIVE");
+    assert_eq!(verdict.critical_issues, 0);
+    assert_eq!(verdict.security_issues, 0);
+    assert_eq!(verdict.important_issues, 0);
+    assert_eq!(verdict.suggestions, 2);
+    assert_eq!(state, ReviewState::Approve);
+}
+
+#[test]
+fn test_parse_verdict_important_issues_threshold_table() {
+    // Table-driven: (important_issues count, expected ReviewState).
+    // Threshold constant is 3 — below yields Comment, at/above yields RequestChanges.
+    let cases: &[(u32, ReviewState)] = &[
+        (1, ReviewState::Comment),        // below threshold: COMMENT
+        (2, ReviewState::Comment),        // below threshold: COMMENT
+        (3, ReviewState::RequestChanges), // at threshold: REQUEST_CHANGES
+        (4, ReviewState::RequestChanges), // above threshold: REQUEST_CHANGES
+    ];
+    for (count, expected_state) in cases {
+        // Arrange
+        let response = format!(
+            "[RS_GUARD_VERDICT_METADATA]\nVerdict: POSITIVE\nCriticalIssues: 0\nSecurityIssues: 0\nImportantIssues: {count}\nSuggestions: 0"
+        );
+        // Act
+        let (_verdict, state) = parse_verdict(&response).unwrap();
+        // Assert
+        assert_eq!(
+            state, *expected_state,
+            "ImportantIssues: {count} should yield {expected_state:?}"
+        );
+    }
+}
+
+#[test]
+fn test_parse_metadata_block_empty_field_value_defaults_to_zero() {
+    // Arrange: ImportantIssues field present but has no numeric value — should default to 0,
+    // not return None (a missing count is treated as zero, not a parse failure).
+    let response = "[RS_GUARD_VERDICT_METADATA]\nVerdict: POSITIVE\nCriticalIssues: 0\nSecurityIssues: 0\nImportantIssues:\nSuggestions: 0";
+    // Act
+    let verdict = parse_metadata_block(response).unwrap();
+    // Assert: graceful default to 0
+    assert_eq!(verdict.important_issues, 0);
+    assert_eq!(verdict.verdict, "POSITIVE");
+}
+
+#[test]
+fn test_parse_metadata_block_whitespace_field_value_defaults_to_zero() {
+    // Arrange: ImportantIssues field has only whitespace after the colon.
+    // The parser must trim before parsing, so "   " should not cause a parse error.
+    let response = "[RS_GUARD_VERDICT_METADATA]\nVerdict: POSITIVE\nCriticalIssues: 0\nSecurityIssues: 0\nImportantIssues:   \nSuggestions: 0";
+    // Act
+    let verdict = parse_metadata_block(response).unwrap();
+    // Assert: whitespace-only value treated identically to empty — defaults to 0
+    assert_eq!(verdict.important_issues, 0);
+    assert_eq!(verdict.verdict, "POSITIVE");
+}
+
+#[test]
+fn test_review_state_display() {
+    // Arrange / Act / Assert: Display impl matches GitHub API event string
+    assert_eq!(ReviewState::Approve.to_string(), "APPROVE");
+    assert_eq!(ReviewState::RequestChanges.to_string(), "REQUEST_CHANGES");
+    assert_eq!(ReviewState::Comment.to_string(), "COMMENT");
+}
+
+#[test]
+fn test_parse_metadata_block_missing_important_issues_field_defaults_to_zero() {
+    // Arrange: ImportantIssues field is completely absent (not just empty).
+    // The relaxed parse policy must treat a missing count field as 0.
+    let response = "[RS_GUARD_VERDICT_METADATA]\nVerdict: POSITIVE\nCriticalIssues: 0\nSecurityIssues: 0\nSuggestions: 1";
+    // Act
+    let verdict = parse_metadata_block(response).unwrap();
+    // Assert: absent field defaults gracefully to 0
+    assert_eq!(verdict.important_issues, 0);
+    assert_eq!(verdict.suggestions, 1);
+    assert_eq!(verdict.verdict, "POSITIVE");
 }
 
 #[test]
