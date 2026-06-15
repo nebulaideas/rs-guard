@@ -5,6 +5,34 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.2] - 2026-06-15
+
+### Added
+
+- **Helpful TOML configuration error messages** — `load_toml_config()` now parses the raw TOML
+  structure first and detects common mistakes, emitting actionable guidance instead of raw
+  serde/toml errors.
+- **SHA-256 checksums for release binaries** — The release workflow now generates
+  `rs-guard-x86_64-unknown-linux-gnu.sha256` and uploads it alongside the binary.
+
+### Fixed
+
+- **Issue #63** — Using `[provider.deepseek]` (singular table) now produces a clear error that
+  explains `provider` must be a string and shows the correct plural form `[providers.deepseek]`.
+- **Issue #64** — Unknown top-level keys (e.g., `providor`) now produce a helpful message that
+  suggests the closest valid key and lists all accepted top-level keys.
+- **Non-string `provider` values** — `provider = 123` now reports that `provider` must be a
+  string with an example of the correct syntax.
+- **AI Code Review workflow 404 failure** — `.github/workflows/ai-review.yml` now downloads the
+  correctly named release asset (`rs-guard-x86_64-unknown-linux-gnu`) and verifies its SHA-256
+  checksum instead of the old `rs-guard` filename that did not exist.
+- **Documentation/implementation mismatch** — `docs/INSTALLATION.md`, `docs/USAGE.md`,
+  `docs/implementation-guide.md`, and `examples/github-actions-workflow/README.md` now reflect
+  the actual release asset name and the Linux-x86_64-only pre-built binary policy.
+- **Node.js 20 deprecation warnings** — All workflows and documented examples now pin
+  `actions/checkout@v5` and `actions/upload-artifact@v5` (or their SHA-pinned equivalents) to
+  avoid the upcoming Node.js 20 removal.
+
 ## [1.0.1] - 2026-06-15
 
 ### Fixed

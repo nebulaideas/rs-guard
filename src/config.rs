@@ -181,6 +181,132 @@ pub struct TomlConfig {
     pub auto_gitignore: Option<bool>,
 }
 
+/// Known top-level keys in `.reviewer.toml`, used to detect typos and
+/// provide suggestions when an unknown key is encountered.
+const KNOWN_TOP_LEVEL_KEYS: &[&str] = &[
+    "provider",
+    "model",
+    "temperature",
+    "max_tokens",
+    "chunk_head_lines",
+    "chunk_tail_lines",
+    "providers",
+    "cache_dir",
+    "circuit_breaker",
+    "pricing",
+    "auto_gitignore",
+];
+
+/// Returns the closest known top-level key to `unknown`, or `None` if no
+/// reasonable match exists. Uses a simple Levenshtein distance threshold.
+fn suggest_key(unknown: &str) -> Option<&'static str> {
+    let mut best: Option<(&str, usize)> = None;
+    for known in KNOWN_TOP_LEVEL_KEYS {
+        let dist = levenshtein_distance(unknown, known);
+        if dist == 0 {
+            return Some(known);
+        }
+        if dist <= 3 {
+            best = Some(match best {
+                Some((_, best_dist)) if best_dist <= dist => best.unwrap(),
+                _ => (known, dist),
+            });
+        }
+    }
+    best.map(|(k, _)| k)
+}
+
+/// Simple Levenshtein distance between two strings.
+fn levenshtein_distance(a: &str, b: &str) -> usize {
+    let a_chars: Vec<char> = a.chars().collect();
+    let b_chars: Vec<char> = b.chars().collect();
+    let a_len = a_chars.len();
+    let b_len = b_chars.len();
+
+    if a_len == 0 {
+        return b_len;
+    }
+    if b_len == 0 {
+        return a_len;
+    }
+
+    let mut prev: Vec<usize> = (0..=b_len).collect();
+    let mut curr = vec![0; b_len + 1];
+
+    for i in 1..=a_len {
+        curr[0] = i;
+        for (j, b_char) in b_chars.iter().enumerate().take(b_len) {
+            let cost = if a_chars[i - 1] == *b_char { 0 } else { 1 };
+            curr[j + 1] = (curr[j] + 1).min(prev[j + 1] + 1).min(prev[j] + cost);
+        }
+        std::mem::swap(&mut prev, &mut curr);
+    }
+
+    prev[b_len]
+}
+
+/// Validates common TOML mistakes and returns a human-friendly error message.
+///
+/// Checks for:
+/// - `provider` declared as a table (`[provider.X]`) instead of a string.
+/// - Unknown top-level keys with suggestions.
+/// - `provider` present but not a string.
+fn validate_toml_value(raw: &toml::Value, path: &Path) -> Result<(), RsGuardError> {
+    let table = raw.as_table().ok_or_else(|| {
+        RsGuardError::Config(format!(
+            "In '{}': config file must be a TOML table (e.g., key = value)",
+            path.display()
+        ))
+    })?;
+
+    // Detect the common [provider.X] (singular) mistake.
+    if let Some(provider) = table.get("provider") {
+        if provider.is_table() {
+            return Err(RsGuardError::Config(format!(
+                "In '{}': `[provider.deepseek]` is the singular form and is not valid.\n\n\
+                 `provider` must be a string, not a table.\n\n\
+                 Did you mean to write:\n\
+                   provider = \"deepseek\"\n\n\
+                 For per-provider overrides, use the plural table name:\n\
+                   [providers.deepseek]\n\
+                   api_key_env = \"DEEPSEEK_API_KEY\"\n",
+                path.display()
+            )));
+        }
+        if !provider.is_str() {
+            return Err(RsGuardError::Config(format!(
+                "In '{}':\n\n\
+                 `provider` must be a string (e.g., provider = \"deepseek\").\n\
+                 Got a non-string value for `provider`.\n",
+                path.display()
+            )));
+        }
+    }
+
+    // Detect unknown top-level keys and suggest the closest valid key.
+    for key in table.keys() {
+        if !KNOWN_TOP_LEVEL_KEYS.contains(&key.as_str()) {
+            let suggestion = suggest_key(key);
+            let hint = suggestion.map_or_else(
+                || String::from("See the documentation for valid configuration keys."),
+                |s| format!("Did you mean `{}`?", s),
+            );
+            return Err(RsGuardError::Config(format!(
+                "In '{}':\n\n\
+                 Unknown key `{}` at the top level.\n\
+                 {}\n\n\
+                 Valid top-level keys: {}\n",
+                path.display(),
+                key,
+                hint,
+                KNOWN_TOP_LEVEL_KEYS.join(", ")
+            )));
+        }
+    }
+
+    Ok(())
+}
+
 /// Parses a `.reviewer.toml` configuration file.
 ///
 /// Returns `Ok(None)` if the file does not exist, allowing callers to
@@ -203,9 +329,23 @@ pub fn load_toml_config(path: &Path) -> Result<Option<TomlConfig>, RsGuardError>
         ))
     })?;
 
-    let config: TomlConfig = toml::from_str(&content).map_err(|e| {
+    // Parse to a generic value first so we can inspect the structure and emit
+    // friendly error messages for common mistakes.
+    let raw: toml::Value = toml::from_str(&content).map_err(|e| {
         RsGuardError::Config(format!(
-            "Failed to parse config file '{}': {}",
+            "Failed to parse config file '{}': {}\n\n\
+             See docs/CONFIGURATION.md for the full configuration reference.",
+            path.display(),
+            e
+        ))
+    })?;
+
+    validate_toml_value(&raw, path)?;
+
+    let config: TomlConfig = TomlConfig::deserialize(raw).map_err(|e| {
+        RsGuardError::Config(format!(
+            "Failed to parse config file '{}': {}\n\n\
+             See docs/CONFIGURATION.md for the full configuration reference.",
             path.display(),
             e
         ))

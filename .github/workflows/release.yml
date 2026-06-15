@@ -15,16 +15,27 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      # Pinned from actions/checkout@v5 (93cb6efe) to avoid Node.js 20 deprecation.
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+      # Pinned from dtolnay/rust-toolchain@stable (e97e2d8c).
+      - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9
         with:
           targets: x86_64-unknown-linux-gnu
       - run: cargo build --release --target x86_64-unknown-linux-gnu
       - run: strip target/x86_64-unknown-linux-gnu/release/rs-guard
+      - name: Prepare release asset and checksum
+        run: |
+          set -euo pipefail
+          BINARY="rs-guard-x86_64-unknown-linux-gnu"
+          cp "target/x86_64-unknown-linux-gnu/release/rs-guard" "${BINARY}"
+          sha256sum "${BINARY}" > "${BINARY}.sha256"
       - name: Upload Release Asset
-        uses: softprops/action-gh-release@v2
+        # Pinned from softprops/action-gh-release@v2 (3bb12739).
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65
         with:
-          files: target/x86_64-unknown-linux-gnu/release/rs-guard
+          files: |
+            rs-guard-x86_64-unknown-linux-gnu
+            rs-guard-x86_64-unknown-linux-gnu.sha256
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -34,8 +45,10 @@ jobs:
     runs-on: ubuntu-latest
     needs: build-release
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      # Pinned from actions/checkout@v5 (93cb6efe).
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+      # Pinned from dtolnay/rust-toolchain@stable (e97e2d8c).
+      - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9
       - name: Publish to crates.io
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_TOKEN }}

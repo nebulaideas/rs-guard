@@ -58,15 +58,11 @@ The example workflows use the following security defaults:
   the default `write-all` token scope.
 - **Concurrency groups** — Prevents stale reviews and resource waste.
 - **SHA-256 verification** — The `Download rs-guard` step downloads the
-  release binary with its original filename (e.g., `rs-guard-x86_64-unknown-linux-gnu`),
-  fetches the corresponding `*.sha256` file (if published), and verifies the binary.
-  The downloaded file is then renamed to `rs-guard` for subsequent steps. If the
-  checksums file is missing, a warning is emitted and the workflow continues —
-  tighten this in production by failing the build when no `*.sha256` is
-  available, or by switching to a pinned release tag with a hard-coded hash.
-- **Pinned release tag** — For production use, replace
-  `releases/latest/download/...` with a specific tag (e.g. `releases/v0.7.0/...`)
-  so you have a reproducible build.
+  release binary (`rs-guard-x86_64-unknown-linux-gnu`) together with its
+  `*.sha256` checksum file, verifies the checksum, and renames the binary to
+  `rs-guard` for subsequent steps.
+- **Pinned release tag** — For production use, replace the `VERSION` variable
+  with a specific tag (e.g., `VERSION="v1.0.2"`) so you have a reproducible build.
 
 > ⚠️ The `pull_request_target` event in `fork-safe.yml` runs in the **base
 > branch** context and has access to repository secrets. The example workflow

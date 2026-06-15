@@ -645,17 +645,19 @@ All jobs use `Swatinem/rust-cache` for Cargo build caching.
 
 ### Release Workflow (`.github/workflows/release.yml`)
 
-Triggered by pushing a `v*` tag (e.g., `v0.1.0`):
+Triggered by pushing a `v*` tag (e.g., `v1.0.2`):
 
 1. Build release binary for `x86_64-unknown-linux-gnu`
 2. Strip debug symbols with `strip`
-3. Create GitHub Release via `softprops/action-gh-release@v2`
-4. Upload the `rs-guard` binary as a release asset
+3. Rename the binary to `rs-guard-x86_64-unknown-linux-gnu`
+4. Generate a `rs-guard-x86_64-unknown-linux-gnu.sha256` checksum file
+5. Create GitHub Release via pinned `softprops/action-gh-release`
+6. Upload the binary and its checksum as release assets
 
 ```bash
 # Tag and release
-git tag v0.1.0
-git push origin v0.1.0
+git tag v1.0.2
+git push origin v1.0.2
 ```
 
 ### Docs Deployment (`.github/workflows/docs-deploy.yml`)

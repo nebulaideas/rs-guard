@@ -122,6 +122,47 @@ output_per_million = 60  # $0.60 per 1M output tokens
 
 ---
 
+## Common Configuration Mistakes
+
+rs-guard validates `.reviewer.toml` and reports friendly errors for the following mistakes:
+
+### `[provider.X]` instead of `provider = "X"`
+
+**Incorrect:**
+
+```toml
+[provider.deepseek]
+api_key_env = "DEEPSEEK_API_KEY"
+```
+
+**Correct:**
+
+```toml
+provider = "deepseek"
+
+[providers.deepseek]
+api_key_env = "DEEPSEEK_API_KEY"
+```
+
+`provider` is a top-level string that selects the default provider. Per-provider overrides use
+the plural table name `[providers.<name>]`.
+
+### Unknown top-level keys
+
+Typos such as `providor = "deepseek"` are detected and rs-guard suggests the closest valid key
+(`provider`). The full list of valid top-level keys is shown in the error message.
+
+### Non-string `provider`
+
+`provider` must be a quoted string:
+
+```toml
+provider = "deepseek"  # correct
+provider = deepseek    # incorrect
+```
+
+---
+
 ## Verdict Behavior
 
 The review state submitted to GitHub is determined by counting severity-tagged findings in the

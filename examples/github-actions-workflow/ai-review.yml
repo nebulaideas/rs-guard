@@ -19,28 +19,22 @@ jobs:
       contents: read
       pull-requests: write
     steps:
-      - uses: actions/checkout@v4
+      # Pinned from actions/checkout@v5 (93cb6efe) to avoid Node.js 20 deprecation.
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
 
-      # Download rs-guard v1.0.0.
-
-      # SECURITY: Verify the SHA-256 checksum against the release's
-      # `*.sha256` file. The verification step warns (but does not fail)
-      # if the checksums file is missing — useful until the project
-      # publishes signed release artifacts.
+      # Download rs-guard v1.0.2 and verify its SHA-256.
       - name: Download rs-guard
         run: |
           set -euo pipefail
-          curl -L --fail -o rs-guard-x86_64-unknown-linux-gnu \
-            https://github.com/nebulaideas/rs-guard/releases/download/v1.0.0/rs-guard-x86_64-unknown-linux-gnu
-          # Optional integrity check — downloads rs-guard-x86_64-unknown-linux-gnu.sha256 if present.
-          if curl -fsSL -o rs-guard-x86_64-unknown-linux-gnu.sha256 \
-              https://github.com/nebulaideas/rs-guard/releases/download/v1.0.0/rs-guard-x86_64-unknown-linux-gnu.sha256; then
-            sha256sum -c rs-guard-x86_64-unknown-linux-gnu.sha256
-          else
-            echo "::warning::No .sha256 file published for this release; skipping integrity check."
-          fi
-          chmod +x rs-guard-x86_64-unknown-linux-gnu
-          mv rs-guard-x86_64-unknown-linux-gnu rs-guard
+          VERSION="v1.0.2"
+          BINARY="rs-guard-x86_64-unknown-linux-gnu"
+          curl -L --fail -o "${BINARY}" \
+            "https://github.com/nebulaideas/rs-guard/releases/download/${VERSION}/${BINARY}"
+          curl -L --fail -o "${BINARY}.sha256" \
+            "https://github.com/nebulaideas/rs-guard/releases/download/${VERSION}/${BINARY}.sha256"
+          sha256sum -c "${BINARY}.sha256"
+          chmod +x "${BINARY}"
+          mv "${BINARY}" rs-guard
 
       # Run the AI code review.
       # The tool reads the diff from the PR, sends it to the configured LLM,

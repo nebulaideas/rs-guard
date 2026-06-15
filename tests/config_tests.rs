@@ -1005,3 +1005,83 @@ fn test_default_prompt_does_not_contain_old_metadata_fields() {
         "DEFAULT_PROMPT must not contain legacy CriticalBugs field"
     );
 }
+
+// ---------------------------------------------------------------------------
+// TOML error message improvements (issues #63 and #64)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_toml_singular_provider_table_gives_helpful_error() {
+    // [provider.deepseek] (singular) is a common mistake; the correct form is
+    // provider = "deepseek" plus [providers.deepseek] (plural).
+    let file = write_toml(
+        br#"[provider.deepseek]
+api_key_env = "DEEPSEEK_API_KEY"
+"#,
+    );
+
+    let result = load_toml_config(file.path());
+    assert!(
+        result.is_err(),
+        "singular [provider.X] should fail to parse"
+    );
+
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("provider = \"deepseek\""),
+        "error should show the correct string syntax: {err}"
+    );
+    assert!(
+        err.contains("[providers.deepseek]"),
+        "error should show the correct plural table syntax: {err}"
+    );
+    assert!(
+        err.contains("singular"),
+        "error should explain that [provider.X] is the singular form: {err}"
+    );
+}
+
+#[test]
+fn test_toml_unknown_top_level_key_gives_suggestion() {
+    // A typo like "providor" should suggest the closest valid key "provider".
+    let file = write_toml(br#"providor = "deepseek""#);
+
+    let result = load_toml_config(file.path());
+    assert!(
+        result.is_err(),
+        "unknown top-level key should fail to parse"
+    );
+
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("provider"),
+        "error should suggest the valid 'provider' key: {err}"
+    );
+    assert!(
+        err.to_lowercase().contains("unknown key"),
+        "error should identify the key as unknown: {err}"
+    );
+}
+
+#[test]
+fn test_toml_provider_type_mismatch_gives_helpful_error() {
+    // provider must be a string; an integer should produce a helpful message.
+    let file = write_toml(br#"provider = 123"#);
+
+    let result = load_toml_config(file.path());
+    assert!(result.is_err(), "non-string provider should fail to parse");
+
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("provider"),
+        "error should mention the provider field: {err}"
+    );
+    assert!(
+        err.contains("must be a string"),
+        "error should indicate a string is expected: {err}"
+    );
+    assert!(
+        err.contains("provider = \"deepseek\""),
+        "error should show the correct string syntax: {err}"
+    );
+}

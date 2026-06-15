@@ -34,26 +34,24 @@ jobs:
       pull-requests: write
     steps:
       # Checkout the BASE branch (not the PR branch) for security.
-      - uses: actions/checkout@v4
+      # Pinned from actions/checkout@v5 (93cb6efe) to avoid Node.js 20 deprecation.
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
         with:
           ref: ${{ github.event.pull_request.base.sha }}
 
-      # Download rs-guard v1.0.0 and verify its SHA-256.
-      # The integrity check warns (but does not fail) if the checksums
-      # file is missing from the release.
+      # Download rs-guard v1.0.2 and verify its SHA-256.
       - name: Download rs-guard
         run: |
           set -euo pipefail
-          curl -L --fail -o rs-guard-x86_64-unknown-linux-gnu \
-            https://github.com/nebulaideas/rs-guard/releases/download/v1.0.0/rs-guard-x86_64-unknown-linux-gnu
-          if curl -fsSL -o rs-guard-x86_64-unknown-linux-gnu.sha256 \
-              https://github.com/nebulaideas/rs-guard/releases/download/v1.0.0/rs-guard-x86_64-unknown-linux-gnu.sha256; then
-            sha256sum -c rs-guard-x86_64-unknown-linux-gnu.sha256
-          else
-            echo "::warning::No .sha256 file published for this release; skipping integrity check."
-          fi
-          chmod +x rs-guard-x86_64-unknown-linux-gnu
-          mv rs-guard-x86_64-unknown-linux-gnu rs-guard
+          VERSION="v1.0.2"
+          BINARY="rs-guard-x86_64-unknown-linux-gnu"
+          curl -L --fail -o "${BINARY}" \
+            "https://github.com/nebulaideas/rs-guard/releases/download/${VERSION}/${BINARY}"
+          curl -L --fail -o "${BINARY}.sha256" \
+            "https://github.com/nebulaideas/rs-guard/releases/download/${VERSION}/${BINARY}.sha256"
+          sha256sum -c "${BINARY}.sha256"
+          chmod +x "${BINARY}"
+          mv "${BINARY}" rs-guard
 
       - name: AI Code Review
         run: ./rs-guard

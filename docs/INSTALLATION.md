@@ -43,9 +43,13 @@ export DEEPSEEK_API_KEY="your-api-key"
 
 ## Installation Methods
 
-### Option 1: Pre-built Binary (Recommended)
+### Option 1: Pre-built Binary (Recommended for Linux x86_64)
 
 Fastest method — no compilation required. Downloads a ready-to-run binary.
+
+The release pipeline currently publishes a pre-built binary for **Linux x86_64** only.
+For other platforms, use [Option 3: Cargo Install](#option-3-cargo-install) or
+[Option 2: Build from Source](#option-2-build-from-source).
 
 #### Linux (x86_64)
 
@@ -57,53 +61,6 @@ sudo mv rs-guard /usr/local/bin/
 
 # Verify
 rs-guard --version
-```
-
-#### Linux (ARM64)
-
-```bash
-curl -L -o rs-guard \
-  https://github.com/nebulaideas/rs-guard/releases/latest/download/rs-guard-aarch64-unknown-linux-gnu
-chmod +x rs-guard
-sudo mv rs-guard /usr/local/bin/
-```
-
-#### macOS (Intel x86_64)
-
-```bash
-curl -L -o rs-guard \
-  https://github.com/nebulaideas/rs-guard/releases/latest/download/rs-guard-x86_64-apple-darwin
-chmod +x rs-guard
-sudo mv rs-guard /usr/local/bin/
-```
-
-#### macOS (Apple Silicon M1/M2/M3/M4/M5)
-
-```bash
-curl -L -o rs-guard \
-  https://github.com/nebulaideas/rs-guard/releases/latest/download/rs-guard-aarch64-apple-darwin
-chmod +x rs-guard
-sudo mv rs-guard /usr/local/bin/
-```
-
-#### Windows (x86_64)
-
-**PowerShell:**
-
-```powershell
-Invoke-WebRequest -Uri "https://github.com/nebulaideas/rs-guard/releases/latest/download/rs-guard-x86_64-pc-windows-msvc.exe" -OutFile "rs-guard.exe"
-Move-Item "rs-guard.exe" "C:\Program Files\rs-guard\"
-
-# Add to PATH if needed
-$env:Path += ";C:\Program Files\rs-guard"
-```
-
-**Command Prompt:**
-
-```cmd
-curl -L -o rs-guard.exe ^
-  https://github.com/nebulaideas/rs-guard/releases/latest/download/rs-guard-x86_64-pc-windows-msvc.exe
-move rs-guard.exe "C:\Program Files\rs-guard\"
 ```
 
 ---
@@ -249,7 +206,7 @@ rs-guard
 Expected output:
 
 ```
-rs-guard 0.6.0
+rs-guard 1.0.2
 AI-powered code review CLI for GitHub PRs
 
 Usage: rs-guard [OPTIONS]
@@ -281,13 +238,20 @@ jobs:
     if: ${{ !github.event.pull_request.head.repo.fork }}
 
     steps:
-      - uses: actions/checkout@v4
+      # Pinned from actions/checkout@v5 (93cb6efe) to avoid Node.js 20 deprecation.
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
 
       - name: Download rs-guard
         run: |
-          curl -L -o rs-guard \
-            https://github.com/nebulaideas/rs-guard/releases/latest/download/rs-guard-x86_64-unknown-linux-gnu
-          chmod +x rs-guard
+          set -euo pipefail
+          BINARY="rs-guard-x86_64-unknown-linux-gnu"
+          curl -L --fail -o "${BINARY}" \
+            "https://github.com/nebulaideas/rs-guard/releases/latest/download/${BINARY}"
+          curl -L --fail -o "${BINARY}.sha256" \
+            "https://github.com/nebulaideas/rs-guard/releases/latest/download/${BINARY}.sha256"
+          sha256sum -c "${BINARY}.sha256"
+          chmod +x "${BINARY}"
+          mv "${BINARY}" rs-guard
 
       - name: AI Code Review
         run: ./rs-guard
@@ -315,7 +279,8 @@ If using `.reviewer.toml`:
 
 ```yaml
 - name: Upload review result
-  uses: actions/upload-artifact@v4
+  # Pinned from actions/upload-artifact@v5 (330a01c4) to avoid Node.js 20 deprecation.
+  uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4
   if: always()
   with:
     name: review-result
