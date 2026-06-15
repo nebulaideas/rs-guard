@@ -52,7 +52,18 @@ pub fn all_providers() -> &'static [ProviderMeta] {
             api_key_env: "DEEPSEEK_API_KEY",
             ci_allowed_hosts: &[("https", "api.deepseek.com")],
             context_window: 64_000,
-            variants: &[],
+            variants: &[
+                ProviderVariant {
+                    name: "flash",
+                    description: "Fast, cost-effective DeepSeek V4 model",
+                    effect: VariantEffect::ModelAlias("deepseek-v4-flash"),
+                },
+                ProviderVariant {
+                    name: "pro",
+                    description: "Most capable DeepSeek V4 model for complex reasoning",
+                    effect: VariantEffect::ModelAlias("deepseek-v4-pro"),
+                },
+            ],
         },
         ProviderMeta {
             name: "kimi",

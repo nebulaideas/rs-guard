@@ -223,7 +223,7 @@ pub fn print_colored_summary(
     writeln!(writer, "Provider:    {}", config.provider)?;
     writeln!(writer, "Model:       {}", config.model)?;
     if let Some(ref variant) = config.variant {
-        writeln!(writer, "Variant:     {}", variant)?;
+        writeln!(writer, "Variant:       {}", variant)?;
     }
     writeln!(writer, "Temperature: {}", config.temperature)?;
     writeln!(writer, "Diff Lines:  {}", config.diff_line_count)?;
@@ -526,6 +526,6 @@ mod tests {
         print_colored_summary("review", &verdict, &ReviewState::Comment, &config, &mut buf)
             .unwrap();
         let output = String::from_utf8(buf).unwrap();
-        assert!(output.contains("Variant:     thinking-on"));
+        assert!(output.contains("Variant:       thinking-on"));
     }
 }

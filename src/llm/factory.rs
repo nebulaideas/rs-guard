@@ -40,6 +40,7 @@ pub fn create_provider(
             }
             client = client
                 .with_model(config.model.clone())
+                .with_variant(config.variant.clone())
                 .with_max_tokens(config.max_tokens);
             Ok(Box::new(client))
         }
@@ -50,6 +51,7 @@ pub fn create_provider(
             }
             client = client
                 .with_model(config.model.clone())
+                .with_variant(config.variant.clone())
                 .with_max_tokens(config.max_tokens);
             Ok(Box::new(client))
         }
@@ -60,6 +62,7 @@ pub fn create_provider(
             }
             client = client
                 .with_model(config.model.clone())
+                .with_variant(config.variant.clone())
                 .with_max_tokens(config.max_tokens);
             Ok(Box::new(client))
         }
@@ -73,6 +76,7 @@ pub fn create_provider(
             }
             client = client
                 .with_model(config.model.clone())
+                .with_variant(config.variant.clone())
                 .with_max_tokens(config.max_tokens);
             Ok(Box::new(client))
         }
@@ -83,6 +87,7 @@ pub fn create_provider(
             }
             client = client
                 .with_model(config.model.clone())
+                .with_variant(config.variant.clone())
                 .with_max_tokens(config.max_tokens);
             Ok(Box::new(client))
         }

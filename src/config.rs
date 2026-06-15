@@ -502,6 +502,8 @@ pub struct Config {
     pub model: String,
     /// Provider-specific model variant (e.g. "flash", "thinking-on").
     pub variant: Option<String>,
+    /// Top-level variant from TOML, retained for provider-switch re-resolution.
+    top_level_variant: Option<String>,
     /// Sampling temperature for LLM completions.
     pub temperature: f32,
     /// API key for the selected LLM provider.
@@ -563,6 +565,7 @@ impl Config {
             provider: String::new(),
             model: String::new(),
             variant: None,
+            top_level_variant: None,
             temperature: 0.1,
             api_key: String::new(),
             github_token: None,
@@ -731,10 +734,11 @@ impl Config {
         // Variant: env > toml per-provider > toml top-level
         let env_variant = std::env::var("RS_GUARD_VARIANT").ok();
         let toml_provider_variant = toml_provider.and_then(|p| p.variant.clone());
-        let toml_top_level_variant = toml.as_ref().and_then(|t| t.variant.clone());
+        let top_level_variant = toml.as_ref().and_then(|t| t.variant.clone());
         let variant = env_variant
-            .or(toml_provider_variant)
-            .or(toml_top_level_variant);
+            .clone()
+            .or(toml_provider_variant.clone())
+            .or(top_level_variant.clone());
 
         let provider_config = ProviderConfig {
             base_url,
@@ -767,6 +771,7 @@ impl Config {
             provider,
             model,
             variant,
+            top_level_variant,
             temperature,
             api_key,
             github_token,
@@ -793,10 +798,11 @@ impl Config {
     /// Applies CLI argument overrides to the configuration.
     ///
     /// CLI flags take precedence over environment variables and TOML for `model`,
-    /// `temperature`, `provider`, and `max_tokens`. If the provider changes, the
-    /// API key is re-resolved (respecting TOML `api_key_env` overrides) and the
-    /// model is reset to the new provider's default unless explicitly set via
-    /// the CLI `--model` flag.
+    /// `variant`, `temperature`, `provider`, and `max_tokens`. If the provider
+    /// changes, the API key is re-resolved (respecting TOML `api_key_env`
+    /// overrides), the model is reset to the new provider's default unless
+    /// explicitly set via the CLI `--model` flag, and the variant is re-resolved
+    /// from env/TOML unless explicitly set via the CLI `--variant` flag.
     ///
     /// # Errors
     ///
@@ -848,6 +854,19 @@ impl Config {
                 // This prevents provider_config.model from becoming stale when
                 // model_set_via_cli is true and no --model flag is passed.
                 self.provider_config.model = self.model.clone();
+
+                // Re-resolve variant for the new provider unless CLI --variant was used.
+                if args.variant.is_none() {
+                    let env_variant = std::env::var("RS_GUARD_VARIANT").ok();
+                    let provider_variant = self
+                        .toml_providers
+                        .get(provider)
+                        .and_then(|p| p.variant.clone());
+                    self.variant = env_variant
+                        .or(provider_variant)
+                        .or(self.top_level_variant.clone());
+                    self.provider_config.variant = self.variant.clone();
+                }
             }
         }
 

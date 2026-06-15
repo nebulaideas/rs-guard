@@ -30,7 +30,7 @@ pub struct Args {
     #[arg(
         long,
         env = "RS_GUARD_VARIANT",
-        help = "Provider-specific model variant (default: provider-specific)"
+        help = "Provider-specific model variant; has no effect if unset"
     )]
     pub variant: Option<String>,
 

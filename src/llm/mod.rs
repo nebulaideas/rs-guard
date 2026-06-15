@@ -20,6 +20,8 @@ pub mod openrouter;
 pub mod providers;
 pub mod qwen;
 
+pub use providers::VariantEffect;
+
 /// A single message in a chat conversation.
 #[derive(Debug, Clone, Serialize)]
 pub struct ChatMessage {

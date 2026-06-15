@@ -5,7 +5,7 @@ use rs_guard::llm::openai::OpenAiClient;
 use rs_guard::llm::openrouter::OpenRouterClient;
 use rs_guard::llm::qwen::QwenClient;
 use rs_guard::llm::{LlmProvider, ProviderConfig};
-use wiremock::matchers::{method, path};
+use wiremock::matchers::{body_partial_json, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 fn default_config() -> ProviderConfig {
@@ -308,4 +308,105 @@ async fn test_factory_applies_max_tokens() {
 
     assert!(result.is_ok());
     assert!(result.unwrap().contains("max_tokens applied"));
+}
+
+#[tokio::test]
+async fn test_deepseek_variant_flash_maps_to_model_id() {
+    let mock_server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/chat/completions"))
+        .and(body_partial_json(serde_json::json!({
+            "model": "deepseek-v4-flash"
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "choices": [{
+                "message": { "content": "Flash OK" }
+            }]
+        })))
+        .mount(&mock_server)
+        .await;
+
+    let config = ProviderConfig {
+        base_url: Some(mock_server.uri()),
+        http_referer: None,
+        max_tokens: None,
+        model: "ignored".to_string(),
+        variant: Some("flash".to_string()),
+    };
+
+    let provider = create_provider("deepseek", "test-key", &config).unwrap();
+    let result = provider
+        .chat_completion("You are a reviewer.", "diff content", 0.1)
+        .await;
+
+    assert!(result.is_ok());
+    assert!(result.unwrap().contains("Flash OK"));
+}
+
+#[tokio::test]
+async fn test_deepseek_variant_pro_maps_to_model_id() {
+    let mock_server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/chat/completions"))
+        .and(body_partial_json(serde_json::json!({
+            "model": "deepseek-v4-pro"
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "choices": [{
+                "message": { "content": "Pro OK" }
+            }]
+        })))
+        .mount(&mock_server)
+        .await;
+
+    let config = ProviderConfig {
+        base_url: Some(mock_server.uri()),
+        http_referer: None,
+        max_tokens: None,
+        model: "ignored".to_string(),
+        variant: Some("pro".to_string()),
+    };
+
+    let provider = create_provider("deepseek", "test-key", &config).unwrap();
+    let result = provider
+        .chat_completion("You are a reviewer.", "diff content", 0.1)
+        .await;
+
+    assert!(result.is_ok());
+    assert!(result.unwrap().contains("Pro OK"));
+}
+
+#[tokio::test]
+async fn test_deepseek_unknown_variant_returns_error() {
+    let mock_server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/chat/completions"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "choices": [{
+                "message": { "content": "Should not reach" }
+            }]
+        })))
+        .mount(&mock_server)
+        .await;
+
+    let config = ProviderConfig {
+        base_url: Some(mock_server.uri()),
+        http_referer: None,
+        max_tokens: None,
+        model: "deepseek-v4-flash".to_string(),
+        variant: Some("unknown".to_string()),
+    };
+
+    let provider = create_provider("deepseek", "test-key", &config).unwrap();
+    let result = provider
+        .chat_completion("You are a reviewer.", "diff content", 0.1)
+        .await;
+
+    assert!(result.is_err());
+    let err = result.unwrap_err().to_string();
+    assert!(err.contains("Unknown variant"));
+    assert!(err.contains("unknown"));
 }
