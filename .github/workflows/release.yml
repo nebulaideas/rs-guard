@@ -20,6 +20,7 @@ jobs:
       # Pinned from dtolnay/rust-toolchain@stable (e97e2d8c).
       - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9
         with:
+          toolchain: stable
           targets: x86_64-unknown-linux-gnu
       - run: cargo build --release --target x86_64-unknown-linux-gnu
       - run: strip target/x86_64-unknown-linux-gnu/release/rs-guard
@@ -49,6 +50,8 @@ jobs:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
       # Pinned from dtolnay/rust-toolchain@stable (e97e2d8c).
       - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9
+        with:
+          toolchain: stable
       - name: Publish to crates.io
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_TOKEN }}

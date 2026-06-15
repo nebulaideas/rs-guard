@@ -113,7 +113,8 @@ jobs:
     name: Workflow Lint (actionlint)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      # Pinned from actions/checkout@v5 (93cb6efe) to avoid Node.js 20 deprecation.
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
       - uses: rhysd/actionlint@03d0035246f3e81f36aed592ffb4bebf33a03106 # v1.7.7
 
   bench:
