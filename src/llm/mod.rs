@@ -112,6 +112,8 @@ pub struct ProviderConfig {
     pub max_tokens: Option<u32>,
     /// Model identifier to use (overrides provider default).
     pub model: String,
+    /// Provider-specific model variant (e.g. "flash", "thinking-on").
+    pub variant: Option<String>,
 }
 
 /// Sends a chat completion HTTP request and parses the response.

@@ -5,6 +5,25 @@
 //! Every other module that needs provider metadata should import from here
 //! instead of duplicating constants.
 
+/// Effect that a model variant has on an LLM request.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum VariantEffect {
+    /// Variant maps to a concrete model identifier.
+    ModelAlias(&'static str),
+    /// Variant injects a provider-specific key/value into the request body.
+    ExtraBody(&'static str, serde_json::Value),
+}
+
+/// Metadata for a single supported model variant.
+pub struct ProviderVariant {
+    /// Canonical variant identifier (e.g. `"flash"`).
+    pub name: &'static str,
+    /// Human-readable description.
+    pub description: &'static str,
+    /// How this variant changes the outgoing request.
+    pub effect: VariantEffect,
+}
+
 /// Metadata for a single LLM provider.
 pub struct ProviderMeta {
     /// Canonical provider identifier (e.g. `"deepseek"`).
@@ -19,6 +38,8 @@ pub struct ProviderMeta {
     pub ci_allowed_hosts: &'static [(&'static str, &'static str)],
     /// Context window size in tokens.
     pub context_window: usize,
+    /// Supported model variants for this provider.
+    pub variants: &'static [ProviderVariant],
 }
 
 /// Returns the metadata for all known providers, in registration order.
@@ -31,6 +52,7 @@ pub fn all_providers() -> &'static [ProviderMeta] {
             api_key_env: "DEEPSEEK_API_KEY",
             ci_allowed_hosts: &[("https", "api.deepseek.com")],
             context_window: 64_000,
+            variants: &[],
         },
         ProviderMeta {
             name: "kimi",
@@ -39,6 +61,7 @@ pub fn all_providers() -> &'static [ProviderMeta] {
             api_key_env: "KIMI_API_KEY",
             ci_allowed_hosts: &[("https", "api.moonshot.ai")],
             context_window: 128_000,
+            variants: &[],
         },
         ProviderMeta {
             name: "qwen",
@@ -50,6 +73,7 @@ pub fn all_providers() -> &'static [ProviderMeta] {
                 ("https", "dashscope.aliyuncs.com"),
             ],
             context_window: 128_000,
+            variants: &[],
         },
         ProviderMeta {
             name: "openrouter",
@@ -58,6 +82,7 @@ pub fn all_providers() -> &'static [ProviderMeta] {
             api_key_env: "OPENROUTER_API_KEY",
             ci_allowed_hosts: &[("https", "openrouter.ai")],
             context_window: 128_000,
+            variants: &[],
         },
         ProviderMeta {
             name: "openai",
@@ -66,6 +91,7 @@ pub fn all_providers() -> &'static [ProviderMeta] {
             api_key_env: "OPENAI_API_KEY",
             ci_allowed_hosts: &[("https", "api.openai.com")],
             context_window: 128_000,
+            variants: &[],
         },
     ]
 }
@@ -84,6 +110,29 @@ pub fn find_provider(name: &str) -> Option<&'static ProviderMeta> {
 /// Returns `None` if the provider is not recognized.
 pub fn get_provider_context_window(name: &str) -> Option<usize> {
     find_provider(name).map(|p| p.context_window)
+}
+
+/// Looks up a provider's variant by name.
+///
+/// Returns `None` if the provider or variant is not recognized.
+pub fn find_provider_variant(
+    provider_name: &str,
+    variant_name: &str,
+) -> Option<&'static ProviderVariant> {
+    find_provider(provider_name).and_then(|p| {
+        p.variants
+            .iter()
+            .find(|v| v.name.eq_ignore_ascii_case(variant_name))
+    })
+}
+
+/// Returns the names of all variants supported by a provider.
+///
+/// Returns an empty vec if the provider is not recognized.
+pub fn provider_variant_names(provider_name: &str) -> Vec<&'static str> {
+    find_provider(provider_name)
+        .map(|p| p.variants.iter().map(|v| v.name).collect())
+        .unwrap_or_default()
 }
 
 /// Returns a formatted string of all known provider names.

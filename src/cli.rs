@@ -26,6 +26,14 @@ pub struct Args {
     )]
     pub model: Option<String>,
 
+    /// Provider-specific model variant (e.g. "flash", "thinking-on").
+    #[arg(
+        long,
+        env = "RS_GUARD_VARIANT",
+        help = "Provider-specific model variant (default: provider-specific)"
+    )]
+    pub variant: Option<String>,
+
     /// Sampling temperature (0.0 - 2.0). Default: 0.1.
     #[arg(
         short,
