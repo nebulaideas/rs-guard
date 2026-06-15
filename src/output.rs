@@ -474,4 +474,58 @@ mod tests {
         assert_eq!(config.model, "test-model");
         assert_eq!(config.pr_number, Some(99));
     }
+
+    #[test]
+    fn test_write_artifact_includes_variant() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("review.txt");
+        let path_str = path.to_str().unwrap();
+
+        let verdict = Verdict {
+            verdict: "POSITIVE".to_string(),
+            critical_issues: 0,
+            security_issues: 0,
+            important_issues: 0,
+            suggestions: 0,
+        };
+        let config = ReviewConfig {
+            provider: "deepseek".to_string(),
+            model: "deepseek-v4-flash".to_string(),
+            variant: Some("flash".to_string()),
+            temperature: 0.1,
+            pr_number: None,
+            diff_size_bytes: 512,
+            diff_line_count: 20,
+        };
+
+        write_artifact("review", &verdict, &ReviewState::Comment, &config, path_str).unwrap();
+
+        let content = std::fs::read_to_string(path_str).unwrap();
+        assert!(content.contains("Variant:       flash"));
+    }
+
+    #[test]
+    fn test_print_colored_summary_includes_variant() {
+        let verdict = Verdict {
+            verdict: "POSITIVE".to_string(),
+            critical_issues: 0,
+            security_issues: 0,
+            important_issues: 0,
+            suggestions: 0,
+        };
+        let config = ReviewConfig {
+            provider: "kimi".to_string(),
+            model: "kimi-k2.5".to_string(),
+            variant: Some("thinking-on".to_string()),
+            temperature: 0.1,
+            pr_number: None,
+            diff_size_bytes: 512,
+            diff_line_count: 20,
+        };
+        let mut buf = Vec::new();
+        print_colored_summary("review", &verdict, &ReviewState::Comment, &config, &mut buf)
+            .unwrap();
+        let output = String::from_utf8(buf).unwrap();
+        assert!(output.contains("Variant:     thinking-on"));
+    }
 }

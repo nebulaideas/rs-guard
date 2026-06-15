@@ -14,6 +14,7 @@ use tempfile::NamedTempFile;
 const ALL_TEST_ENV_VARS: &[&str] = &[
     "RS_GUARD_PROVIDER",
     "RS_GUARD_MODEL",
+    "RS_GUARD_VARIANT",
     "RS_GUARD_TEMPERATURE",
     "RS_GUARD_MAX_TOKENS",
     "DEEPSEEK_API_KEY",
@@ -212,6 +213,96 @@ fn test_cli_model_override() {
         config.apply_args(&args).unwrap();
 
         assert_eq!(config.model, "custom-model");
+    });
+}
+
+#[test]
+#[serial]
+fn test_cli_variant_override() {
+    with_env(&[("DEEPSEEK_API_KEY", "test-deepseek-key")], || {
+        let toml = Some(TomlConfig {
+            provider: Some("deepseek".to_string()),
+            model: Some("deepseek-v4-flash".to_string()),
+            variant: Some("flash".to_string()),
+            temperature: Some(0.1),
+            max_tokens: None,
+            providers: None,
+            ..Default::default()
+        });
+
+        let mut config = Config::from_env(toml).unwrap();
+        assert_eq!(config.variant, Some("flash".to_string()));
+        assert_eq!(config.provider_config.variant, Some("flash".to_string()));
+
+        let args = rs_guard::cli::Args::parse_from(["rs-guard", "--variant", "pro"]);
+        config.apply_args(&args).unwrap();
+
+        assert_eq!(config.variant, Some("pro".to_string()));
+        assert_eq!(config.provider_config.variant, Some("pro".to_string()));
+    });
+}
+
+#[test]
+#[serial]
+fn test_env_variant_override() {
+    with_env(
+        &[
+            ("DEEPSEEK_API_KEY", "test-deepseek-key"),
+            ("RS_GUARD_VARIANT", "thinking-on"),
+        ],
+        || {
+            let config = Config::from_env(None).unwrap();
+            assert_eq!(config.variant, Some("thinking-on".to_string()));
+            assert_eq!(
+                config.provider_config.variant,
+                Some("thinking-on".to_string())
+            );
+        },
+    );
+}
+
+#[test]
+#[serial]
+fn test_toml_per_provider_variant_wired() {
+    with_env(&[("OPENAI_API_KEY", "test-openai-key-2")], || {
+        let file = write_toml(
+            br#"provider = "openai"
+model = "gpt-4o"
+
+[providers.openai]
+variant = "custom-variant"
+"#,
+        );
+
+        let toml = load_toml_config(file.path()).unwrap();
+        let config = Config::from_env(toml).unwrap();
+
+        assert_eq!(config.variant, Some("custom-variant".to_string()));
+        assert_eq!(
+            config.provider_config.variant,
+            Some("custom-variant".to_string())
+        );
+    });
+}
+
+#[test]
+#[serial]
+fn test_toml_per_provider_variant_overrides_top_level() {
+    with_env(&[("OPENAI_API_KEY", "test-openai-key-2")], || {
+        let file = write_toml(
+            br#"provider = "openai"
+model = "gpt-4o"
+variant = "top-level"
+
+[providers.openai]
+variant = "per-provider"
+"#,
+        );
+
+        let toml = load_toml_config(file.path()).unwrap();
+        let config = Config::from_env(toml).unwrap();
+
+        assert_eq!(config.variant, Some("per-provider".to_string()));
     });
 }
 
