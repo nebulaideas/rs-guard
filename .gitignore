@@ -21,5 +21,6 @@ target
 #.idea/
 rs-guard-metrics.json
 review-result.txt
+rs-guard.sha256
 .rs-guard/
 .rs-guard/cache
