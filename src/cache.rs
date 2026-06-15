@@ -444,7 +444,9 @@ impl DiffCache {
     /// Attempts to auto-create a `.gitignore` entry for the cache directory.
     ///
     /// Adds the configured cache directory to the project's `.gitignore` if the file
-    /// does not already contain an entry for the cache directory.
+    /// does not already contain an entry for the cache directory. The entry is written
+    /// as a path relative to the git repository root (or the current working directory
+    /// when no git repository is found).
     ///
     /// Returns `Ok(())` if the entry already exists, was successfully added, or if
     /// caching is disabled. Returns `Err` only on unexpected filesystem errors.
@@ -453,17 +455,28 @@ impl DiffCache {
             return Ok(());
         }
 
-        let gitignore_path = find_git_root()
-            .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
-            .join(".gitignore");
-        let cache_dir_str = self.config.cache_dir.to_string_lossy();
-        let entry = format!("{}\n", cache_dir_str);
+        let git_root = find_git_root()
+            .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+        let gitignore_path = git_root.join(".gitignore");
+
+        let entry = match Self::gitignore_entry(&git_root, &self.config.cache_dir) {
+            Some(entry) => entry,
+            None => {
+                log::warn!(
+                    "Cache dir {} is the same as the git root. Skipping .gitignore entry.",
+                    self.config.cache_dir.display()
+                );
+                return Ok(());
+            }
+        };
+        let entry_with_slash = format!("{}/", entry);
 
         match fs::read_to_string(&gitignore_path) {
             Ok(content) => {
-                let has_entry = content
-                    .lines()
-                    .any(|line| line == cache_dir_str || line == format!("{}/", cache_dir_str));
+                let has_entry = content.lines().any(|line| {
+                    let normalized = Self::normalize_gitignore_line(line);
+                    normalized == entry || normalized == entry_with_slash
+                });
                 if has_entry {
                     return Ok(());
                 }
@@ -480,8 +493,78 @@ impl DiffCache {
             .open(&gitignore_path)
             .map_err(RsGuardError::Io)?;
 
-        f.write_all(entry.as_bytes()).map_err(RsGuardError::Io)?;
+        f.write_all(format!("{}\n", entry_with_slash).as_bytes())
+            .map_err(RsGuardError::Io)?;
         Ok(())
+    }
+
+    /// Computes the `.gitignore` entry for the cache directory relative to the git root.
+    ///
+    /// If the cache directory is inside the git root, returns the relative path with
+    /// forward slashes. Otherwise, falls back to the configured path as-is.
+    /// Returns `None` if the cache directory is the same as the git root.
+    fn gitignore_entry(git_root: &Path, cache_dir: &Path) -> Option<String> {
+        let cache_path = if cache_dir.is_absolute() {
+            cache_dir.to_path_buf()
+        } else {
+            git_root.join(cache_dir)
+        };
+
+        // Prefer canonical paths so symlinked directories (e.g. /var -> /private/var)
+        // resolve consistently before stripping the prefix.
+        let relative =
+            if let (Ok(root), Ok(cache)) = (git_root.canonicalize(), cache_path.canonicalize()) {
+                cache.strip_prefix(&root).ok().map(|p| p.to_path_buf())
+            } else {
+                None
+            };
+
+        // Fall back to non-canonical paths if canonicalization fails.
+        let relative = relative.or_else(|| {
+            cache_path
+                .strip_prefix(git_root)
+                .ok()
+                .map(|p| p.to_path_buf())
+        });
+
+        match relative {
+            Some(path) => {
+                let entry = path
+                    .to_string_lossy()
+                    .replace('\\', "/")
+                    .trim_end_matches('/')
+                    .to_string();
+                if entry.is_empty() {
+                    None
+                } else {
+                    Some(entry)
+                }
+            }
+            None => {
+                log::warn!(
+                    "Cache dir {} is outside git root {}. Using configured path in .gitignore.",
+                    cache_path.display(),
+                    git_root.display()
+                );
+                let entry = cache_dir
+                    .to_string_lossy()
+                    .replace('\\', "/")
+                    .trim_end_matches('/')
+                    .to_string();
+                if entry.is_empty() {
+                    None
+                } else {
+                    Some(entry)
+                }
+            }
+        }
+    }
+
+    /// Normalizes a `.gitignore` line for duplicate detection.
+    ///
+    /// Trims whitespace and removes a trailing directory separator.
+    fn normalize_gitignore_line(line: &str) -> String {
+        line.trim().trim_end_matches('/').to_string()
     }
 
     /// Clears all cache entries.
@@ -556,6 +639,18 @@ mod tests {
     use super::*;
     use tempfile::tempdir;
 
+    /// Restores the process working directory when dropped.
+    ///
+    /// Tests that mutate `std::env::current_dir()` must use this guard so that
+    /// a panic does not leave subsequent tests pointing at a deleted temp dir.
+    struct RestoreCurrentDir(PathBuf);
+
+    impl Drop for RestoreCurrentDir {
+        fn drop(&mut self) {
+            let _ = std::env::set_current_dir(&self.0);
+        }
+    }
+
     #[test]
     fn test_diff_hash_consistent() {
         let content = "diff --git a/f.rs b/f.rs";
@@ -600,6 +695,7 @@ mod tests {
 
         // Change to the temp directory for the test
         let original_dir = std::env::current_dir().unwrap();
+        let _restore = RestoreCurrentDir(original_dir);
         std::env::set_current_dir(dir.path()).unwrap();
 
         // First call should create .gitignore
@@ -607,7 +703,13 @@ mod tests {
         let gitignore_path = dir.path().join(".gitignore");
         assert!(gitignore_path.exists());
         let content = std::fs::read_to_string(&gitignore_path).unwrap();
-        assert!(content.contains(".rs-guard/cache"));
+        assert!(
+            content
+                .lines()
+                .any(|line| line.trim() == ".rs-guard/cache/"),
+            ".gitignore should contain exact relative entry: {}",
+            content
+        );
         let line_count_before = content.lines().count();
 
         // Second call should not duplicate the entry
@@ -616,9 +718,6 @@ mod tests {
         let line_count_after = content_after.lines().count();
         // Line count should be the same (no new lines added)
         assert_eq!(line_count_before, line_count_after);
-
-        // Restore original directory
-        std::env::set_current_dir(original_dir).unwrap();
     }
 
     #[test]
@@ -637,19 +736,23 @@ mod tests {
 
         // Change to the temp directory for the test
         let original_dir = std::env::current_dir().unwrap();
+        let _restore = RestoreCurrentDir(original_dir);
         std::env::set_current_dir(dir.path()).unwrap();
 
         // Create .gitignore with a similar but different path
         let gitignore_path = dir.path().join(".gitignore");
-        std::fs::write(&gitignore_path, ".rs-guard/cache2/").unwrap();
+        std::fs::write(&gitignore_path, ".rs-guard/cache2/\n").unwrap();
 
         // Should add the entry since it's not an exact match
         cache.ensure_gitignored().unwrap();
         let content = std::fs::read_to_string(&gitignore_path).unwrap();
-        assert!(content.contains(".rs-guard/cache"));
-
-        // Restore original directory
-        std::env::set_current_dir(original_dir).unwrap();
+        assert!(
+            content
+                .lines()
+                .any(|line| line.trim() == ".rs-guard/cache/"),
+            ".gitignore should contain exact relative entry: {}",
+            content
+        );
     }
 
     #[test]
@@ -667,6 +770,7 @@ mod tests {
         let cache = DiffCache::new(config).unwrap();
 
         let original_dir = std::env::current_dir().unwrap();
+        let _restore = RestoreCurrentDir(original_dir);
         std::env::set_current_dir(dir.path()).unwrap();
 
         // Should not create .gitignore when auto_gitignore is false
@@ -676,8 +780,6 @@ mod tests {
             !gitignore_path.exists(),
             ".gitignore should not be created when auto_gitignore=false"
         );
-
-        std::env::set_current_dir(original_dir).unwrap();
     }
 
     #[test]
@@ -695,6 +797,7 @@ mod tests {
         let cache = DiffCache::new(config).unwrap();
 
         let original_dir = std::env::current_dir().unwrap();
+        let _restore = RestoreCurrentDir(original_dir);
         std::env::set_current_dir(dir.path()).unwrap();
 
         // Should not create .gitignore when cache is disabled
@@ -704,8 +807,109 @@ mod tests {
             !gitignore_path.exists(),
             ".gitignore should not be created when cache is disabled"
         );
+    }
 
-        std::env::set_current_dir(original_dir).unwrap();
+    #[test]
+    #[serial_test::serial]
+    fn test_gitignore_uses_relative_path_when_cache_dir_is_absolute() {
+        let dir = tempdir().unwrap();
+        let cache_dir = dir.path().join(DEFAULT_CACHE_DIR);
+        let config = CacheConfig {
+            cache_dir,
+            ttl: Duration::from_secs(3600),
+            enabled: true,
+            max_size_bytes: DEFAULT_MAX_SIZE_BYTES,
+            auto_gitignore: true,
+        };
+        let cache = DiffCache::new(config).unwrap();
+
+        let original_dir = std::env::current_dir().unwrap();
+        let _restore = RestoreCurrentDir(original_dir);
+        std::env::set_current_dir(dir.path()).unwrap();
+
+        cache.ensure_gitignored().unwrap();
+        let gitignore_path = dir.path().join(".gitignore");
+        let content = std::fs::read_to_string(&gitignore_path).unwrap();
+        assert!(
+            content
+                .lines()
+                .any(|line| line.trim() == ".rs-guard/cache/"),
+            ".gitignore should contain exact relative entry: {}",
+            content
+        );
+        assert!(
+            !content
+                .lines()
+                .any(|line| line.contains(dir.path().to_string_lossy().as_ref())),
+            ".gitignore should not contain absolute path: {}",
+            content
+        );
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn test_gitignore_does_not_duplicate_relative_entry() {
+        let dir = tempdir().unwrap();
+        let gitignore_path = dir.path().join(".gitignore");
+        std::fs::write(&gitignore_path, ".rs-guard/cache\n").unwrap();
+
+        let cache_dir = dir.path().join(DEFAULT_CACHE_DIR);
+        let config = CacheConfig {
+            cache_dir,
+            ttl: Duration::from_secs(3600),
+            enabled: true,
+            max_size_bytes: DEFAULT_MAX_SIZE_BYTES,
+            auto_gitignore: true,
+        };
+        let cache = DiffCache::new(config).unwrap();
+
+        let original_dir = std::env::current_dir().unwrap();
+        let _restore = RestoreCurrentDir(original_dir);
+        std::env::set_current_dir(dir.path()).unwrap();
+
+        cache.ensure_gitignored().unwrap();
+        let content = std::fs::read_to_string(&gitignore_path).unwrap();
+        let count = content
+            .lines()
+            .filter(|l| l.trim() == ".rs-guard/cache/" || l.trim() == ".rs-guard/cache")
+            .count();
+        assert_eq!(count, 1, "entry should not be duplicated: {}", content);
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn test_gitignore_does_not_duplicate_entry_with_trailing_slash() {
+        let dir = tempdir().unwrap();
+        let gitignore_path = dir.path().join(".gitignore");
+        std::fs::write(&gitignore_path, ".rs-guard/cache/\n").unwrap();
+
+        let cache_dir = dir.path().join(DEFAULT_CACHE_DIR);
+        let config = CacheConfig {
+            cache_dir,
+            ttl: Duration::from_secs(3600),
+            enabled: true,
+            max_size_bytes: DEFAULT_MAX_SIZE_BYTES,
+            auto_gitignore: true,
+        };
+        let cache = DiffCache::new(config).unwrap();
+
+        let original_dir = std::env::current_dir().unwrap();
+        let _restore = RestoreCurrentDir(original_dir);
+        std::env::set_current_dir(dir.path()).unwrap();
+
+        let line_count_before = std::fs::read_to_string(&gitignore_path)
+            .unwrap()
+            .lines()
+            .count();
+
+        cache.ensure_gitignored().unwrap();
+        let content = std::fs::read_to_string(&gitignore_path).unwrap();
+        let line_count_after = content.lines().count();
+        assert_eq!(
+            line_count_before, line_count_after,
+            "entry with trailing slash should not be duplicated: {}",
+            content
+        );
     }
 
     #[test]
@@ -1139,6 +1343,7 @@ mod tests {
         let cache = DiffCache::new(config).unwrap();
 
         let original_dir = std::env::current_dir().unwrap();
+        let _restore = RestoreCurrentDir(original_dir);
         std::env::set_current_dir(dir.path()).unwrap();
 
         let gitignore_path = dir.path().join(".gitignore");
@@ -1149,6 +1354,5 @@ mod tests {
         assert!(result.is_err(), "should fail on read-only .gitignore");
 
         std::fs::set_permissions(&gitignore_path, std::fs::Permissions::from_mode(0o644)).unwrap();
-        std::env::set_current_dir(original_dir).unwrap();
     }
 }
