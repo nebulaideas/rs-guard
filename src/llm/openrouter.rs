@@ -21,6 +21,7 @@ const DEFAULT_HTTP_REFERER: &str = "https://github.com/nebulaideas/rs-guard";
 pub struct OpenRouterClient {
     base_url: String,
     model: String,
+    variant: Option<String>,
     max_tokens: Option<u32>,
     client: reqwest::Client,
 }
@@ -42,6 +43,7 @@ impl OpenRouterClient {
         Ok(Self {
             base_url: DEFAULT_BASE_URL.to_string(),
             model: DEFAULT_MODEL.to_string(),
+            variant: None,
             max_tokens: None,
             client,
         })
@@ -56,6 +58,12 @@ impl OpenRouterClient {
     /// Sets a custom model identifier.
     pub fn with_model(mut self, model: impl Into<String>) -> Self {
         self.model = model.into();
+        self
+    }
+
+    /// Sets a provider-specific model variant.
+    pub fn with_variant(mut self, variant: Option<String>) -> Self {
+        self.variant = variant;
         self
     }
 

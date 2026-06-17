@@ -21,6 +21,9 @@ pub struct ReviewMetrics {
     pub provider: String,
     /// Model identifier.
     pub model: String,
+    /// Provider-specific model variant, if any.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub variant: Option<String>,
     /// Estimated input tokens sent to the LLM (character count / 4 heuristic).
     pub estimated_tokens_in: usize,
     /// Estimated output tokens received from the LLM (character count / 4 heuristic).
@@ -44,6 +47,8 @@ pub struct ReviewConfig {
     pub provider: String,
     /// Model identifier.
     pub model: String,
+    /// Provider-specific model variant, if any.
+    pub variant: Option<String>,
     /// Sampling temperature used.
     pub temperature: f32,
     /// Pull request number (if in CI mode).
@@ -71,12 +76,18 @@ pub fn write_artifact(
     config: &ReviewConfig,
     path: &str,
 ) -> std::io::Result<()> {
+    let variant_line = config
+        .variant
+        .as_deref()
+        .map(|v| format!("Variant:       {}\n", v))
+        .unwrap_or_default();
+
     let content = format!(
         "rs-guard Review Result
 ==========================
 Provider: {}
 Model: {}
-Temperature: {}
+{}Temperature: {}
 Diff Size: {} lines ({} bytes)
 Review State: {}
 
@@ -92,6 +103,7 @@ Suggestions:     {}
 ",
         config.provider,
         config.model,
+        variant_line,
         config.temperature,
         config.diff_line_count,
         config.diff_size_bytes,
@@ -210,6 +222,9 @@ pub fn print_colored_summary(
     writeln!(writer, "{}", "--- Metadata ---".dimmed())?;
     writeln!(writer, "Provider:    {}", config.provider)?;
     writeln!(writer, "Model:       {}", config.model)?;
+    if let Some(ref variant) = config.variant {
+        writeln!(writer, "Variant:       {}", variant)?;
+    }
     writeln!(writer, "Temperature: {}", config.temperature)?;
     writeln!(writer, "Diff Lines:  {}", config.diff_line_count)?;
     Ok(())
@@ -228,6 +243,7 @@ mod tests {
         let metrics = ReviewMetrics {
             provider: "deepseek".to_string(),
             model: "deepseek-v4-flash".to_string(),
+            variant: None,
             estimated_tokens_in: 4230,
             estimated_tokens_out: 892,
             latency_secs: 8.4,
@@ -263,6 +279,7 @@ mod tests {
         let config = ReviewConfig {
             provider: "deepseek".to_string(),
             model: "deepseek-v4-flash".to_string(),
+            variant: None,
             temperature: 0.1,
             pr_number: Some(42),
             diff_size_bytes: 1024,
@@ -298,6 +315,7 @@ mod tests {
             &ReviewConfig {
                 provider: "test".to_string(),
                 model: "test".to_string(),
+                variant: None,
                 temperature: 0.0,
                 pr_number: None,
                 diff_size_bytes: 0,
@@ -360,6 +378,7 @@ mod tests {
         let config = ReviewConfig {
             provider: "openai".to_string(),
             model: "gpt-4o".to_string(),
+            variant: None,
             temperature: 0.5,
             pr_number: None,
             diff_size_bytes: 512,
@@ -398,6 +417,7 @@ mod tests {
         let config = ReviewConfig {
             provider: "openai".to_string(),
             model: "gpt-4o".to_string(),
+            variant: None,
             temperature: 0.1,
             pr_number: None,
             diff_size_bytes: 512,
@@ -444,6 +464,7 @@ mod tests {
         let config = ReviewConfig {
             provider: "test-provider".to_string(),
             model: "test-model".to_string(),
+            variant: None,
             temperature: 0.3,
             pr_number: Some(99),
             diff_size_bytes: 2048,
@@ -452,5 +473,59 @@ mod tests {
         assert_eq!(config.provider, "test-provider");
         assert_eq!(config.model, "test-model");
         assert_eq!(config.pr_number, Some(99));
+    }
+
+    #[test]
+    fn test_write_artifact_includes_variant() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("review.txt");
+        let path_str = path.to_str().unwrap();
+
+        let verdict = Verdict {
+            verdict: "POSITIVE".to_string(),
+            critical_issues: 0,
+            security_issues: 0,
+            important_issues: 0,
+            suggestions: 0,
+        };
+        let config = ReviewConfig {
+            provider: "deepseek".to_string(),
+            model: "deepseek-v4-flash".to_string(),
+            variant: Some("flash".to_string()),
+            temperature: 0.1,
+            pr_number: None,
+            diff_size_bytes: 512,
+            diff_line_count: 20,
+        };
+
+        write_artifact("review", &verdict, &ReviewState::Comment, &config, path_str).unwrap();
+
+        let content = std::fs::read_to_string(path_str).unwrap();
+        assert!(content.contains("Variant:       flash"));
+    }
+
+    #[test]
+    fn test_print_colored_summary_includes_variant() {
+        let verdict = Verdict {
+            verdict: "POSITIVE".to_string(),
+            critical_issues: 0,
+            security_issues: 0,
+            important_issues: 0,
+            suggestions: 0,
+        };
+        let config = ReviewConfig {
+            provider: "kimi".to_string(),
+            model: "kimi-k2.5".to_string(),
+            variant: Some("thinking-on".to_string()),
+            temperature: 0.1,
+            pr_number: None,
+            diff_size_bytes: 512,
+            diff_line_count: 20,
+        };
+        let mut buf = Vec::new();
+        print_colored_summary("review", &verdict, &ReviewState::Comment, &config, &mut buf)
+            .unwrap();
+        let output = String::from_utf8(buf).unwrap();
+        assert!(output.contains("Variant:       thinking-on"));
     }
 }

@@ -26,6 +26,14 @@ pub struct Args {
     )]
     pub model: Option<String>,
 
+    /// Provider-specific model variant (e.g. "flash", "pro" for deepseek).
+    #[arg(
+        long,
+        env = "RS_GUARD_VARIANT",
+        help = "Provider-specific model variant (e.g. flash/pro for deepseek). Has no effect for providers that do not declare variants."
+    )]
+    pub variant: Option<String>,
+
     /// Sampling temperature (0.0 - 2.0). Default: 0.1.
     #[arg(
         short,

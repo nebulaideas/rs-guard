@@ -4,7 +4,10 @@
 //! OpenAI-compatible request format.
 
 use crate::error::RsGuardError;
-use crate::llm::{build_llm_client, chat_messages, send_chat_request, ChatRequest, LlmProvider};
+use crate::llm::{
+    build_llm_client, chat_messages, providers, send_chat_request, ChatRequest, LlmProvider,
+    VariantEffect,
+};
 use async_trait::async_trait;
 
 /// Default DeepSeek API base URL.
@@ -18,6 +21,7 @@ const DEFAULT_MODEL: &str = "deepseek-v4-flash";
 pub struct DeepSeekClient {
     base_url: String,
     model: String,
+    variant: Option<String>,
     max_tokens: Option<u32>,
     client: reqwest::Client,
 }
@@ -34,6 +38,7 @@ impl DeepSeekClient {
         Ok(Self {
             base_url: DEFAULT_BASE_URL.to_string(),
             model: DEFAULT_MODEL.to_string(),
+            variant: None,
             max_tokens: None,
             client,
         })
@@ -48,6 +53,12 @@ impl DeepSeekClient {
     /// Sets a custom model identifier.
     pub fn with_model(mut self, model: impl Into<String>) -> Self {
         self.model = model.into();
+        self
+    }
+
+    /// Sets a provider-specific model variant.
+    pub fn with_variant(mut self, variant: Option<String>) -> Self {
+        self.variant = variant;
         self
     }
 
@@ -70,8 +81,26 @@ impl LlmProvider for DeepSeekClient {
         user_message: &str,
         temperature: f32,
     ) -> Result<String, RsGuardError> {
+        let effective_model = if let Some(ref variant) = self.variant {
+            match providers::find_provider_variant("deepseek", variant) {
+                Some(v) => match &v.effect {
+                    VariantEffect::ModelAlias(model) => model.to_string(),
+                    VariantEffect::ExtraBody(_, _) => self.model.clone(),
+                },
+                None => {
+                    let known = providers::provider_variant_names("deepseek").join(", ");
+                    return Err(RsGuardError::Config(format!(
+                        "Unknown variant '{}' for provider 'deepseek'. Supported variants: {}",
+                        variant, known
+                    )));
+                }
+            }
+        } else {
+            self.model.clone()
+        };
+
         let request = ChatRequest {
-            model: self.model.clone(),
+            model: effective_model,
             messages: chat_messages(system_prompt, user_message),
             temperature,
             max_tokens: self.max_tokens,

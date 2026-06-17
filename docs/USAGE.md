@@ -32,6 +32,7 @@ rs-guard [OPTIONS]
 | `--model`       | `-m`  | _(provider default)_       | LLM model identifier. Overrides TOML and provider defaults.                        |
 | `--temperature` | `-t`  | `0.1`                      | Sampling temperature (0.0 to 2.0). Lower values produce more deterministic output. |
 | `--provider`    |       | `deepseek`                 | LLM provider: `deepseek`, `kimi`, `qwen`, `openrouter`, `openai`.                  |
+| `--variant`     |       | (none)                     | Provider-specific model variant (e.g. `flash`/`pro` for deepseek). See PROVIDERS.md and CONFIGURATION.md. |
 | `--config`      | `-c`  | `.reviewer.toml`           | Path to the configuration TOML file.                                               |
 | `--max-tokens`  |       | `4096`                     | Maximum tokens for LLM completions.                                                |
 | `--diff-file`   | —     | _(none)_                   | Review a pre-existing diff file instead of fetching from GitHub API.               |
@@ -56,6 +57,9 @@ rs-guard --provider deepseek --model deepseek-v4-flash
 
 # Local mode with Kimi
 rs-guard --provider kimi --model kimi-k2.5
+
+# DeepSeek with explicit variant (higher-level than --model for supported providers)
+rs-guard --provider deepseek --variant pro
 
 # Review a pre-existing diff file
 rs-guard --diff-file pr-diff.diff

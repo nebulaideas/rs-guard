@@ -220,6 +220,7 @@ pub async fn run_pipeline(
         &config.prompt,
         &config.provider,
         &config.model,
+        config.variant.as_deref(),
         config.temperature,
     ) {
         log::info!("Cache hit — using cached LLM response");
@@ -252,6 +253,7 @@ pub async fn run_pipeline(
             &config.prompt,
             &config.provider,
             &config.model,
+            config.variant.as_deref(),
             config.temperature,
             &response,
         ) {
@@ -307,6 +309,7 @@ pub async fn run_pipeline(
     let review_config = ReviewConfig {
         provider: config.provider.clone(),
         model: config.model.clone(),
+        variant: config.variant.clone(),
         temperature: config.temperature,
         pr_number: config.pr_number,
         diff_size_bytes: diff_result.size_bytes,
@@ -327,6 +330,7 @@ pub async fn run_pipeline(
     let metrics = ReviewMetrics {
         provider: config.provider.clone(),
         model: config.model.clone(),
+        variant: config.variant.clone(),
         estimated_tokens_in,
         estimated_tokens_out,
         latency_secs: latency.as_secs_f64(),
@@ -399,6 +403,9 @@ pub async fn run_pipeline(
         println!("============================");
         println!("Provider:    {}", config.provider);
         println!("Model:       {}", config.model);
+        if let Some(ref v) = config.variant {
+            println!("Variant:       {}", v);
+        }
         println!("Est. Tokens In:  {}", estimated_tokens_in);
         println!("Est. Tokens Out: {}", estimated_tokens_out);
         println!("Latency:     {:.1}s", latency.as_secs_f64());
