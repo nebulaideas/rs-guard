@@ -72,6 +72,10 @@ impl QwenClient {
     }
 
     /// Sets a provider-specific model variant.
+    ///
+    /// Only has an effect for providers that declare variants in
+    /// [`crate::llm::providers`]. See [`crate::llm::VariantEffect`] and the provider
+    /// metadata tables in `docs/PROVIDERS.md`.
     pub fn with_variant(mut self, variant: Option<String>) -> Self {
         self.variant = variant;
         self

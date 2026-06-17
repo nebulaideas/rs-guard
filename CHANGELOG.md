@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Generic model variant mechanism** — `VariantEffect` (ModelAlias + ExtraBody),
+  `ProviderVariant`, `ProviderMeta`, `all_providers()`, `find_provider_variant()`,
+  and `provider_variant_names()` in `llm::providers`. A centralized `apply_variant()`
+  helper (pub(crate)) resolves effective model + extra request body fields.
+- **`ChatRequest.extra_body`** — `HashMap` merged via `#[serde(flatten)]` (with `default`)
+  so `ExtraBody` variants can inject arbitrary top-level fields (e.g. Kimi's `thinking` object).
+- **Kimi thinking mode variants** (`thinking-on` / `thinking-off`) using `ExtraBody`
+  to send `{"thinking": {"type": "enabled"}}` / `disabled`. Preserves existing
+  `reasoning_content` handling.
+- **`ProviderConfig.variant`** and `with_variant()` builder on all `*Client` types.
+- **CLI / config / env support** for `--variant` / `variant` / `RS_GUARD_VARIANT`.
+- **Documentation** — Expanded `PROVIDERS.md` (per-provider variant tables), `API.md`,
+  `CONFIGURATION.md`, `USAGE.md`, `implementation-guide.md` (custom provider example now
+  shows `extra_body`).
+
+### Changed
+
+- Provider clients now route through `apply_variant()` for consistent model + extra
+  handling.
+
 ## [1.0.2] - 2026-06-15
 
 ### Added

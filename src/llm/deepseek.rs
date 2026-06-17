@@ -55,7 +55,11 @@ impl DeepSeekClient {
         self
     }
 
-    /// Sets a provider-specific model variant.
+    /// Sets a provider-specific model variant (e.g. `"flash"` or `"pro"`).
+    ///
+    /// Only has an effect for providers that declare variants in
+    /// [`crate::llm::providers`]. See [`crate::llm::VariantEffect`] and the provider
+    /// metadata tables in `docs/PROVIDERS.md`.
     pub fn with_variant(mut self, variant: Option<String>) -> Self {
         self.variant = variant;
         self

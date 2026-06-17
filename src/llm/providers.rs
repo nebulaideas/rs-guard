@@ -14,6 +14,14 @@ pub enum VariantEffect {
     /// Variant maps to a concrete model identifier.
     ModelAlias(&'static str),
     /// Variant injects a provider-specific key + JSON value (as a source string) into the request body.
+    ///
+    /// The key/value is placed at the top level of the serialized request via
+    /// `ChatRequest.extra_body` + `#[serde(flatten)]`.
+    ///
+    /// **Warning:** The key must not collide with standard `ChatRequest` fields
+    /// (`model`, `messages`, `temperature`, `max_tokens`). See the documentation
+    /// on [`super::ChatRequest`] for details.
+    ///
     /// The JSON string is parsed at use time (cheap and the data is hardcoded/trusted).
     ExtraBody(&'static str, &'static str),
 }
@@ -47,6 +55,10 @@ pub struct ProviderMeta {
 }
 
 /// Returns the metadata for all known providers, in registration order.
+///
+/// This is the single source of truth used by the CLI, configuration,
+/// and the variant resolution logic. Custom providers can be added by
+/// extending this list (see the custom provider guide).
 pub fn all_providers() -> &'static [ProviderMeta] {
     &[
         ProviderMeta {
