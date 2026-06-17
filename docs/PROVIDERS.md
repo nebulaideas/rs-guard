@@ -107,12 +107,37 @@ export KIMI_API_KEY="your-api-key"
 | Default Model   | `kimi-k2.5`                       |
 | Context Window  | 128,000 tokens                    |
 | Auth Header     | `Bearer {KIMI_API_KEY}`           |
-| Special Feature | `reasoning_content` field support (response); thinking mode via `variant` (request, planned) |
+| Special Feature | `reasoning_content` field support (response); thinking mode via `variant` (request) |
+
+### Variants
+
+Kimi supports a thinking mode toggle via the generic variant mechanism.
+
+| Variant       | Description                                                                 | Injected Request Field          |
+|---------------|-----------------------------------------------------------------------------|---------------------------------|
+| `thinking-on` | Enable Kimi thinking / chain-of-thought mode. The response may contain a `reasoning_content` field (rs-guard parses the final content and discards the reasoning). | `thinking: { "type": "enabled" }` |
+| `thinking-off`| Explicitly disable thinking mode.                                           | `thinking: { "type": "disabled" }` |
+
+Example:
+```bash
+rs-guard --provider kimi --variant thinking-on
+# or
+export RS_GUARD_VARIANT=thinking-on
+```
+In TOML:
+```toml
+provider = "kimi"
+# variant = "thinking-on"          # top-level
+[providers.kimi]
+variant = "thinking-on"
+```
 
 ### CLI Usage
 
 ```bash
 rs-guard --provider kimi --model kimi-k2.5
+# or use a thinking mode variant:
+rs-guard --provider kimi --variant thinking-on
 ```
 
 ### TOML Configuration
@@ -124,6 +149,7 @@ model = "kimi-k2.5"
 [providers.kimi]
 api_key_env = "KIMI_API_KEY"
 base_url = "https://api.moonshot.ai/v1"
+# variant = "thinking-on"
 ```
 
 ### API Key Acquisition

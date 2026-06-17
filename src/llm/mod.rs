@@ -8,6 +8,7 @@ use crate::error::RsGuardError;
 use async_trait::async_trait;
 use reqwest::header::{self, HeaderMap, HeaderValue};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 /// HTTP request timeout for LLM API calls.
 const LLM_REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
@@ -43,6 +44,21 @@ pub struct ChatRequest {
     /// Maximum tokens in the response (provider-agnostic).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_tokens: Option<u32>,
+    /// Extra top-level fields contributed by `VariantEffect::ExtraBody`
+    /// (e.g. "reasoning_effort" or provider-specific thinking toggles).
+    ///
+    /// Serialized via `#[serde(flatten)]` so they appear at the same level as the
+    /// standard fields (`model`, `messages`, `temperature`, `max_tokens`).
+    ///
+    /// **Important:** Keys provided via `ExtraBody` **must not** collide with the
+    /// standard top-level `ChatRequest` fields. A colliding key will silently
+    /// overwrite the corresponding field during serialization (e.g. overriding
+    /// the chosen `model` or `temperature`).
+    ///
+    /// Uses `default` so that deserialization (or custom provider code following
+    /// older examples) does not require the field when it is empty.
+    #[serde(flatten, default, skip_serializing_if = "HashMap::is_empty")]
+    pub extra_body: HashMap<String, serde_json::Value>,
 }
 
 /// A single choice in a chat completion response.
@@ -115,6 +131,10 @@ pub struct ProviderConfig {
     /// Model identifier to use (overrides provider default).
     pub model: String,
     /// Provider-specific model variant (e.g. "flash", "thinking-on").
+    ///
+    /// Resolved (together with any `ExtraBody` fields) when the client
+    /// performs a completion. See [`providers`] and the per-provider
+    /// tables in `docs/PROVIDERS.md`.
     pub variant: Option<String>,
 }
 
@@ -407,6 +427,7 @@ mod tests {
             messages: chat_messages("system", "user"),
             temperature: 0.1,
             max_tokens: None,
+            extra_body: HashMap::new(),
         };
         let result = send_chat_request(
             &client,
@@ -442,6 +463,7 @@ mod tests {
             messages: chat_messages("system", "user"),
             temperature: 0.1,
             max_tokens: None,
+            extra_body: HashMap::new(),
         };
         let result = send_chat_request(
             &client,
@@ -477,6 +499,7 @@ mod tests {
             messages: chat_messages("system", "user"),
             temperature: 0.1,
             max_tokens: None,
+            extra_body: HashMap::new(),
         };
         let result = send_chat_request(
             &client,
@@ -515,6 +538,7 @@ mod tests {
             messages: chat_messages("system", "user"),
             temperature: 0.1,
             max_tokens: None,
+            extra_body: HashMap::new(),
         };
         let result = send_chat_request(
             &client,

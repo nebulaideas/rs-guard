@@ -4,7 +4,9 @@
 //! and model identifier.
 
 use crate::error::RsGuardError;
-use crate::llm::{build_llm_client, chat_messages, send_chat_request, ChatRequest, LlmProvider};
+use crate::llm::{
+    build_llm_client, chat_messages, providers, send_chat_request, ChatRequest, LlmProvider,
+};
 use async_trait::async_trait;
 
 /// Default OpenAI API base URL.
@@ -54,6 +56,10 @@ impl OpenAiClient {
     }
 
     /// Sets a provider-specific model variant.
+    ///
+    /// Only has an effect for providers that declare variants in
+    /// [`crate::llm::providers`]. See [`crate::llm::VariantEffect`] and the provider
+    /// metadata tables in `docs/PROVIDERS.md`.
     pub fn with_variant(mut self, variant: Option<String>) -> Self {
         self.variant = variant;
         self
@@ -78,11 +84,15 @@ impl LlmProvider for OpenAiClient {
         user_message: &str,
         temperature: f32,
     ) -> Result<String, RsGuardError> {
+        let (effective_model, extra_body) =
+            providers::apply_variant("openai", &self.model, self.variant.as_deref())?;
+
         let request = ChatRequest {
-            model: self.model.clone(),
+            model: effective_model,
             messages: chat_messages(system_prompt, user_message),
             temperature,
             max_tokens: self.max_tokens,
+            extra_body,
         };
 
         let url = format!("{}/chat/completions", self.base_url);

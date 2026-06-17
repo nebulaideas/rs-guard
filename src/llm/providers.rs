@@ -5,13 +5,32 @@
 //! Every other module that needs provider metadata should import from here
 //! instead of duplicating constants.
 
+use crate::error::RsGuardError;
+use std::collections::HashMap;
+
+/// Convenient alias for `&'static str` (used in `VariantEffect` arms for
+/// consistency and to avoid repeating the verbose type in multiple places).
+type StaticStr = &'static str;
+
 /// Effect that a model variant has on an LLM request.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum VariantEffect {
     /// Variant maps to a concrete model identifier.
-    ModelAlias(&'static str),
-    /// Variant injects a provider-specific key/value into the request body.
-    ExtraBody(&'static str, serde_json::Value),
+    ModelAlias(StaticStr),
+    /// Variant injects a provider-specific key + JSON value (as a source string) into the request body.
+    ///
+    /// The key/value is placed at the top level of the serialized request via
+    /// `ChatRequest.extra_body` + `#[serde(flatten)]`.
+    ///
+    /// **Warning:** The key must not collide with standard `ChatRequest` fields
+    /// (`model`, `messages`, `temperature`, `max_tokens`). See the documentation
+    /// on [`super::ChatRequest`] for details.
+    ///
+    /// The JSON string is parsed at use time (cheap and the data is hardcoded/trusted).
+    /// We keep the source as `&'static str` (instead of a direct `serde_json::Value`)
+    /// to satisfy the `'static` lifetime requirements when storing the effects inside
+    /// the static table returned by `all_providers()`.
+    ExtraBody(StaticStr, StaticStr),
 }
 
 /// Metadata for a single supported model variant.
@@ -43,6 +62,10 @@ pub struct ProviderMeta {
 }
 
 /// Returns the metadata for all known providers, in registration order.
+///
+/// This is the single source of truth used by the CLI, configuration,
+/// and the variant resolution logic. Custom providers can be added by
+/// extending this list (see the custom provider guide).
 pub fn all_providers() -> &'static [ProviderMeta] {
     &[
         ProviderMeta {
@@ -72,7 +95,23 @@ pub fn all_providers() -> &'static [ProviderMeta] {
             api_key_env: "KIMI_API_KEY",
             ci_allowed_hosts: &[("https", "api.moonshot.ai")],
             context_window: 128_000,
-            variants: &[],
+            variants: &[
+                ProviderVariant {
+                    name: "thinking-on",
+                    description: "Enable Kimi thinking / chain-of-thought mode (response may include reasoning_content)",
+                    // We use a raw string literal + runtime parse here (instead of
+                    // `serde_json::json!(...)`) purely for 'static lifetime reasons inside
+                    // the static provider metadata table. The json! form would be nicer
+                    // (compile-time validation) but leads to borrow-checker errors when
+                    // storing the resulting `&'static Value` in the array.
+                    effect: VariantEffect::ExtraBody("thinking", r#"{"type":"enabled"}"#),
+                },
+                ProviderVariant {
+                    name: "thinking-off",
+                    description: "Disable Kimi thinking mode (default)",
+                    effect: VariantEffect::ExtraBody("thinking", r#"{"type":"disabled"}"#),
+                },
+            ],
         },
         ProviderMeta {
             name: "qwen",
@@ -144,6 +183,60 @@ pub fn provider_variant_names(provider_name: &str) -> Vec<&'static str> {
     find_provider(provider_name)
         .map(|p| p.variants.iter().map(|v| v.name).collect())
         .unwrap_or_default()
+}
+
+/// Resolves a (possibly variant-adjusted) model identifier together with any
+/// extra top-level body fields contributed by the variant.
+///
+/// This is the single shared implementation used by all LLM provider clients
+/// so that `ModelAlias` and `ExtraBody` effects work uniformly.
+///
+/// See the detailed resolution rules in the implementation below.
+pub(crate) fn apply_variant(
+    provider_name: &str,
+    configured_model: &str,
+    variant: Option<&str>,
+) -> Result<(String, HashMap<String, serde_json::Value>), RsGuardError> {
+    // Resolution rules (preserve documented "no effect" / silent-ignore behaviour):
+    // * No variant supplied → (configured_model, empty map)
+    // * Variant matches a ModelAlias → (aliased model id, empty map)
+    // * Variant matches an ExtraBody(k, v) → (configured_model, {k: v})
+    // * Variant unknown **and** provider declares ≥1 variants → RsGuardError::Config listing supported names
+    // * Variant unknown **and** provider declares 0 variants → (configured_model, empty map)  // silently ignored
+    let Some(vname) = variant else {
+        return Ok((configured_model.to_string(), HashMap::new()));
+    };
+
+    match find_provider_variant(provider_name, vname) {
+        Some(v) => match &v.effect {
+            VariantEffect::ModelAlias(alias) => Ok((alias.to_string(), HashMap::new())),
+            VariantEffect::ExtraBody(key, json) => {
+                let val: serde_json::Value = serde_json::from_str(json).map_err(|e| {
+                    RsGuardError::Config(format!(
+                        "Invalid hardcoded variant JSON for key '{}': {}",
+                        key, e
+                    ))
+                })?;
+                let mut map = HashMap::new();
+                map.insert((*key).to_string(), val);
+                Ok((configured_model.to_string(), map))
+            }
+        },
+        None => {
+            let declared = provider_variant_names(provider_name);
+            if declared.is_empty() {
+                // No variants registered → "has no effect" per CLI help and PROVIDERS.md
+                Ok((configured_model.to_string(), HashMap::new()))
+            } else {
+                Err(RsGuardError::Config(format!(
+                    "Unknown variant '{}' for provider '{}'. Supported variants: {}",
+                    vname,
+                    provider_name,
+                    declared.join(", ")
+                )))
+            }
+        }
+    }
 }
 
 /// Returns a formatted string of all known provider names.
@@ -255,5 +348,82 @@ mod tests {
                 allowed
             );
         }
+    }
+
+    // --- apply_variant tests (core of model-variant-feature) ---
+
+    #[test]
+    fn test_apply_variant_none_returns_configured() {
+        let (m, extra) = apply_variant("deepseek", "deepseek-v4-flash", None).unwrap();
+        assert_eq!(m, "deepseek-v4-flash");
+        assert!(extra.is_empty());
+    }
+
+    #[test]
+    fn test_apply_variant_model_alias_deepseek_flash() {
+        let (m, extra) = apply_variant("deepseek", "ignored-base", Some("flash")).unwrap();
+        assert_eq!(m, "deepseek-v4-flash");
+        assert!(extra.is_empty());
+    }
+
+    #[test]
+    fn test_apply_variant_model_alias_deepseek_pro() {
+        let (m, extra) = apply_variant("deepseek", "ignored-base", Some("pro")).unwrap();
+        assert_eq!(m, "deepseek-v4-pro");
+        assert!(extra.is_empty());
+    }
+
+    #[test]
+    fn test_apply_variant_case_insensitive() {
+        let (m, _) = apply_variant("deepseek", "base", Some("FLASH")).unwrap();
+        assert_eq!(m, "deepseek-v4-flash");
+    }
+
+    #[test]
+    fn test_apply_variant_unknown_for_provider_with_variants_errors() {
+        let err = apply_variant("deepseek", "base", Some("nope")).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("Unknown variant 'nope'"));
+        assert!(msg.contains("deepseek"));
+        assert!(msg.contains("flash, pro"));
+    }
+
+    #[test]
+    fn test_apply_variant_unknown_for_provider_without_variants_is_ignored() {
+        // Uses a dedicated dummy provider name that is never expected to declare
+        // any variants. This avoids fragility if a real provider (e.g. "openai")
+        // later gains variants in all_providers().
+        let (m, extra) = apply_variant("test-no-variants", "some-model", Some("anything")).unwrap();
+        assert_eq!(m, "some-model");
+        assert!(extra.is_empty());
+    }
+
+    #[test]
+    fn test_apply_variant_unknown_kimi_reports_supported_variants() {
+        // Provider that does declare variants: unknown name produces a clear error listing them.
+        let err = apply_variant("kimi", "kimi-k2.5", Some("nonexistent-variant")).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("Unknown variant 'nonexistent-variant'"));
+        assert!(msg.contains("kimi"));
+        assert!(msg.contains("thinking-on, thinking-off"));
+    }
+
+    #[test]
+    fn test_apply_variant_extra_body_populates_map() {
+        // Now that Kimi registers real ExtraBody variants, exercise the arm
+        // directly via apply_variant.
+        let (m, extra) = apply_variant("kimi", "kimi-k2.5", Some("thinking-on")).unwrap();
+        assert_eq!(m, "kimi-k2.5");
+        assert_eq!(
+            extra.get("thinking"),
+            Some(&serde_json::json!({"type": "enabled"}))
+        );
+
+        let (m2, extra2) = apply_variant("kimi", "kimi-k2.5", Some("thinking-off")).unwrap();
+        assert_eq!(m2, "kimi-k2.5");
+        assert_eq!(
+            extra2.get("thinking"),
+            Some(&serde_json::json!({"type": "disabled"}))
+        );
     }
 }

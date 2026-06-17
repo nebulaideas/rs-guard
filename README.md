@@ -21,6 +21,7 @@
 - ⚙️ **CI + local mode** — GitHub Actions submits reviews; git pre-commit hook blocks bad commits
 - 📄 **Configurable prompts** — Per-repository `.github/review-prompt.md` or `.reviewer.toml`
 - 🔒 **SSRF protection** — URL allowlist per provider; `Authorization` headers never sent to unknown hosts
+- 🧩 **Model variants** — `ModelAlias` (e.g. DeepSeek flash/pro) and `ExtraBody` injection (e.g. Kimi thinking mode) via `--variant`, config, or `ProviderConfig`
 - 📦 **Single binary** — No runtime dependencies; ~3s typical execution
 
 ---
@@ -96,6 +97,8 @@ Auto-detected when `GITHUB_ACTIONS=true`. Fetches the PR diff from the GitHub AP
 ```bash
 rs-guard --provider deepseek --model deepseek-v4-flash
 ```
+
+Model variants are supported for providers that declare them (e.g. `--variant pro` for DeepSeek or `--variant thinking-on` for Kimi). See [docs/PROVIDERS.md](docs/PROVIDERS.md) for the full list and configuration.
 
 ### Local Mode (Pre-commit)
 

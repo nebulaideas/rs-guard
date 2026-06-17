@@ -6,7 +6,6 @@
 use crate::error::RsGuardError;
 use crate::llm::{
     build_llm_client, chat_messages, providers, send_chat_request, ChatRequest, LlmProvider,
-    VariantEffect,
 };
 use async_trait::async_trait;
 
@@ -56,7 +55,11 @@ impl DeepSeekClient {
         self
     }
 
-    /// Sets a provider-specific model variant.
+    /// Sets a provider-specific model variant (e.g. `"flash"` or `"pro"`).
+    ///
+    /// Only has an effect for providers that declare variants in
+    /// [`crate::llm::providers`]. See [`crate::llm::VariantEffect`] and the provider
+    /// metadata tables in `docs/PROVIDERS.md`.
     pub fn with_variant(mut self, variant: Option<String>) -> Self {
         self.variant = variant;
         self
@@ -81,29 +84,15 @@ impl LlmProvider for DeepSeekClient {
         user_message: &str,
         temperature: f32,
     ) -> Result<String, RsGuardError> {
-        let effective_model = if let Some(ref variant) = self.variant {
-            match providers::find_provider_variant("deepseek", variant) {
-                Some(v) => match &v.effect {
-                    VariantEffect::ModelAlias(model) => model.to_string(),
-                    VariantEffect::ExtraBody(_, _) => self.model.clone(),
-                },
-                None => {
-                    let known = providers::provider_variant_names("deepseek").join(", ");
-                    return Err(RsGuardError::Config(format!(
-                        "Unknown variant '{}' for provider 'deepseek'. Supported variants: {}",
-                        variant, known
-                    )));
-                }
-            }
-        } else {
-            self.model.clone()
-        };
+        let (effective_model, extra_body) =
+            providers::apply_variant("deepseek", &self.model, self.variant.as_deref())?;
 
         let request = ChatRequest {
             model: effective_model,
             messages: chat_messages(system_prompt, user_message),
             temperature,
             max_tokens: self.max_tokens,
+            extra_body,
         };
 
         let url = format!("{}/chat/completions", self.base_url);
