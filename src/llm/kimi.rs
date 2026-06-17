@@ -4,7 +4,9 @@
 //! OpenAI-compatible request format with `reasoning_content` support.
 
 use crate::error::RsGuardError;
-use crate::llm::{build_llm_client, chat_messages, send_chat_request, ChatRequest, LlmProvider};
+use crate::llm::{
+    build_llm_client, chat_messages, providers, send_chat_request, ChatRequest, LlmProvider,
+};
 use async_trait::async_trait;
 
 /// Default Kimi API base URL.
@@ -78,11 +80,20 @@ impl LlmProvider for KimiClient {
         user_message: &str,
         temperature: f32,
     ) -> Result<String, RsGuardError> {
+        // Variant support (thinking-on / thinking-off) is provided entirely by the
+        // shared `apply_variant` + `ExtraBody` infrastructure (see providers.rs).
+        // The resulting `thinking` object is placed into the request via the
+        // flattened `extra_body` field. Existing reasoning_content handling in
+        // responses is unaffected (see `test_reasoning_content_parsed`).
+        let (effective_model, extra_body) =
+            providers::apply_variant("kimi", &self.model, self.variant.as_deref())?;
+
         let request = ChatRequest {
-            model: self.model.clone(),
+            model: effective_model,
             messages: chat_messages(system_prompt, user_message),
             temperature,
             max_tokens: self.max_tokens,
+            extra_body,
         };
 
         let url = format!("{}/chat/completions", self.base_url);

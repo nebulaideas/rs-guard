@@ -410,3 +410,140 @@ async fn test_deepseek_unknown_variant_returns_error() {
     assert!(err.contains("Unknown variant"));
     assert!(err.contains("unknown"));
 }
+
+#[tokio::test]
+async fn test_openai_variant_ignored_sends_configured_model() {
+    let mock_server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/chat/completions"))
+        .and(body_partial_json(serde_json::json!({
+            "model": "gpt-4o-mini"
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "choices": [{
+                "message": { "content": "OpenAI ignore variant OK" }
+            }]
+        })))
+        .mount(&mock_server)
+        .await;
+
+    let config = ProviderConfig {
+        base_url: Some(mock_server.uri()),
+        http_referer: None,
+        max_tokens: None,
+        model: "gpt-4o-mini".to_string(),
+        variant: Some("some-future-variant".to_string()),
+    };
+
+    let provider = create_provider("openai", "test-key", &config).unwrap();
+    let result = provider
+        .chat_completion("You are a reviewer.", "diff content", 0.1)
+        .await;
+
+    assert!(result.is_ok());
+    assert!(result.unwrap().contains("ignore variant OK"));
+}
+
+#[tokio::test]
+async fn test_kimi_unknown_variant_returns_error() {
+    let mock_server = MockServer::start().await;
+
+    // The mock should never be hit because apply_variant fails before the HTTP call.
+    Mock::given(method("POST"))
+        .and(path("/chat/completions"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "choices": [{
+                "message": { "content": "Should not reach" }
+            }]
+        })))
+        .mount(&mock_server)
+        .await;
+
+    let config = ProviderConfig {
+        base_url: Some(mock_server.uri()),
+        http_referer: None,
+        max_tokens: None,
+        model: "kimi-k2.5".to_string(),
+        variant: Some("nonexistent".to_string()),
+    };
+
+    let provider = create_provider("kimi", "test-key", &config).unwrap();
+    let result = provider
+        .chat_completion("You are a reviewer.", "diff content", 0.1)
+        .await;
+
+    assert!(result.is_err());
+    let err = result.unwrap_err().to_string();
+    assert!(err.contains("Unknown variant"));
+    assert!(err.contains("nonexistent"));
+    assert!(err.contains("thinking-on, thinking-off"));
+}
+
+#[tokio::test]
+async fn test_kimi_variant_thinking_on_sends_thinking_enabled() {
+    let mock_server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/chat/completions"))
+        .and(body_partial_json(serde_json::json!({
+            "thinking": { "type": "enabled" }
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "choices": [{
+                "message": { "content": "Kimi thinking-on OK" }
+            }]
+        })))
+        .mount(&mock_server)
+        .await;
+
+    let config = ProviderConfig {
+        base_url: Some(mock_server.uri()),
+        http_referer: None,
+        max_tokens: None,
+        model: "kimi-k2.5".to_string(),
+        variant: Some("thinking-on".to_string()),
+    };
+
+    let provider = create_provider("kimi", "test-key", &config).unwrap();
+    let result = provider
+        .chat_completion("You are a reviewer.", "diff content", 0.1)
+        .await;
+
+    assert!(result.is_ok());
+    assert!(result.unwrap().contains("thinking-on OK"));
+}
+
+#[tokio::test]
+async fn test_kimi_variant_thinking_off_sends_thinking_disabled() {
+    let mock_server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/chat/completions"))
+        .and(body_partial_json(serde_json::json!({
+            "thinking": { "type": "disabled" }
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "choices": [{
+                "message": { "content": "Kimi thinking-off OK" }
+            }]
+        })))
+        .mount(&mock_server)
+        .await;
+
+    let config = ProviderConfig {
+        base_url: Some(mock_server.uri()),
+        http_referer: None,
+        max_tokens: None,
+        model: "kimi-k2.5".to_string(),
+        variant: Some("thinking-off".to_string()),
+    };
+
+    let provider = create_provider("kimi", "test-key", &config).unwrap();
+    let result = provider
+        .chat_completion("You are a reviewer.", "diff content", 0.1)
+        .await;
+
+    assert!(result.is_ok());
+    assert!(result.unwrap().contains("thinking-off OK"));
+}
