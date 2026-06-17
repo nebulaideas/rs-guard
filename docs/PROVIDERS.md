@@ -14,6 +14,10 @@ This document covers how to configure each supported LLM provider for rs-guard.
 
 ---
 
+**Model Variants (generic mechanism):** Several providers support provider-specific "variants" (e.g. DeepSeek `flash`/`pro`). Set via `--variant`, `RS_GUARD_VARIANT`, or `variant` in `.reviewer.toml` (top-level or per-provider). See the per-provider sections below and `docs/CONFIGURATION.md`. Unknown variants for a provider that declares them produce a clear error listing the supported ones. Providers without registered variants silently ignore the setting for now.
+
+---
+
 ## DeepSeek
 
 
@@ -33,10 +37,35 @@ export DEEPSEEK_API_KEY="your-api-key"
 | Context Window | 64,000 tokens               |
 | Auth Header    | `Bearer {DEEPSEEK_API_KEY}` |
 
+### Variants
+
+DeepSeek V4 exposes multiple models. Use the generic `variant` mechanism (CLI `--variant`, `RS_GUARD_VARIANT` env, or `variant` / `[providers.deepseek].variant` in `.reviewer.toml`) instead of hard-coding raw model IDs.
+
+| Variant | Description                          | Effective Model      |
+| ------- | ------------------------------------ | -------------------- |
+| `flash` | Fast, cost-effective (default)       | `deepseek-v4-flash`  |
+| `pro`   | Most capable for complex reasoning   | `deepseek-v4-pro`    |
+
+Example:
+```bash
+rs-guard --provider deepseek --variant pro
+# or
+export RS_GUARD_VARIANT=flash
+```
+In TOML:
+```toml
+provider = "deepseek"
+# variant = "pro"                # top-level
+[providers.deepseek]
+variant = "pro"
+```
+
 ### CLI Usage
 
 ```bash
 rs-guard --provider deepseek --model deepseek-v4-flash
+# or use the higher-level variant (recommended when available):
+rs-guard --provider deepseek --variant flash
 ```
 
 ### TOML Configuration
@@ -44,10 +73,12 @@ rs-guard --provider deepseek --model deepseek-v4-flash
 ```toml
 provider = "deepseek"
 model = "deepseek-v4-flash"
+# variant = "pro"                # top level (applies to selected provider)
 
 [providers.deepseek]
 api_key_env = "DEEPSEEK_API_KEY"
 base_url = "https://api.deepseek.com"
+# variant = "pro"                # per-provider override (highest TOML precedence)
 ```
 
 ### API Key Acquisition
@@ -76,7 +107,7 @@ export KIMI_API_KEY="your-api-key"
 | Default Model   | `kimi-k2.5`                       |
 | Context Window  | 128,000 tokens                    |
 | Auth Header     | `Bearer {KIMI_API_KEY}`           |
-| Special Feature | `reasoning_content` field support |
+| Special Feature | `reasoning_content` field support (response); thinking mode via `variant` (request, planned) |
 
 ### CLI Usage
 

@@ -403,6 +403,9 @@ pub async fn run_pipeline(
         println!("============================");
         println!("Provider:    {}", config.provider);
         println!("Model:       {}", config.model);
+        if let Some(ref v) = config.variant {
+            println!("Variant:       {}", v);
+        }
         println!("Est. Tokens In:  {}", estimated_tokens_in);
         println!("Est. Tokens Out: {}", estimated_tokens_out);
         println!("Latency:     {:.1}s", latency.as_secs_f64());

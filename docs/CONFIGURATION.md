@@ -33,6 +33,7 @@ Place `.reviewer.toml` in your repository root (or pass `--config /path/to/confi
 # Top-level settings
 provider = "deepseek"           # LLM provider: deepseek | kimi | qwen | openrouter | openai
 model = "deepseek-v4-flash"     # Model identifier (provider-specific)
+variant = "flash"               # Provider-specific model variant (e.g. "flash", "pro" for deepseek). Optional.
 temperature = 0.1               # Sampling temperature (0.0 to 2.0)
 max_tokens = 8192               # Maximum tokens for LLM completion
 
@@ -67,6 +68,7 @@ base_url = "https://api.openai.com/v1"
 | ------------------- | ------- | ----------------- | --------------------------------------------------------------------------------------------------------------------------------- |
 | `provider`          | string  | `"deepseek"`      | LLM provider to use.                                                                                                              |
 | `model`             | string  | provider-specific | Model identifier. See [PROVIDERS.md](PROVIDERS.md) for defaults.                                                                  |
+| `variant`           | string  | (none)            | Provider-specific model variant (e.g. "flash" / "pro" for deepseek). See [PROVIDERS.md](PROVIDERS.md). CLI/env/TOML precedence applies. |
 | `temperature`       | float   | `0.1`             | Sampling temperature (0.0 = deterministic, 2.0 = very random).                                                                    |
 | `max_tokens`        | integer | `4096`            | Maximum tokens in the LLM response. Defaults to 4096 to prevent the verdict block from being truncated by the provider.           |
 | `chunk_head_lines`  | integer | `400`             | Lines preserved from the **start** of the diff when chunking. Increase for providers with large context windows (e.g. 128K).      |
@@ -81,6 +83,7 @@ base_url = "https://api.openai.com/v1"
 | `api_key_env`  | string | no       | Environment variable name for the API key. Defaults to provider-standard names. |
 | `base_url`     | string | no       | Custom API base URL. Defaults to provider's official endpoint.                  |
 | `http_referer` | string | no       | Attribution referer (OpenRouter only).                                          |
+| `variant`      | string | no       | Provider-specific model variant override for this provider.                     |
 
 #### Circuit Breaker Section (`[circuit_breaker]`)
 
@@ -188,6 +191,7 @@ recompile from source.
 | `--model`       | `-m`  | provider-specific          | LLM model identifier.                |
 | `--temperature` | `-t`  | `0.1`                      | Sampling temperature (0.0 - 2.0).    |
 | `--provider`    |       | `deepseek`                 | LLM provider to use.                 |
+| `--variant`     |       | (none)                     | Provider-specific model variant (e.g. flash/pro). Has no effect if provider does not support it. |
 | `--config`      | `-c`  | `.reviewer.toml`           | Path to configuration TOML file.     |
 | `--max-tokens`  |       | `4096`                     | Maximum tokens for LLM completions.  |
 | `--no-cache`    |       | Off                        | Bypass response cache.               |
@@ -212,6 +216,7 @@ recompile from source.
 | `GITHUB_ACTIONS`        | Auto-detected       | Presence indicates CI mode.              |
 | `RS_GUARD_PROVIDER`     | Optional            | Override TOML/default provider.          |
 | `RS_GUARD_MODEL`        | Optional            | Override TOML/default model.             |
+| `RS_GUARD_VARIANT`      | Optional            | Provider-specific model variant (CLI --variant equivalent). |
 | `RS_GUARD_TEMPERATURE`  | Optional            | Override TOML/default temperature.       |
 | `RS_GUARD_MAX_TOKENS`   | Optional            | Override TOML/default max tokens.        |
 | `GITHUB_API_URL`        | Optional            | Custom GitHub API base URL (Enterprise). |
