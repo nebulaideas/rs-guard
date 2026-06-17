@@ -188,13 +188,12 @@ pub(crate) fn apply_variant(
         Some(v) => match &v.effect {
             VariantEffect::ModelAlias(alias) => Ok((alias.to_string(), HashMap::new())),
             VariantEffect::ExtraBody(key, json) => {
-                let val: serde_json::Value = serde_json::from_str(json)
-                    .map_err(|e| {
-                        RsGuardError::Config(format!(
-                            "Invalid hardcoded variant JSON for key '{}': {}",
-                            key, e
-                        ))
-                    })?;
+                let val: serde_json::Value = serde_json::from_str(json).map_err(|e| {
+                    RsGuardError::Config(format!(
+                        "Invalid hardcoded variant JSON for key '{}': {}",
+                        key, e
+                    ))
+                })?;
                 let mut map = HashMap::new();
                 map.insert((*key).to_string(), val);
                 Ok((configured_model.to_string(), map))
@@ -368,9 +367,11 @@ mod tests {
 
     #[test]
     fn test_apply_variant_unknown_for_provider_without_variants_is_ignored() {
-        // Provider with no variants declared: unknown name is silently ignored.
-        let (m, extra) = apply_variant("openai", "gpt-4o-mini", Some("anything")).unwrap();
-        assert_eq!(m, "gpt-4o-mini");
+        // Uses a dedicated dummy provider name that is never expected to declare
+        // any variants. This avoids fragility if a real provider (e.g. "openai")
+        // later gains variants in all_providers().
+        let (m, extra) = apply_variant("test-no-variants", "some-model", Some("anything")).unwrap();
+        assert_eq!(m, "some-model");
         assert!(extra.is_empty());
     }
 

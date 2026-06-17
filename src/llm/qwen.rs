@@ -27,7 +27,7 @@ struct QwenChatRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     max_tokens: Option<u32>,
     /// Extra fields for VariantEffect::ExtraBody (flattened into body).
-    #[serde(flatten, skip_serializing_if = "HashMap::is_empty")]
+    #[serde(flatten, default, skip_serializing_if = "HashMap::is_empty")]
     extra_body: HashMap<String, serde_json::Value>,
 }
 
