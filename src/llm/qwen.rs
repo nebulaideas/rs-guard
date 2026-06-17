@@ -4,9 +4,12 @@
 //! Sends `result_format: "message"` as required by the DashScope API.
 
 use crate::error::RsGuardError;
-use crate::llm::{build_llm_client, chat_messages, send_chat_request, ChatMessage, LlmProvider};
+use crate::llm::{
+    build_llm_client, chat_messages, providers, send_chat_request, ChatMessage, LlmProvider,
+};
 use async_trait::async_trait;
 use serde::Serialize;
+use std::collections::HashMap;
 
 /// Default Qwen API base URL.
 const DEFAULT_BASE_URL: &str = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1";
@@ -23,6 +26,9 @@ struct QwenChatRequest {
     result_format: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
     max_tokens: Option<u32>,
+    /// Extra fields for VariantEffect::ExtraBody (flattened into body).
+    #[serde(flatten, skip_serializing_if = "HashMap::is_empty")]
+    extra_body: HashMap<String, serde_json::Value>,
 }
 
 /// Client for the Qwen chat completions API.
@@ -90,12 +96,16 @@ impl LlmProvider for QwenClient {
         user_message: &str,
         temperature: f32,
     ) -> Result<String, RsGuardError> {
+        let (effective_model, extra_body) =
+            providers::apply_variant("qwen", &self.model, self.variant.as_deref())?;
+
         let request = QwenChatRequest {
-            model: self.model.clone(),
+            model: effective_model,
             messages: chat_messages(system_prompt, user_message),
             temperature,
             result_format: "message",
             max_tokens: self.max_tokens,
+            extra_body,
         };
 
         let url = format!("{}/chat/completions", self.base_url);

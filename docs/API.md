@@ -256,7 +256,7 @@ pub struct ProviderConfig {
 | `Provider`                          | Type alias: `Box<dyn LlmProvider>`                                 |
 | `ProviderConfig`                    | Per-provider config overrides                                      |
 | `ChatMessage`                       | Single message with `role` and `content`                           |
-| `ChatRequest`                       | Request body with `model`, `messages`, `temperature`, `max_tokens` |
+| `ChatRequest`                       | Request body with `model`, `messages`, `temperature`, `max_tokens`, `extra_body` (for VariantEffect) |
 | `ChatResponse`                      | Parsed response with `choices` vector                              |
 | `factory::create_provider()`        | Factory: `provider_name + api_key -> Provider`                     |
 | `providers::all_providers()`        | Metadata for all known providers                                   |

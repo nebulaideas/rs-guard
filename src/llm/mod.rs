@@ -8,6 +8,7 @@ use crate::error::RsGuardError;
 use async_trait::async_trait;
 use reqwest::header::{self, HeaderMap, HeaderValue};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 /// HTTP request timeout for LLM API calls.
 const LLM_REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
@@ -43,6 +44,11 @@ pub struct ChatRequest {
     /// Maximum tokens in the response (provider-agnostic).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_tokens: Option<u32>,
+    /// Extra top-level fields contributed by VariantEffect::ExtraBody
+    /// (e.g. "reasoning_effort" or provider-specific thinking toggles).
+    /// Serialized via flatten so they appear at the same level as model/messages.
+    #[serde(flatten, skip_serializing_if = "HashMap::is_empty")]
+    pub extra_body: HashMap<String, serde_json::Value>,
 }
 
 /// A single choice in a chat completion response.
@@ -407,6 +413,7 @@ mod tests {
             messages: chat_messages("system", "user"),
             temperature: 0.1,
             max_tokens: None,
+            extra_body: HashMap::new(),
         };
         let result = send_chat_request(
             &client,
@@ -442,6 +449,7 @@ mod tests {
             messages: chat_messages("system", "user"),
             temperature: 0.1,
             max_tokens: None,
+            extra_body: HashMap::new(),
         };
         let result = send_chat_request(
             &client,
@@ -477,6 +485,7 @@ mod tests {
             messages: chat_messages("system", "user"),
             temperature: 0.1,
             max_tokens: None,
+            extra_body: HashMap::new(),
         };
         let result = send_chat_request(
             &client,
@@ -515,6 +524,7 @@ mod tests {
             messages: chat_messages("system", "user"),
             temperature: 0.1,
             max_tokens: None,
+            extra_body: HashMap::new(),
         };
         let result = send_chat_request(
             &client,

@@ -267,6 +267,7 @@ impl LlmProvider for GroqClient {
             messages: chat_messages(system_prompt, user_message),
             temperature,
             max_tokens: self.max_tokens,
+            extra_body: std::collections::HashMap::new(),
         };
 
         let url = format!("{}/chat/completions", self.base_url);
