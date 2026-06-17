@@ -47,7 +47,9 @@ pub struct ChatRequest {
     /// Extra top-level fields contributed by VariantEffect::ExtraBody
     /// (e.g. "reasoning_effort" or provider-specific thinking toggles).
     /// Serialized via flatten so they appear at the same level as model/messages.
-    #[serde(flatten, skip_serializing_if = "HashMap::is_empty")]
+    /// Uses `default` so that deserialization (or custom provider code following
+    /// older examples) does not require the field when it is empty.
+    #[serde(flatten, default, skip_serializing_if = "HashMap::is_empty")]
     pub extra_body: HashMap<String, serde_json::Value>,
 }
 

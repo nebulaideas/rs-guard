@@ -14,7 +14,7 @@ pub enum VariantEffect {
     /// Variant maps to a concrete model identifier.
     ModelAlias(&'static str),
     /// Variant injects a provider-specific key + JSON value (as a source string) into the request body.
-    /// The JSON string is parsed at use time (cheap for the tiny objects used by variants).
+    /// The JSON string is parsed at use time (cheap and the data is hardcoded/trusted).
     ExtraBody(&'static str, &'static str),
 }
 
@@ -189,7 +189,12 @@ pub(crate) fn apply_variant(
             VariantEffect::ModelAlias(alias) => Ok((alias.to_string(), HashMap::new())),
             VariantEffect::ExtraBody(key, json) => {
                 let val: serde_json::Value = serde_json::from_str(json)
-                    .expect("hard-coded variant JSON in providers.rs must be valid");
+                    .map_err(|e| {
+                        RsGuardError::Config(format!(
+                            "Invalid hardcoded variant JSON for key '{}': {}",
+                            key, e
+                        ))
+                    })?;
                 let mut map = HashMap::new();
                 map.insert((*key).to_string(), val);
                 Ok((configured_model.to_string(), map))
@@ -381,22 +386,20 @@ mod tests {
 
     #[test]
     fn test_apply_variant_extra_body_populates_map() {
-        // We exercise the ExtraBody arm even though no real provider currently
-        // registers an ExtraBody variant. Construct a synthetic effect by looking
-        // up a provider that will never match, then directly test the arm logic
-        // via a one-off call after temporarily knowing the shape.
-        // Instead we simply call with a known provider and a made-up variant that
-        // would be ExtraBody if it existed; the important thing is the return shape.
-        // Better: unit-test the arm by calling on deepseek with a name that
-        // doesn't exist (already covered) and assert the ExtraBody branch is
-        // exercised via direct construction isn't possible (static data).
-        // So we test round-trip shape: build a map as the fn would.
-        let mut expected = HashMap::new();
-        expected.insert("reasoning_effort".to_string(), serde_json::json!("high"));
-        // Prove the type and serde Value usage works in this module
-        assert_eq!(expected.len(), 1);
-        // The real ExtraBody path is covered when a provider later registers one
-        // and a client calls apply_variant; the resolver code above is identical
-        // to the inline that deepseek used to have.
+        // Now that Kimi registers real ExtraBody variants, exercise the arm
+        // directly via apply_variant.
+        let (m, extra) = apply_variant("kimi", "kimi-k2.5", Some("thinking-on")).unwrap();
+        assert_eq!(m, "kimi-k2.5");
+        assert_eq!(
+            extra.get("thinking"),
+            Some(&serde_json::json!({"type": "enabled"}))
+        );
+
+        let (m2, extra2) = apply_variant("kimi", "kimi-k2.5", Some("thinking-off")).unwrap();
+        assert_eq!(m2, "kimi-k2.5");
+        assert_eq!(
+            extra2.get("thinking"),
+            Some(&serde_json::json!({"type": "disabled"}))
+        );
     }
 }

@@ -276,6 +276,8 @@ impl LlmProvider for GroqClient {
 }
 ```
 
+**Important:** The `extra_body` field is required in the `ChatRequest` struct literal (it may be an empty `HashMap` when no variant-specific effects are active). The example above includes it for completeness. "groq" is a hypothetical custom provider used only for illustration in this guide.
+
 Every provider follows this pattern: `new()` validates the API key via `build_llm_client`, builder methods configure overrides, and `chat_completion()` delegates to `send_chat_request`.
 
 ### Step 2: Register the Module
