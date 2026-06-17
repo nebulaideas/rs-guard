@@ -7,7 +7,7 @@
 use rs_guard::config::Config;
 use rs_guard::pipeline::{run_pipeline, PipelineResult};
 use serde_json::json;
-use wiremock::matchers::{method, path_regex};
+use wiremock::matchers::{body_partial_json, method, path_regex};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 /// Builds a minimal Config for CI-mode integration tests.
@@ -208,6 +208,44 @@ async fn test_full_pipeline_empty_diff() {
 
     let mut config = ci_config(42, "deepseek", "test-token");
     config.github_base_url = github.uri();
+    config.no_cache = true; // Disable cache to avoid conflicts
+
+    let result = run_pipeline(config, None).await;
+    assert!(matches!(result, Ok(PipelineResult::Success)));
+}
+
+#[tokio::test]
+async fn test_full_pipeline_with_variant_deepseek_pro() {
+    let github = MockServer::start().await;
+    let llm = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path_regex(r"/repos/test-owner/test-repo/pulls/\d+"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(VALID_DIFF))
+        .mount(&github)
+        .await;
+
+    // Exercise the variant: "pro" should resolve to deepseek-v4-pro via apply_variant + ModelAlias
+    Mock::given(method("POST"))
+        .and(path_regex(r"/chat/completions"))
+        .and(body_partial_json(json!({"model": "deepseek-v4-pro"})))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "choices": [{"message": {"content": POSITIVE_RESPONSE}}]
+        })))
+        .mount(&llm)
+        .await;
+
+    Mock::given(method("POST"))
+        .and(path_regex(r"/repos/test-owner/test-repo/pulls/\d+/reviews"))
+        .respond_with(ResponseTemplate::new(200))
+        .mount(&github)
+        .await;
+
+    let mut config = ci_config(42, "deepseek", "test-token");
+    config.github_base_url = github.uri();
+    config.provider_config.base_url = Some(llm.uri());
+    config.variant = Some("pro".to_string());
+    config.provider_config.variant = Some("pro".to_string());
     config.no_cache = true; // Disable cache to avoid conflicts
 
     let result = run_pipeline(config, None).await;

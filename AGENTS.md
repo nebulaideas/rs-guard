@@ -10,6 +10,8 @@
 
 **Current Status:** Phases 1–6 are complete. The crate is published on crates.io and registered on crates.ai.
 
+**Variant Feature Track (issues #65–#68, PR #70, merged 2026-06-17):** Generic `VariantEffect` (ModelAlias + ExtraBody) support added, with DeepSeek flash/pro and first ExtraBody use for Kimi thinking-on/off. Full CLI/config/env support, integration test coverage, and docs. Released as v1.1.0. See `docs/PROVIDERS.md` and the feature branch history.
+
 - **Repository:** `git@github.com:nebulaideas/rs-guard.git`
 - **Current Branch:** `main`
 - **License:** MIT License (Copyright 2026 Nebula Ideas)
