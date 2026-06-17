@@ -55,7 +55,7 @@ impl OpenAiClient {
         self
     }
 
-    /// Sets a provider-specific model variant (e.g. "gpt-4o" family options).
+    /// Sets a provider-specific model variant.
     ///
     /// Only has an effect for providers that declare variants in
     /// [`crate::llm::providers`]. See [`crate::llm::VariantEffect`] and the provider

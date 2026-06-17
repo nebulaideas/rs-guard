@@ -8,11 +8,15 @@
 use crate::error::RsGuardError;
 use std::collections::HashMap;
 
+/// Convenient alias for `&'static str` (used in `VariantEffect` arms for
+/// consistency and to avoid repeating the verbose type in multiple places).
+type StaticStr = &'static str;
+
 /// Effect that a model variant has on an LLM request.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum VariantEffect {
     /// Variant maps to a concrete model identifier.
-    ModelAlias(&'static str),
+    ModelAlias(StaticStr),
     /// Variant injects a provider-specific key + JSON value (as a source string) into the request body.
     ///
     /// The key/value is placed at the top level of the serialized request via
@@ -23,7 +27,10 @@ pub enum VariantEffect {
     /// on [`super::ChatRequest`] for details.
     ///
     /// The JSON string is parsed at use time (cheap and the data is hardcoded/trusted).
-    ExtraBody(&'static str, &'static str),
+    /// We keep the source as `&'static str` (instead of a direct `serde_json::Value`)
+    /// to satisfy the `'static` lifetime requirements when storing the effects inside
+    /// the static table returned by `all_providers()`.
+    ExtraBody(StaticStr, StaticStr),
 }
 
 /// Metadata for a single supported model variant.
@@ -92,6 +99,11 @@ pub fn all_providers() -> &'static [ProviderMeta] {
                 ProviderVariant {
                     name: "thinking-on",
                     description: "Enable Kimi thinking / chain-of-thought mode (response may include reasoning_content)",
+                    // We use a raw string literal + runtime parse here (instead of
+                    // `serde_json::json!(...)`) purely for 'static lifetime reasons inside
+                    // the static provider metadata table. The json! form would be nicer
+                    // (compile-time validation) but leads to borrow-checker errors when
+                    // storing the resulting `&'static Value` in the array.
                     effect: VariantEffect::ExtraBody("thinking", r#"{"type":"enabled"}"#),
                 },
                 ProviderVariant {
@@ -177,21 +189,20 @@ pub fn provider_variant_names(provider_name: &str) -> Vec<&'static str> {
 /// extra top-level body fields contributed by the variant.
 ///
 /// This is the single shared implementation used by all LLM provider clients
-/// so that ModelAlias (e.g. deepseek flash/pro) and ExtraBody (e.g. kimi-style
-/// operation toggles such as thinking on/off, or reasoning flags) work uniformly
-/// and future providers get the behaviour for free.
+/// so that `ModelAlias` and `ExtraBody` effects work uniformly.
 ///
-/// Resolution rules (preserve documented "no effect" / silent-ignore behaviour):
-/// * No variant supplied → (configured_model, empty map)
-/// * Variant matches a ModelAlias → (aliased model id, empty map)
-/// * Variant matches an ExtraBody(k, v) → (configured_model, {k: v})
-/// * Variant unknown **and** provider declares ≥1 variants → RsGuardError::Config listing supported names
-/// * Variant unknown **and** provider declares 0 variants → (configured_model, empty map)  // silently ignored
+/// See the detailed resolution rules in the implementation below.
 pub(crate) fn apply_variant(
     provider_name: &str,
     configured_model: &str,
     variant: Option<&str>,
 ) -> Result<(String, HashMap<String, serde_json::Value>), RsGuardError> {
+    // Resolution rules (preserve documented "no effect" / silent-ignore behaviour):
+    // * No variant supplied → (configured_model, empty map)
+    // * Variant matches a ModelAlias → (aliased model id, empty map)
+    // * Variant matches an ExtraBody(k, v) → (configured_model, {k: v})
+    // * Variant unknown **and** provider declares ≥1 variants → RsGuardError::Config listing supported names
+    // * Variant unknown **and** provider declares 0 variants → (configured_model, empty map)  // silently ignored
     let Some(vname) = variant else {
         return Ok((configured_model.to_string(), HashMap::new()));
     };
