@@ -5,6 +5,69 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Grok (xAI) provider** — first-class support via the generic client.
+  Selectable with `--provider grok`, default model `grok-3`, env var
+  `XAI_API_KEY`, base URL `https://api.x.ai/v1`. Approximate pricing arm in
+  `default_pricing()`. Closes #74.
+- **GLM (Zhipu AI) provider** — first-class support via the generic client.
+  Selectable with `--provider glm`, default model `glm-4`, env var
+  `ZHIPUAI_API_KEY`, base URL `https://open.bigmodel.cn/api/paas/v4`.
+  Approximate pricing arm in `default_pricing()`. Closes #73.
+- **`GenericOpenAiCompatibleClient`** (pub(crate)) — single data-driven
+  implementation of the OpenAI `/chat/completions` flow shared by all
+  providers, parameterized by `ProviderMeta`.
+- **Provider metadata hooks** — `result_format` and `default_extra_headers`
+  fields on `ProviderMeta` model the remaining per-provider differences
+  (Qwen `result_format: "message"`, OpenRouter attribution headers) as data.
+- **docs/GITHUB_BOT_SETUP.md** — dedicated machine-user / GitHub App identity
+  guide for automated reviews (recommended over personal PATs), with
+  fine-grained token scopes and storage guidance.
+- **docs/PERFORMANCE.md** — binary-size baselines, runtime benchmarks,
+  GitHub Actions cold-start tuning, and the caching lever.
+- **Grok + GLM sections in docs/PROVIDERS.md** — full setup guides matching
+  the style of the other providers, plus env var reference rows.
+
+### Changed
+
+- **Provider docs made provider-agnostic** — README, USAGE, CONFIGURATION,
+  INSTALLATION, API, ARCHITECTURE, and local-review hook examples now show
+  provider variety symmetrically instead of DeepSeek-only examples. DeepSeek
+  remains the legitimate programmatic default.
+- **docs/ARCHITECTURE.md** module graph updated to reflect the single
+  `GenericOpenAiCompatibleClient` (no 5-client fan-out from the factory).
+- **docs/API.md** custom-provider guide rewritten — adding a provider is now
+  a `ProviderMeta` entry in `src/llm/providers.rs`, not a new client module.
+- **`create_provider` factory** simplified from a ~80-line per-provider match
+  to a single metadata-driven path (~20 lines).
+
+### Removed
+
+- **Per-provider client modules** — `src/llm/{deepseek,kimi,qwen,openrouter,openai}.rs`
+  and their `*Client` structs (`DeepSeekClient`, `KimiClient`, `QwenClient`,
+  `OpenRouterClient`, `OpenAiClient`) are deleted with no shims or re-exports.
+  Use `llm::factory::create_provider` for all providers. This is a breaking
+  change for library consumers who constructed clients directly.
+- **`with_http_referer` builder method** — OpenRouter referer override is now
+  handled at factory construction time via `ProviderConfig.http_referer`
+  (merged into the client's default headers). Same effective HTTP behavior.
+- **Hardcoded `"openai"` provider name** — `name()` now returns
+  `ProviderMeta::name` dynamically.
+- **Tech-debt comment** in `factory.rs` calling for this consolidation.
+
+### Deprecated
+
+- n/a
+
+### Fixed
+
+- n/a
+
+---
+
 ## [1.1.0] - 2026-06-17
 
 ### Added

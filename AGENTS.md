@@ -8,9 +8,11 @@
 
 **rs-guard** is a Rust-based AI code review CLI tool. It fetches Pull Request diffs from GitHub, sends them to an LLM provider for review, parses a structured verdict from the response, and submits the review state (`APPROVE`, `REQUEST_CHANGES`, or `COMMENT`) back to GitHub — all in a single execution.
 
-**Current Status:** Phases 1–6 are complete. The crate is published on crates.io and registered on crates.ai.
+**Current Status:** Phases 1–7 are complete. The crate is published on crates.io and registered on crates.ai.
 
 **Variant Feature Track (issues #65–#68, PR #70, merged 2026-06-17):** Generic `VariantEffect` (ModelAlias + ExtraBody) support added, with DeepSeek flash/pro and first ExtraBody use for Kimi thinking-on/off. Full CLI/config/env support, integration test coverage, and docs. Released as v1.1.0. See `docs/PROVIDERS.md` and the feature branch history.
+
+**Client Extraction (v1.2, issue #72):** The 5 duplicated per-provider clients (deepseek/kimi/qwen/openrouter/openai) were replaced by a single data-driven `GenericOpenAiCompatibleClient` (pub(crate)) parameterized by `ProviderMeta`. Grok (xAI) and GLM (Zhipu AI) became first-class. Provider-agnostic documentation pass + new bot-setup and performance guides. Released as v1.2.0.
 
 - **Repository:** `git@github.com:nebulaideas/rs-guard.git`
 - **Current Branch:** `main`
@@ -39,13 +41,17 @@
 
 ### Implemented LLM Providers
 
-| Provider             | Status     | Default Model        |
-| -------------------- | ---------- | -------------------- |
-| DeepSeek             | ✅ Phase 1 | `deepseek-v4-flash`  |
-| Kimi (Moonshot AI)   | ✅ Phase 2 | `kimi-k2.5`          |
-| Qwen (Alibaba Cloud) | ✅ Phase 2 | `qwen-plus`          |
-| OpenRouter           | ✅ Phase 2 | `openai/gpt-4o-mini` |
-| OpenAI               | ✅ Phase 2 | `gpt-4o-mini`        |
+| Provider             | Status     | Default Model        | API Key Env          |
+| -------------------- | ---------- | -------------------- | -------------------- |
+| DeepSeek             | ✅ Phase 1 | `deepseek-v4-flash`  | `DEEPSEEK_API_KEY`   |
+| Kimi (Moonshot AI)   | ✅ Phase 2 | `kimi-k2.5`          | `KIMI_API_KEY`       |
+| Qwen (Alibaba Cloud) | ✅ Phase 2 | `qwen-plus`          | `DASHSCOPE_API_KEY`  |
+| OpenRouter           | ✅ Phase 2 | `openai/gpt-4o-mini` | `OPENROUTER_API_KEY` |
+| OpenAI               | ✅ Phase 2 | `gpt-4o-mini`        | `OPENAI_API_KEY`     |
+| Grok (xAI)           | ✅ Phase 7 | `grok-3`             | `XAI_API_KEY`        |
+| GLM (Zhipu AI)       | ✅ Phase 7 | `glm-4`              | `ZHIPUAI_API_KEY`    |
+
+All 7 providers are served by a single `GenericOpenAiCompatibleClient` (pub(crate)) parameterized by `ProviderMeta`. Per-provider differences (Qwen `result_format`, OpenRouter attribution headers) are expressed as metadata fields, not per-client code.
 
 ---
 
@@ -65,14 +71,10 @@ rs-guard/
 │   ├── github.rs                  # GitHub API review submission
 │   ├── http.rs                    # HTTP utilities + URL validation
 │   ├── llm/                       # LLM provider modules
-│   │   ├── mod.rs                 # LlmProvider trait + types
-│   │   ├── deepseek.rs            # DeepSeek provider
-│   │   ├── kimi.rs                # Kimi provider
-│   │   ├── qwen.rs                # Qwen provider
-│   │   ├── openrouter.rs          # OpenRouter provider
-│   │   ├── openai.rs              # OpenAI provider
-│   │   ├── factory.rs             # Provider factory
-│   │   └── providers.rs           # Centralized provider metadata
+│   │   ├── mod.rs                 # LlmProvider trait + shared types
+│   │   ├── generic_client.rs      # GenericOpenAiCompatibleClient (all providers)
+│   │   ├── factory.rs             # Provider factory (metadata-driven)
+│   │   └── providers.rs           # Centralized provider metadata + variants
 │   ├── output.rs                  # Terminal output + artifact + metrics writing
 │   ├── redact.rs                  # Secret redaction
 │   ├── retry.rs                   # Retry logic + circuit breaker
@@ -85,7 +87,7 @@ rs-guard/
 │   ├── diff_tests.rs              # 12 diff tests (wiremock + inline)
 │   ├── github_tests.rs            # 13 github tests (wiremock)
 │   ├── integration_tests.rs       # 5 full pipeline tests (wiremock)
-│   ├── provider_tests.rs          # 14 provider tests (wiremock)
+│   ├── provider_tests.rs          # 22 provider tests (wiremock)
 │   └── verdict_tests.rs           # 15 verdict tests
 ├── examples/
 │   ├── github-actions-workflow/   # Sample CI workflows
@@ -97,7 +99,9 @@ rs-guard/
 │   ├── API.md                     # Module API docs + custom provider guide
 │   ├── PROVIDERS.md               # Per-provider setup guide
 │   ├── CONFIGURATION.md           # .reviewer.toml reference
-│   └── LOCAL_MODE.md              # Pre-commit hook setup
+│   ├── LOCAL_MODE.md              # Pre-commit hook setup
+│   ├── GITHUB_BOT_SETUP.md        # Dedicated GitHub bot/machine-user setup
+│   └── PERFORMANCE.md             # Binary size + runtime perf baselines
 ├── .github/workflows/
 │   ├── ci.yml                     # CI pipeline (format, lint, test, deny, audit, bench)
 │   ├── docs-deploy.yml            # GitHub Pages docs deployment
@@ -120,6 +124,7 @@ rs-guard/
 | ------------------------ | ------------------------------------------------------------------------------------------ |
 | Crate structure          | Single crate (workspace deferred until library demand emerges)                             |
 | Provider dispatch        | `Box<dyn LlmProvider>` trait objects (refactored from enum dispatch in Phase 1)            |
+| Provider client        | Single `GenericOpenAiCompatibleClient` (pub(crate)) parameterized by `ProviderMeta`; per-provider differences are metadata (v1.2) |
 | Exit signal              | `PipelineResult` enum (Success / ReviewBlocked) — not `process::exit()` in library code    |
 | SSRF protection          | URL allowlist per provider in CI mode; loopback allowed in local mode                      |
 | Print functions          | Accept `impl Write` for testability                                                        |
@@ -140,7 +145,7 @@ rs-guard/
 # Build
 cargo build
 
-# Full test suite (~252 tests)
+# Full test suite (~267 tests)
 cargo test
 
 # Lint (zero warnings required)
@@ -173,13 +178,13 @@ cargo audit
 | `output.rs`   | 6                                 | Inline             |
 | `cache.rs`    | 19                                | Inline             |
 | `retry.rs`    | 17 (6 retry + 11 circuit breaker) | Inline             |
-| `provider*`   | 19 (5 inline + 14 integration)    | Unit + Integration |
+| `provider*`   | 34 (12 inline + 22 integration)   | Unit + Integration |
 | `diff.rs`     | 26 (21 inline + 5 integration)    | Unit + Integration |
 | `redact.rs`   | 8                                 | Inline             |
 | `pipeline.rs` | 5                                 | Integration        |
 | `http.rs`     | 16                                | Inline             |
 | `cli.rs`      | 3                                 | Inline             |
-| **Total**     | **~252**                          |                    |
+| **Total**     | **~267**                          |                    |
 
 ---
 
@@ -256,16 +261,38 @@ cargo audit
 
 ---
 
+## Phase 7 Status — ✅ Complete
+
+### v1.2 Client Extraction (issue #72)
+
+| Task | Status |
+| 7.1 — `GenericOpenAiCompatibleClient` (pub(crate)) + hooks | ✅ Done — data-driven; `result_format` + `default_extra_headers` on `ProviderMeta` |
+| 7.2 — Delete 5 duplicated clients (deepseek/kimi/qwen/openrouter/openai) | ✅ Done — no shims or re-exports |
+| 7.3 — Factory simplified to metadata-driven path | ✅ Done — ~80-line match → ~20 lines |
+| 7.4 — Grok (xAI) first-class (`XAI_API_KEY`, `grok-3`) | ✅ Done — closes #74 |
+| 7.5 — GLM (Zhipu AI) first-class (`ZHIPUAI_API_KEY`, `glm-4`) | ✅ Done — closes #73 |
+| 7.6 — `known_provider_names().len() == 7` | ✅ Done |
+| 7.7 — Grok/GLM default pricing | ✅ Done — `default_pricing()` arms |
+| 7.8 — Provider-agnostic documentation pass | ✅ Done — README/USAGE/CONFIG/INSTALL/API/ARCHITECTURE/hooks de-biased |
+| 7.9 — docs/PROVIDERS.md Grok + GLM sections | ✅ Done |
+| 7.10 — docs/GITHUB_BOT_SETUP.md (bot/machine-user guide) | ✅ Done |
+| 7.11 — docs/PERFORMANCE.md (binary size + perf baselines) | ✅ Done |
+| 7.12 — Hardcoded "openai" provider name removed | ✅ Done — `name()` returns `meta.name` |
+| 7.13 — Full linter gates (fmt, clippy -D warnings, test, deny, audit) | ✅ Done |
+
+---
+
 ## Notes for Agents
 
-- **Source code exists** — all ~4,200 lines across 16 modules.
-- **~252 tests** pass with `wiremock`, `serial_test`, and `tempfile` infrastructure.
+- **Source code exists** — all ~3,800 lines across 13 modules.
+- **~267 tests** pass with `wiremock`, `serial_test`, and `tempfile` infrastructure.
 - **The implementation plan** (`docs/MVP_IMPLEMENTATION_PLAN.md`) is authoritative but section "Phase 0: Pre-requisite Cleanup" was added during Phase 3 implementation.
 - **`Config::empty()`** is a `#[doc(hidden)]` constructor for tests — not for production use.
-- **New modules** added since the original plan: `pipeline.rs`, `http.rs`, `redact.rs`, `cache.rs`, `llm/providers.rs`.
+- **New modules** added since the original plan: `pipeline.rs`, `http.rs`, `redact.rs`, `cache.rs`, `llm/providers.rs`, `llm/generic_client.rs` (v1.2).
 - **Decision Log** in Appendix F of the plan tracks all architectural decisions.
 - **Cache directory** (`.rs-guard/cache/`) is auto-gitignored on first use — do not commit it.
 - **`--no-cache` flag** bypasses the LLM response cache for a fresh API call.
+- **v1.2 client extraction** — the 5 per-provider clients were removed; all providers now use `GenericOpenAiCompatibleClient`. Adding a provider = a `ProviderMeta` entry in `llm/providers.rs` + docs + tests.
 
 ---
 
