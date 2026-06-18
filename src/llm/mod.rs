@@ -13,13 +13,9 @@ use std::collections::HashMap;
 /// HTTP request timeout for LLM API calls.
 const LLM_REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 
-pub mod deepseek;
 pub mod factory;
-pub mod kimi;
-pub mod openai;
-pub mod openrouter;
+mod generic_client;
 pub mod providers;
-pub mod qwen;
 
 pub use providers::VariantEffect;
 

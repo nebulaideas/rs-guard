@@ -524,6 +524,8 @@ fn default_pricing(provider: &str) -> (f64, f64) {
         "qwen" => (8.0, 20.0),        // Qwen-Plus: approximate
         "openrouter" => (15.0, 60.0), // OpenRouter avg: approximate
         "openai" => (15.0, 60.0),     // GPT-4o-mini: $0.15/M in, $0.60/M out
+        "grok" => (15.0, 75.0),       // Grok-3: approximate ($0.15/M in, $0.75/M out)
+        "glm" => (7.0, 21.0),         // GLM-4: approximate ($0.07/M in, $0.21/M out)
         _ => (10.0, 30.0),            // Default fallback
     }
 }
@@ -544,6 +546,20 @@ mod tests {
         // 1M tokens in, 1M tokens out should cost 15 + 60 = 75 cents
         let cost = estimate_cost_cents("openai", 1_000_000, 1_000_000, None);
         assert!((cost - 75.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_estimate_cost_cents_grok() {
+        // Grok-3: 15 + 75 = 90 cents per 1M in / 1M out
+        let cost = estimate_cost_cents("grok", 1_000_000, 1_000_000, None);
+        assert!((cost - 90.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_estimate_cost_cents_glm() {
+        // GLM-4: 7 + 21 = 28 cents per 1M in / 1M out
+        let cost = estimate_cost_cents("glm", 1_000_000, 1_000_000, None);
+        assert!((cost - 28.0).abs() < 0.001);
     }
 
     #[test]
