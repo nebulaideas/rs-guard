@@ -194,6 +194,22 @@ pub fn all_providers() -> &'static [ProviderMeta] {
             result_format: None,
             default_extra_headers: &[],
         },
+        #[cfg(test)]
+        ProviderMeta {
+            name: "test-collision",
+            default_base_url: "https://test.example.com",
+            default_model: "test-model",
+            api_key_env: "TEST_API_KEY",
+            ci_allowed_hosts: &[("https", "test.example.com")],
+            context_window: 128_000,
+            variants: &[ProviderVariant {
+                name: "bad-variant",
+                description: "Variant with reserved key (for testing collision guard)",
+                effect: VariantEffect::ExtraBody("model", r#""bad-model""#),
+            }],
+            result_format: None,
+            default_extra_headers: &[],
+        },
     ]
 }
 
@@ -278,6 +294,12 @@ pub(crate) fn apply_variant(
                     )));
                 }
 
+                // TODO (R6, 1.3.0): Optimize by parsing JSON once at startup and caching
+                // the serde_json::Value in ProviderVariant. Currently parses on every
+                // variant use, but the strings are small and hardcoded, so the overhead
+                // is minimal (microseconds). Would require changing ProviderVariant to
+                // use serde_json::Value instead of &'static str, which has lifetime
+                // implications for the static all_providers() table.
                 let val: serde_json::Value = serde_json::from_str(json).map_err(|e| {
                     RsGuardError::Config(format!(
                         "Invalid hardcoded variant JSON for key '{}': {}",
@@ -369,8 +391,8 @@ mod tests {
 
     #[test]
     fn test_known_provider_names_count() {
-        // 5 original OpenAI-compatible providers + grok (xAI) + glm (Zhipu).
-        assert_eq!(known_provider_names().len(), 7);
+        // 5 original OpenAI-compatible providers + grok (xAI) + glm (Zhipu) + test-collision (test-only).
+        assert_eq!(known_provider_names().len(), 8);
     }
 
     #[test]
@@ -547,6 +569,27 @@ mod tests {
         assert_eq!(
             extra2.get("thinking"),
             Some(&serde_json::json!({"type": "disabled"}))
+        );
+    }
+
+    #[test]
+    fn test_apply_variant_rejects_reserved_extra_body_keys() {
+        // F7: ExtraBody keys that collide with standard ChatRequest fields must be rejected.
+        // The test-collision provider has a variant with key "model", which is reserved.
+        let err = apply_variant("test-collision", "test-model", Some("bad-variant")).unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("collides with a standard ChatRequest field"),
+            "expected collision error, got: {}",
+            msg
+        );
+        assert!(
+            msg.contains("model"),
+            "error should mention the reserved key"
+        );
+        assert!(
+            msg.contains("bad-variant"),
+            "error should mention the variant name"
         );
     }
 }

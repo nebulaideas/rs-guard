@@ -51,6 +51,8 @@ ls -lh target/release/rs-guard
 
 ### Baseline (v1.2, macOS arm64, Rust 1.82, measured)
 
+**Machine:** Apple M1 Max, 32GB RAM, macOS 26.5.1
+
 | Build | Size | Notes |
 | Default `cargo build --release` | **3.9 MB** | profile.release applied (measured 2026-06-18) |
 | `strip` (already on via `strip = true`) | included above | symbols removed |
@@ -149,6 +151,28 @@ rs-guard caches LLM responses keyed on `(diff, prompt, provider, model,
 temperature)` in `.rs-guard/cache/` (SHA-256). Re-running on an unchanged diff
 with `--no-cache` unset is a cache hit and skips the LLM call entirely — the
 single biggest performance lever for repeated runs.
+
+### Cache key components
+
+The cache key includes **all parameters that affect the outgoing request**:
+- `diff_content` (SHA-256 hash)
+- `prompt` (SHA-256 hash)
+- `provider` name
+- `model` identifier
+- `variant` (if set)
+- `temperature`
+- `base_url` (effective, including overrides)
+- `max_tokens` (if set)
+
+**Important:** Changing any of these parameters will cause a cache miss. For
+example:
+- Overriding `base_url` to point at a local mock will create a separate cache
+  entry from the real provider endpoint (prevents cache poisoning)
+- Changing `max_tokens` will create a separate cache entry (prevents serving
+  truncated responses to full-length requests)
+
+This ensures cache correctness but means that configuration changes will
+invalidate cached responses.
 
 - Bypass with `--no-cache` for fresh reviews.
 - The cache is size-bounded (100 MB default, LRU-evicted) and auto-gitignored.

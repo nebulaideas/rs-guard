@@ -300,6 +300,65 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_openrouter_new_header_appended_to_defaults() {
+        // R2: Verify that new override headers are appended to defaults, not just replacing.
+        let mock_server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/chat/completions"))
+            .and(header(
+                "HTTP-Referer",
+                "https://github.com/nebulaideas/rs-guard",
+            ))
+            .and(header("X-Title", "rs-guard"))
+            .and(header("X-Custom-Header", "custom-value"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "choices": [{ "message": { "content": "appended ok" } }]
+            })))
+            .mount(&mock_server)
+            .await;
+
+        let meta = find_provider("openrouter").unwrap();
+        let client = GenericOpenAiCompatibleClient::new(
+            meta,
+            "test-key",
+            &[("X-Custom-Header", "custom-value")],
+        )
+        .unwrap()
+        .with_base_url(mock_server.uri());
+        let result = client.chat_completion("system", "user", 0.1).await.unwrap();
+        assert_eq!(result, "appended ok");
+    }
+
+    #[tokio::test]
+    async fn test_openrouter_both_headers_overridden() {
+        // R2: Verify that both default headers can be overridden simultaneously.
+        let mock_server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/chat/completions"))
+            .and(header("HTTP-Referer", "https://custom.example.com"))
+            .and(header("X-Title", "custom-title"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "choices": [{ "message": { "content": "both overridden" } }]
+            })))
+            .mount(&mock_server)
+            .await;
+
+        let meta = find_provider("openrouter").unwrap();
+        let client = GenericOpenAiCompatibleClient::new(
+            meta,
+            "test-key",
+            &[
+                ("HTTP-Referer", "https://custom.example.com"),
+                ("X-Title", "custom-title"),
+            ],
+        )
+        .unwrap()
+        .with_base_url(mock_server.uri());
+        let result = client.chat_completion("system", "user", 0.1).await.unwrap();
+        assert_eq!(result, "both overridden");
+    }
+
+    #[tokio::test]
     async fn test_kimi_thinking_on_extra_body_flows_through() {
         let mock_server = MockServer::start().await;
         Mock::given(method("POST"))

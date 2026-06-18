@@ -30,6 +30,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   GitHub Actions cold-start tuning, and the caching lever.
 - **Grok + GLM sections in docs/PROVIDERS.md** — full setup guides matching
   the style of the other providers, plus env var reference rows.
+- **ExtraBody collision guard** — `apply_variant` now rejects ExtraBody keys
+  that collide with standard `ChatRequest` fields (model, messages,
+  temperature, max_tokens, result_format), preventing silent overwrites.
+- **Cache key documentation** — `docs/PERFORMANCE.md` now documents all cache
+  key components and explains how configuration changes affect cache behavior.
+- **Machine specification in PERFORMANCE.md** — binary size baseline now
+  includes machine details (Apple M1 Max, 32GB RAM, macOS 26.5.1).
+- **Header override tests** — comprehensive tests for OpenRouter header
+  override logic (replace defaults, append new headers, override both).
 
 ### Changed
 
@@ -43,6 +52,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a `ProviderMeta` entry in `src/llm/providers.rs`, not a new client module.
 - **`create_provider` factory** simplified from a ~80-line per-provider match
   to a single metadata-driven path (~20 lines).
+- **http_referer warning** — changed from `log::warn!` to `eprintln!` to
+  ensure users always see the warning when `http_referer` is set for a
+  non-OpenRouter provider.
 
 ### Removed
 
