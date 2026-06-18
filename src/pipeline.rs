@@ -214,7 +214,10 @@ pub async fn run_pipeline(
         check_token_warning(estimated_tokens_in, context_window, &config.provider);
     }
 
-    // Check cache before calling the LLM (keyed on actual content sent to LLM)
+    // Check cache before calling the LLM (keyed on actual content sent to LLM).
+    // base_url + max_tokens are part of the key to prevent cross-endpoint
+    // poisoning and truncation staleness.
+    let effective_base_url = config.provider_config.base_url.as_deref().unwrap_or("");
     let llm_response = if let Some(cached) = cache.get(
         &diff_content,
         &config.prompt,
@@ -222,6 +225,8 @@ pub async fn run_pipeline(
         &config.model,
         config.variant.as_deref(),
         config.temperature,
+        effective_base_url,
+        config.provider_config.max_tokens,
     ) {
         log::info!("Cache hit — using cached LLM response");
         cached
@@ -255,6 +260,8 @@ pub async fn run_pipeline(
             &config.model,
             config.variant.as_deref(),
             config.temperature,
+            effective_base_url,
+            config.provider_config.max_tokens,
             &response,
         ) {
             log::warn!("Failed to cache LLM response: {}", e);
@@ -409,7 +416,13 @@ pub async fn run_pipeline(
         println!("Est. Tokens In:  {}", estimated_tokens_in);
         println!("Est. Tokens Out: {}", estimated_tokens_out);
         println!("Latency:     {:.1}s", latency.as_secs_f64());
-        println!("Est. Cost:   ${:.4}", estimated_cost_cents / 100.0);
+        println!(
+            "Est. Cost:   {}",
+            match estimated_cost_cents {
+                Some(c) => format!("${:.4}", c / 100.0),
+                None => "unknown".to_string(),
+            }
+        );
         println!("Diff Lines:  {}", diff_result.line_count);
         println!("Verdict:     {}", verdict.verdict);
         println!("State:       {}", state);
@@ -493,17 +506,18 @@ fn check_token_warning(estimated_tokens: usize, context_window: usize, provider:
 /// Returns estimated cost in **cents** (USD) as `f64` to avoid integer
 /// truncation for small diffs. For display, divide by 100.0.
 ///
+/// Returns `None` when pricing is unknown for the provider (F9: don't lie).
 /// Pricing can be overridden via `.reviewer.toml` [pricing] sections.
 fn estimate_cost_cents(
     provider: &str,
     tokens_in: u64,
     tokens_out: u64,
     pricing_overrides: Option<&std::collections::HashMap<String, crate::config::PricingTomlConfig>>,
-) -> f64 {
+) -> Option<f64> {
     // Prices in cents per million tokens
-    let (price_in_cents, price_out_cents) = if let Some(pricing) = pricing_overrides {
+    let pricing = if let Some(pricing) = pricing_overrides {
         if let Some(p) = pricing.get(provider) {
-            (p.input_per_million as f64, p.output_per_million as f64)
+            Some((p.input_per_million as f64, p.output_per_million as f64))
         } else {
             default_pricing(provider)
         }
@@ -511,20 +525,41 @@ fn estimate_cost_cents(
         default_pricing(provider)
     };
 
-    let cost_in = (tokens_in as f64 * price_in_cents) / 1_000_000.0;
-    let cost_out = (tokens_out as f64 * price_out_cents) / 1_000_000.0;
-    cost_in + cost_out
+    match pricing {
+        Some((price_in_cents, price_out_cents)) => {
+            let cost_in = (tokens_in as f64 * price_in_cents) / 1_000_000.0;
+            let cost_out = (tokens_out as f64 * price_out_cents) / 1_000_000.0;
+            Some(cost_in + cost_out)
+        }
+        None => {
+            log::warn!(
+                "Pricing unknown for provider '{}'; cost estimate will be omitted from metrics",
+                provider
+            );
+            None
+        }
+    }
 }
 
 /// Returns hardcoded default pricing for known providers.
-fn default_pricing(provider: &str) -> (f64, f64) {
+///
+/// Returns `None` for providers whose pricing cannot be verified. This is
+/// intentional (F9: "don't lie") — an unknown price is reported as unknown,
+/// never fabricated. Pricing is in cents per million tokens.
+fn default_pricing(provider: &str) -> Option<(f64, f64)> {
     match provider {
-        "deepseek" => (7.0, 27.0),    // DeepSeek-V4: $0.07/M in, $0.27/M out
-        "kimi" => (12.0, 70.0),       // Kimi K2.5: approximate
-        "qwen" => (8.0, 20.0),        // Qwen-Plus: approximate
-        "openrouter" => (15.0, 60.0), // OpenRouter avg: approximate
-        "openai" => (15.0, 60.0),     // GPT-4o-mini: $0.15/M in, $0.60/M out
-        _ => (10.0, 30.0),            // Default fallback
+        "deepseek" => Some((7.0, 27.0)), // DeepSeek-V4: $0.07/M in, $0.27/M out
+        "kimi" => Some((12.0, 70.0)),    // Kimi K2.5: approximate
+        "qwen" => Some((8.0, 20.0)),     // Qwen-Plus: approximate
+        "openrouter" => Some((15.0, 60.0)), // OpenRouter avg: approximate
+        "openai" => Some((15.0, 60.0)),  // GPT-4o-mini: $0.15/M in, $0.60/M out
+        // Verified from https://docs.x.ai/docs/models (grok-4.3: $1.25/M in, $2.50/M out).
+        // Our default is grok-3 which may differ; this is the closest verified rate.
+        "grok" => Some((125.0, 250.0)),
+        // GLM-4 pricing could not be verified (Zhipu pricing page requires JavaScript).
+        // Do not fabricate — report "unknown" instead (F9).
+        "glm" => None,
+        _ => None, // Unknown/custom provider — pricing unknown
     }
 }
 
@@ -535,27 +570,44 @@ mod tests {
     #[test]
     fn test_estimate_cost_cents_deepseek() {
         // 1M tokens in, 1M tokens out should cost 7 + 27 = 34 cents
-        let cost = estimate_cost_cents("deepseek", 1_000_000, 1_000_000, None);
+        let cost = estimate_cost_cents("deepseek", 1_000_000, 1_000_000, None).unwrap();
         assert!((cost - 34.0).abs() < 0.001);
     }
 
     #[test]
     fn test_estimate_cost_cents_openai() {
         // 1M tokens in, 1M tokens out should cost 15 + 60 = 75 cents
-        let cost = estimate_cost_cents("openai", 1_000_000, 1_000_000, None);
+        let cost = estimate_cost_cents("openai", 1_000_000, 1_000_000, None).unwrap();
         assert!((cost - 75.0).abs() < 0.001);
     }
 
     #[test]
+    fn test_estimate_cost_cents_grok() {
+        // Grok (verified from docs.x.ai): 125 + 250 = 375 cents per 1M in / 1M out
+        let cost = estimate_cost_cents("grok", 1_000_000, 1_000_000, None).unwrap();
+        assert!((cost - 375.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_estimate_cost_cents_glm_unknown() {
+        // GLM pricing unverifiable — must return None (F9: don't lie)
+        let cost = estimate_cost_cents("glm", 1_000_000, 1_000_000, None);
+        assert_eq!(cost, None, "GLM pricing must be unknown, not fabricated");
+    }
+
+    #[test]
     fn test_estimate_cost_cents_unknown_provider() {
-        // Unknown provider should use default pricing: 10 + 30 = 40 cents
+        // Unknown provider must return None (F9: don't fabricate a fallback)
         let cost = estimate_cost_cents("unknown", 1_000_000, 1_000_000, None);
-        assert!((cost - 40.0).abs() < 0.001);
+        assert_eq!(
+            cost, None,
+            "unknown provider pricing must be None, not fabricated"
+        );
     }
 
     #[test]
     fn test_estimate_cost_cents_zero_tokens() {
-        let cost = estimate_cost_cents("deepseek", 0, 0, None);
+        let cost = estimate_cost_cents("deepseek", 0, 0, None).unwrap();
         assert_eq!(cost, 0.0);
     }
 
@@ -563,7 +615,7 @@ mod tests {
     fn test_estimate_cost_cents_small_tokens_no_truncation() {
         // 1000 tokens in, 500 tokens out
         // DeepSeek: (1000 * 7.0) / 1_000_000 + (500 * 27.0) / 1_000_000 = 0.007 + 0.0135 = 0.0205 cents
-        let cost = estimate_cost_cents("deepseek", 1000, 500, None);
+        let cost = estimate_cost_cents("deepseek", 1000, 500, None).unwrap();
         assert!((cost - 0.0205).abs() < 0.0001);
     }
 
@@ -571,7 +623,7 @@ mod tests {
     fn test_estimate_cost_cents_large_tokens() {
         // 10M tokens in, 5M tokens out
         // DeepSeek: (10_000_000 * 7.0) / 1_000_000 + (5_000_000 * 27.0) / 1_000_000 = 70 + 135 = 205 cents
-        let cost = estimate_cost_cents("deepseek", 10_000_000, 5_000_000, None);
+        let cost = estimate_cost_cents("deepseek", 10_000_000, 5_000_000, None).unwrap();
         assert!((cost - 205.0).abs() < 0.001);
     }
 
@@ -585,8 +637,23 @@ mod tests {
                 output_per_million: 50,
             },
         );
-        let cost = estimate_cost_cents("deepseek", 1_000_000, 1_000_000, Some(&pricing));
+        let cost = estimate_cost_cents("deepseek", 1_000_000, 1_000_000, Some(&pricing)).unwrap();
         assert!((cost - 60.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_estimate_cost_cents_pricing_override_for_glm() {
+        // Even if default pricing is None (GLM), a TOML override must work.
+        let mut pricing = std::collections::HashMap::new();
+        pricing.insert(
+            "glm".to_string(),
+            crate::config::PricingTomlConfig {
+                input_per_million: 10,
+                output_per_million: 30,
+            },
+        );
+        let cost = estimate_cost_cents("glm", 1_000_000, 1_000_000, Some(&pricing)).unwrap();
+        assert!((cost - 40.0).abs() < 0.001);
     }
 
     #[test]
@@ -638,7 +705,7 @@ mod tests {
                 output_per_million: 200,
             },
         );
-        let cost = estimate_cost_cents("deepseek", 1_000_000, 1_000_000, Some(&pricing));
+        let cost = estimate_cost_cents("deepseek", 1_000_000, 1_000_000, Some(&pricing)).unwrap();
         assert!((cost - 34.0).abs() < 0.001);
     }
 
@@ -661,17 +728,21 @@ mod tests {
         // Test with very large token counts that could cause overflow
         // The function uses f64, so it should handle large values gracefully
         let cost = estimate_cost_cents("deepseek", u64::MAX, u64::MAX, None);
-        // Should return a finite value (not infinity or NaN)
-        assert!(cost.is_finite());
-        assert!(!cost.is_nan());
+        // Should return Some with a finite value (not infinity or NaN)
+        assert!(cost.is_some());
+        let cost_val = cost.unwrap();
+        assert!(cost_val.is_finite());
+        assert!(!cost_val.is_nan());
     }
 
     #[test]
     fn test_estimate_cost_cents_large_but_safe() {
         // Test with realistically large token counts (e.g., 1B tokens)
         let cost = estimate_cost_cents("deepseek", 1_000_000_000, 500_000_000, None);
-        // Should be finite and reasonable
-        assert!(cost.is_finite());
-        assert!(cost > 0.0);
+        // Should be Some with a finite and reasonable value
+        assert!(cost.is_some());
+        let cost_val = cost.unwrap();
+        assert!(cost_val.is_finite());
+        assert!(cost_val > 0.0);
     }
 }

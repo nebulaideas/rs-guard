@@ -13,13 +13,9 @@ use std::collections::HashMap;
 /// HTTP request timeout for LLM API calls.
 const LLM_REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 
-pub mod deepseek;
 pub mod factory;
-pub mod kimi;
-pub mod openai;
-pub mod openrouter;
+mod generic_client;
 pub mod providers;
-pub mod qwen;
 
 pub use providers::VariantEffect;
 
@@ -44,6 +40,12 @@ pub struct ChatRequest {
     /// Maximum tokens in the response (provider-agnostic).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_tokens: Option<u32>,
+    /// Optional result format hint (e.g. `"message"` for Qwen/DashScope).
+    ///
+    /// Some providers require an explicit result format field. When `None`,
+    /// the field is omitted from the serialized request.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub result_format: Option<&'static str>,
     /// Extra top-level fields contributed by `VariantEffect::ExtraBody`
     /// (e.g. "reasoning_effort" or provider-specific thinking toggles).
     ///
@@ -427,6 +429,7 @@ mod tests {
             messages: chat_messages("system", "user"),
             temperature: 0.1,
             max_tokens: None,
+            result_format: None,
             extra_body: HashMap::new(),
         };
         let result = send_chat_request(
@@ -463,6 +466,7 @@ mod tests {
             messages: chat_messages("system", "user"),
             temperature: 0.1,
             max_tokens: None,
+            result_format: None,
             extra_body: HashMap::new(),
         };
         let result = send_chat_request(
@@ -499,6 +503,7 @@ mod tests {
             messages: chat_messages("system", "user"),
             temperature: 0.1,
             max_tokens: None,
+            result_format: None,
             extra_body: HashMap::new(),
         };
         let result = send_chat_request(
@@ -538,6 +543,7 @@ mod tests {
             messages: chat_messages("system", "user"),
             temperature: 0.1,
             max_tokens: None,
+            result_format: None,
             extra_body: HashMap::new(),
         };
         let result = send_chat_request(

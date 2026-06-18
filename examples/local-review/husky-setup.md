@@ -41,7 +41,7 @@ if [ -f ~/.config/rs-guard/env ]; then
 fi
 
 # Verify API key is set
-if [ -z "$DEEPSEEK_API_KEY" ] && [ -z "$KIMI_API_KEY" ] && [ -z "$DASHSCOPE_API_KEY" ] && [ -z "$OPENROUTER_API_KEY" ] && [ -z "$OPENAI_API_KEY" ]; then
+if [ -z "$DEEPSEEK_API_KEY" ] && [ -z "$KIMI_API_KEY" ] && [ -z "$DASHSCOPE_API_KEY" ] && [ -z "$OPENROUTER_API_KEY" ] && [ -z "$OPENAI_API_KEY" ] && [ -z "$XAI_API_KEY" ] && [ -z "$ZHIPUAI_API_KEY" ]; then
     echo "rs-guard: No API key found. Skipping AI review."
     exit 0
 fi
@@ -112,7 +112,7 @@ pre-commit:
         fi
 
         # Verify API key is set
-        if [ -z "$DEEPSEEK_API_KEY" ] && [ -z "$KIMI_API_KEY" ] && [ -z "$DASHSCOPE_API_KEY" ] && [ -z "$OPENROUTER_API_KEY" ] && [ -z "$OPENAI_API_KEY" ]; then
+        if [ -z "$DEEPSEEK_API_KEY" ] && [ -z "$KIMI_API_KEY" ] && [ -z "$DASHSCOPE_API_KEY" ] && [ -z "$OPENROUTER_API_KEY" ] && [ -z "$OPENAI_API_KEY" ] && [ -z "$XAI_API_KEY" ] && [ -z "$ZHIPUAI_API_KEY" ]; then
           echo "rs-guard: No API key found. Skipping AI review."
           exit 0
         fi

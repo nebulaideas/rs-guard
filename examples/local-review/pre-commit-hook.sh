@@ -24,7 +24,7 @@ if [ -f ~/.config/rs-guard/env ]; then
 fi
 
 # Verify API key is set (check for common providers)
-if [ -z "$DEEPSEEK_API_KEY" ] && [ -z "$KIMI_API_KEY" ] && [ -z "$DASHSCOPE_API_KEY" ] && [ -z "$OPENROUTER_API_KEY" ] && [ -z "$OPENAI_API_KEY" ]; then
+if [ -z "$DEEPSEEK_API_KEY" ] && [ -z "$KIMI_API_KEY" ] && [ -z "$DASHSCOPE_API_KEY" ] && [ -z "$OPENROUTER_API_KEY" ] && [ -z "$OPENAI_API_KEY" ] && [ -z "$XAI_API_KEY" ] && [ -z "$ZHIPUAI_API_KEY" ]; then
     echo "rs-guard: No API key found in environment."
     echo "Set one of the following environment variables:"
     echo "  - DEEPSEEK_API_KEY (for DeepSeek)"
@@ -32,6 +32,8 @@ if [ -z "$DEEPSEEK_API_KEY" ] && [ -z "$KIMI_API_KEY" ] && [ -z "$DASHSCOPE_API_
     echo "  - DASHSCOPE_API_KEY (for Qwen/Alibaba Cloud)"
     echo "  - OPENROUTER_API_KEY (for OpenRouter)"
     echo "  - OPENAI_API_KEY (for OpenAI)"
+    echo "  - XAI_API_KEY (for Grok/xAI)"
+    echo "  - ZHIPUAI_API_KEY (for GLM/Zhipu AI)"
     echo ""
     echo "Or create ~/.config/rs-guard/env with your API key:"
     echo "  mkdir -p ~/.config/rs-guard"

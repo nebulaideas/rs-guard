@@ -34,6 +34,7 @@ pub enum VariantEffect {
 }
 
 /// Metadata for a single supported model variant.
+#[derive(Debug)]
 pub struct ProviderVariant {
     /// Canonical variant identifier (e.g. `"flash"`).
     pub name: &'static str,
@@ -44,6 +45,7 @@ pub struct ProviderVariant {
 }
 
 /// Metadata for a single LLM provider.
+#[derive(Debug)]
 pub struct ProviderMeta {
     /// Canonical provider identifier (e.g. `"deepseek"`).
     pub name: &'static str,
@@ -59,6 +61,19 @@ pub struct ProviderMeta {
     pub context_window: usize,
     /// Supported model variants for this provider.
     pub variants: &'static [ProviderVariant],
+    /// Optional `result_format` field injected into the chat request body.
+    ///
+    /// Set to `Some("message")` for providers whose OpenAI-compatible API
+    /// requires an explicit result format (currently Qwen/DashScope). `None`
+    /// for all other providers (standard OpenAI shape).
+    pub result_format: Option<&'static str>,
+    /// Default extra HTTP headers attached to every request for this provider
+    /// (e.g. OpenRouter attribution headers `HTTP-Referer` + `X-Title`).
+    ///
+    /// Empty for providers that need no extra headers. The factory merges any
+    /// config-supplied overrides (such as a custom OpenRouter referer) on top
+    /// of these defaults at client construction time.
+    pub default_extra_headers: &'static [(&'static str, &'static str)],
 }
 
 /// Returns the metadata for all known providers, in registration order.
@@ -87,6 +102,8 @@ pub fn all_providers() -> &'static [ProviderMeta] {
                     effect: VariantEffect::ModelAlias("deepseek-v4-pro"),
                 },
             ],
+            result_format: None,
+            default_extra_headers: &[],
         },
         ProviderMeta {
             name: "kimi",
@@ -112,6 +129,8 @@ pub fn all_providers() -> &'static [ProviderMeta] {
                     effect: VariantEffect::ExtraBody("thinking", r#"{"type":"disabled"}"#),
                 },
             ],
+            result_format: None,
+            default_extra_headers: &[],
         },
         ProviderMeta {
             name: "qwen",
@@ -124,6 +143,8 @@ pub fn all_providers() -> &'static [ProviderMeta] {
             ],
             context_window: 128_000,
             variants: &[],
+            result_format: Some("message"),
+            default_extra_headers: &[],
         },
         ProviderMeta {
             name: "openrouter",
@@ -133,6 +154,12 @@ pub fn all_providers() -> &'static [ProviderMeta] {
             ci_allowed_hosts: &[("https", "openrouter.ai")],
             context_window: 128_000,
             variants: &[],
+            result_format: None,
+            // OpenRouter requests attribution via HTTP-Referer + X-Title headers.
+            default_extra_headers: &[
+                ("HTTP-Referer", "https://github.com/nebulaideas/rs-guard"),
+                ("X-Title", "rs-guard"),
+            ],
         },
         ProviderMeta {
             name: "openai",
@@ -142,6 +169,46 @@ pub fn all_providers() -> &'static [ProviderMeta] {
             ci_allowed_hosts: &[("https", "api.openai.com")],
             context_window: 128_000,
             variants: &[],
+            result_format: None,
+            default_extra_headers: &[],
+        },
+        ProviderMeta {
+            name: "grok",
+            default_base_url: "https://api.x.ai/v1",
+            default_model: "grok-3",
+            api_key_env: "XAI_API_KEY",
+            ci_allowed_hosts: &[("https", "api.x.ai")],
+            context_window: 128_000,
+            variants: &[],
+            result_format: None,
+            default_extra_headers: &[],
+        },
+        ProviderMeta {
+            name: "glm",
+            default_base_url: "https://open.bigmodel.cn/api/paas/v4",
+            default_model: "glm-4",
+            api_key_env: "ZHIPUAI_API_KEY",
+            ci_allowed_hosts: &[("https", "open.bigmodel.cn")],
+            context_window: 128_000,
+            variants: &[],
+            result_format: None,
+            default_extra_headers: &[],
+        },
+        #[cfg(test)]
+        ProviderMeta {
+            name: "test-collision",
+            default_base_url: "https://test.example.com",
+            default_model: "test-model",
+            api_key_env: "TEST_API_KEY",
+            ci_allowed_hosts: &[("https", "test.example.com")],
+            context_window: 128_000,
+            variants: &[ProviderVariant {
+                name: "bad-variant",
+                description: "Variant with reserved key (for testing collision guard)",
+                effect: VariantEffect::ExtraBody("model", r#""bad-model""#),
+            }],
+            result_format: None,
+            default_extra_headers: &[],
         },
     ]
 }
@@ -211,6 +278,28 @@ pub(crate) fn apply_variant(
         Some(v) => match &v.effect {
             VariantEffect::ModelAlias(alias) => Ok((alias.to_string(), HashMap::new())),
             VariantEffect::ExtraBody(key, json) => {
+                // F7: Reject ExtraBody keys that collide with standard ChatRequest fields.
+                // These would silently overwrite the corresponding field during serialization.
+                const RESERVED_KEYS: &[&str] = &[
+                    "model",
+                    "messages",
+                    "temperature",
+                    "max_tokens",
+                    "result_format",
+                ];
+                if RESERVED_KEYS.contains(key) {
+                    return Err(RsGuardError::Config(format!(
+                        "Variant '{}' for provider '{}' attempts to set ExtraBody key '{}' which collides with a standard ChatRequest field. This would silently overwrite the field. Use a different key name.",
+                        vname, provider_name, key
+                    )));
+                }
+
+                // TODO (R6, 1.3.0): Optimize by parsing JSON once at startup and caching
+                // the serde_json::Value in ProviderVariant. Currently parses on every
+                // variant use, but the strings are small and hardcoded, so the overhead
+                // is minimal (microseconds). Would require changing ProviderVariant to
+                // use serde_json::Value instead of &'static str, which has lifetime
+                // implications for the static all_providers() table.
                 let val: serde_json::Value = serde_json::from_str(json).map_err(|e| {
                     RsGuardError::Config(format!(
                         "Invalid hardcoded variant JSON for key '{}': {}",
@@ -302,7 +391,63 @@ mod tests {
 
     #[test]
     fn test_known_provider_names_count() {
-        assert_eq!(known_provider_names().len(), 5);
+        // 5 original OpenAI-compatible providers + grok (xAI) + glm (Zhipu) + test-collision (test-only).
+        assert_eq!(known_provider_names().len(), 8);
+    }
+
+    #[test]
+    fn test_known_provider_names_includes_grok_and_glm() {
+        let names = known_provider_names();
+        assert!(names.contains(&"grok"), "grok must be a known provider");
+        assert!(names.contains(&"glm"), "glm must be a known provider");
+    }
+
+    #[test]
+    fn test_grok_metadata() {
+        let m = find_provider("grok").expect("grok provider must be registered");
+        assert_eq!(m.default_base_url, "https://api.x.ai/v1");
+        assert_eq!(m.default_model, "grok-3");
+        assert_eq!(m.api_key_env, "XAI_API_KEY");
+        assert!(m.ci_allowed_hosts.contains(&("https", "api.x.ai")));
+        assert!(m.result_format.is_none());
+        assert!(m.default_extra_headers.is_empty());
+    }
+
+    #[test]
+    fn test_glm_metadata() {
+        let m = find_provider("glm").expect("glm provider must be registered");
+        assert_eq!(m.default_base_url, "https://open.bigmodel.cn/api/paas/v4");
+        assert_eq!(m.default_model, "glm-4");
+        assert_eq!(m.api_key_env, "ZHIPUAI_API_KEY");
+        assert!(m.ci_allowed_hosts.contains(&("https", "open.bigmodel.cn")));
+        assert!(m.result_format.is_none());
+        assert!(m.default_extra_headers.is_empty());
+    }
+
+    #[test]
+    fn test_qwen_result_format_is_message() {
+        let m = find_provider("qwen").unwrap();
+        assert_eq!(m.result_format, Some("message"));
+    }
+
+    #[test]
+    fn test_openrouter_default_extra_headers_present() {
+        let m = find_provider("openrouter").unwrap();
+        let header_names: Vec<&str> = m.default_extra_headers.iter().map(|(n, _)| *n).collect();
+        assert!(header_names.contains(&"HTTP-Referer"));
+        assert!(header_names.contains(&"X-Title"));
+    }
+
+    #[test]
+    fn test_standard_providers_have_no_result_format() {
+        for name in ["deepseek", "kimi", "openrouter", "openai", "grok", "glm"] {
+            let m = find_provider(name).unwrap();
+            assert!(
+                m.result_format.is_none(),
+                "{} should not declare result_format",
+                name
+            );
+        }
     }
 
     #[test]
@@ -424,6 +569,27 @@ mod tests {
         assert_eq!(
             extra2.get("thinking"),
             Some(&serde_json::json!({"type": "disabled"}))
+        );
+    }
+
+    #[test]
+    fn test_apply_variant_rejects_reserved_extra_body_keys() {
+        // F7: ExtraBody keys that collide with standard ChatRequest fields must be rejected.
+        // The test-collision provider has a variant with key "model", which is reserved.
+        let err = apply_variant("test-collision", "test-model", Some("bad-variant")).unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("collides with a standard ChatRequest field"),
+            "expected collision error, got: {}",
+            msg
+        );
+        assert!(
+            msg.contains("model"),
+            "error should mention the reserved key"
+        );
+        assert!(
+            msg.contains("bad-variant"),
+            "error should mention the variant name"
         );
     }
 }
