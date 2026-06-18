@@ -43,6 +43,13 @@ pub fn create_provider(
     // OpenRouter allows a custom HTTP-Referer override; other providers ignore it.
     let header_overrides: Vec<(&str, &str)> = match (provider_name, &config.http_referer) {
         ("openrouter", Some(referer)) => vec![("HTTP-Referer", referer.as_str())],
+        (_, Some(_)) => {
+            log::warn!(
+                "http_referer is set but ignored for provider '{}' (only OpenRouter uses it)",
+                provider_name
+            );
+            Vec::new()
+        }
         _ => Vec::new(),
     };
 

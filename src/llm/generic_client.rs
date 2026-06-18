@@ -22,11 +22,9 @@
 
 use crate::error::RsGuardError;
 use crate::llm::{
-    build_llm_client, chat_messages, providers, send_chat_request, ChatMessage, LlmProvider,
+    build_llm_client, chat_messages, providers, send_chat_request, ChatRequest, LlmProvider,
 };
 use async_trait::async_trait;
-use serde::Serialize;
-use std::collections::HashMap;
 
 use super::providers::ProviderMeta;
 
@@ -50,32 +48,6 @@ pub(crate) struct GenericOpenAiCompatibleClient {
     max_tokens: Option<u32>,
     /// Pre-built reqwest client with auth + provider headers.
     client: reqwest::Client,
-}
-
-/// Serialisable chat request that optionally includes a `result_format` field.
-///
-/// Mirrors [`super::ChatRequest`] but adds the `result_format` field required
-/// by some OpenAI-compatible providers (e.g. Qwen/DashScope). When
-/// `result_format` is `None` the field is omitted from the serialized body,
-/// producing a standard OpenAI request shape.
-#[derive(Debug, Serialize)]
-struct GenericChatRequest {
-    /// Model identifier to use for completion.
-    pub model: String,
-    /// Conversation messages.
-    pub messages: Vec<ChatMessage>,
-    /// Sampling temperature (0.0 to 2.0).
-    pub temperature: f32,
-    /// Optional result format (e.g. `"message"` for Qwen).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub result_format: Option<&'static str>,
-    /// Maximum tokens in the response (provider-agnostic).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub max_tokens: Option<u32>,
-    /// Extra top-level fields contributed by `VariantEffect::ExtraBody`,
-    /// flattened into the request body.
-    #[serde(flatten, default, skip_serializing_if = "HashMap::is_empty")]
-    pub extra_body: HashMap<String, serde_json::Value>,
 }
 
 impl GenericOpenAiCompatibleClient {
@@ -172,7 +144,7 @@ impl LlmProvider for GenericOpenAiCompatibleClient {
         let (effective_model, extra_body) =
             providers::apply_variant(self.meta.name, &self.model, self.variant.as_deref())?;
 
-        let request = GenericChatRequest {
+        let request = ChatRequest {
             model: effective_model,
             messages: chat_messages(system_prompt, user_message),
             temperature,

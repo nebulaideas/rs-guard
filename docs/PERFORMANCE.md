@@ -49,12 +49,12 @@ cargo build --release
 ls -lh target/release/rs-guard
 ```
 
-### Baseline (v1.2, macOS arm64, Rust 1.82)
+### Baseline (v1.2, macOS arm64, Rust 1.82, measured)
 
 | Build | Size | Notes |
-| Default `cargo build --release` | ~6-8 MB | profile.release applied |
-| + `strip` (already on) | included above | symbols removed |
-| + `upx --best` (optional) | ~2-3 MB | runtime self-decompression; see note |
+| Default `cargo build --release` | **3.9 MB** | profile.release applied (measured 2026-06-18) |
+| `strip` (already on via `strip = true`) | included above | symbols removed |
+| + `upx --best` (optional) | ~1.5-2 MB (typical UPX ratio) | runtime self-decompression; see note |
 
 > **`upx` note:** UPX compresses the binary at rest and decompresses on
 > launch, adding ~50-150ms of startup. It is useful when download bandwidth

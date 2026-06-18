@@ -272,7 +272,7 @@ cargo audit
 | 7.4 — Grok (xAI) first-class (`XAI_API_KEY`, `grok-3`) | ✅ Done — closes #74 |
 | 7.5 — GLM (Zhipu AI) first-class (`ZHIPUAI_API_KEY`, `glm-4`) | ✅ Done — closes #73 |
 | 7.6 — `known_provider_names().len() == 7` | ✅ Done |
-| 7.7 — Grok/GLM default pricing | ✅ Done — `default_pricing()` arms |
+| 7.7 — Grok/GLM default pricing | ✅ Done — Grok verified from docs.x.ai (125/250); GLM `None` (unverifiable, F9) |
 | 7.8 — Provider-agnostic documentation pass | ✅ Done — README/USAGE/CONFIG/INSTALL/API/ARCHITECTURE/hooks de-biased |
 | 7.9 — docs/PROVIDERS.md Grok + GLM sections | ✅ Done |
 | 7.10 — docs/GITHUB_BOT_SETUP.md (bot/machine-user guide) | ✅ Done |

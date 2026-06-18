@@ -367,10 +367,18 @@ ProviderMeta {
     api_key_env: "NEWPROVIDER_API_KEY",
     ci_allowed_hosts: &[("https", "api.newprovider.com")],
     context_window: 128_000,
+    variants: &[],
+    result_format: None,  // Set to Some("message") if your provider requires it (e.g. Qwen)
+    default_extra_headers: &[],  // Add default headers if needed (e.g. OpenRouter attribution)
 }
 ```
 
 The `factory.rs` module resolves the provider name to a `ProviderMeta` and constructs a `GenericOpenAiCompatibleClient` parameterized by that metadata — no new module or match arm is required.
+
+**Field explanations:**
+- `variants`: Provider-specific model variants (e.g. DeepSeek's `flash`/`pro`, Kimi's `thinking-on`/`thinking-off`). Leave empty if your provider has no variants.
+- `result_format`: Some providers (like Qwen/DashScope) require a `result_format: "message"` field in the request body. Set to `Some("message")` if needed, otherwise `None`.
+- `default_extra_headers`: Default HTTP headers sent with every request. Use for provider-specific attribution (e.g. OpenRouter's `HTTP-Referer` and `X-Title`). Most providers don't need this.
 
 ### 2. Update `.reviewer.toml` Schema
 

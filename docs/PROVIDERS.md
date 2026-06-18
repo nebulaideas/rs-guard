@@ -370,6 +370,10 @@ base_url = "https://api.x.ai/v1"
 2. Sign in with your xAI account
 3. Navigate to **API Keys** and create a new key
 
+### Provider Divergence
+
+rs-guard uses the standard non-streaming `/chat/completions` endpoint. Advanced xAI-specific features (tool calling, function calling, streaming responses, web search integration) are not supported. If you need these features, consider using the xAI SDK directly.
+
 ---
 
 ## GLM (Zhipu AI)
@@ -411,6 +415,10 @@ base_url = "https://open.bigmodel.cn/api/paas/v4"
 1. Visit [open.bigmodel.cn](https://open.bigmodel.cn)
 2. Sign up for a Zhipu AI account
 3. Navigate to **API Keys** and create a new key
+
+### Provider Divergence
+
+rs-guard uses the standard non-streaming `/chat/completions` endpoint. Advanced Zhipu-specific features (tool calling, function calling, streaming responses, plugin system) are not supported. If you need these features, consider using the Zhipu SDK directly.
 
 ---
 

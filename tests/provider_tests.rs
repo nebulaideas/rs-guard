@@ -6,6 +6,7 @@
 //! not part of the public surface.
 
 use rs_guard::llm::factory::create_provider;
+use rs_guard::llm::providers::{find_provider, ProviderMeta};
 use rs_guard::llm::{LlmProvider, ProviderConfig};
 use wiremock::matchers::{body_partial_json, header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -475,4 +476,121 @@ async fn test_qwen_result_format_sent() {
         .await;
     assert!(result.is_ok());
     assert!(result.unwrap().contains("qwen result_format ok"));
+}
+
+// ============================================================================
+// Per-provider metadata-contract tests (F8)
+// ============================================================================
+//
+// These tests lock the metadata for each provider. If a provider's metadata
+// changes (e.g. default model, base URL, env var), these tests will fail,
+// forcing an explicit decision about whether the change is intentional.
+
+fn assert_provider_metadata(
+    meta: &ProviderMeta,
+    expected_name: &str,
+    expected_base_url: &str,
+    expected_model: &str,
+    expected_env: &str,
+    expected_hosts: &[(&str, &str)],
+) {
+    assert_eq!(meta.name, expected_name);
+    assert_eq!(meta.default_base_url, expected_base_url);
+    assert_eq!(meta.default_model, expected_model);
+    assert_eq!(meta.api_key_env, expected_env);
+    assert_eq!(meta.ci_allowed_hosts, expected_hosts);
+}
+
+#[test]
+fn test_deepseek_metadata_contract() {
+    let meta = find_provider("deepseek").expect("deepseek provider must be registered");
+    assert_provider_metadata(
+        meta,
+        "deepseek",
+        "https://api.deepseek.com",
+        "deepseek-v4-flash",
+        "DEEPSEEK_API_KEY",
+        &[("https", "api.deepseek.com")],
+    );
+}
+
+#[test]
+fn test_kimi_metadata_contract() {
+    let meta = find_provider("kimi").expect("kimi provider must be registered");
+    assert_provider_metadata(
+        meta,
+        "kimi",
+        "https://api.moonshot.ai/v1",
+        "kimi-k2.5",
+        "KIMI_API_KEY",
+        &[("https", "api.moonshot.ai")],
+    );
+}
+
+#[test]
+fn test_qwen_metadata_contract() {
+    let meta = find_provider("qwen").expect("qwen provider must be registered");
+    assert_provider_metadata(
+        meta,
+        "qwen",
+        "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+        "qwen-plus",
+        "DASHSCOPE_API_KEY",
+        &[
+            ("https", "dashscope-intl.aliyuncs.com"),
+            ("https", "dashscope.aliyuncs.com"),
+        ],
+    );
+}
+
+#[test]
+fn test_openrouter_metadata_contract() {
+    let meta = find_provider("openrouter").expect("openrouter provider must be registered");
+    assert_provider_metadata(
+        meta,
+        "openrouter",
+        "https://openrouter.ai/api/v1",
+        "openai/gpt-4o-mini",
+        "OPENROUTER_API_KEY",
+        &[("https", "openrouter.ai")],
+    );
+}
+
+#[test]
+fn test_openai_metadata_contract() {
+    let meta = find_provider("openai").expect("openai provider must be registered");
+    assert_provider_metadata(
+        meta,
+        "openai",
+        "https://api.openai.com/v1",
+        "gpt-4o-mini",
+        "OPENAI_API_KEY",
+        &[("https", "api.openai.com")],
+    );
+}
+
+#[test]
+fn test_grok_metadata_contract() {
+    let meta = find_provider("grok").expect("grok provider must be registered");
+    assert_provider_metadata(
+        meta,
+        "grok",
+        "https://api.x.ai/v1",
+        "grok-3",
+        "XAI_API_KEY",
+        &[("https", "api.x.ai")],
+    );
+}
+
+#[test]
+fn test_glm_metadata_contract() {
+    let meta = find_provider("glm").expect("glm provider must be registered");
+    assert_provider_metadata(
+        meta,
+        "glm",
+        "https://open.bigmodel.cn/api/paas/v4",
+        "glm-4",
+        "ZHIPUAI_API_KEY",
+        &[("https", "open.bigmodel.cn")],
+    );
 }

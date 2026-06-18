@@ -262,6 +262,22 @@ pub(crate) fn apply_variant(
         Some(v) => match &v.effect {
             VariantEffect::ModelAlias(alias) => Ok((alias.to_string(), HashMap::new())),
             VariantEffect::ExtraBody(key, json) => {
+                // F7: Reject ExtraBody keys that collide with standard ChatRequest fields.
+                // These would silently overwrite the corresponding field during serialization.
+                const RESERVED_KEYS: &[&str] = &[
+                    "model",
+                    "messages",
+                    "temperature",
+                    "max_tokens",
+                    "result_format",
+                ];
+                if RESERVED_KEYS.contains(key) {
+                    return Err(RsGuardError::Config(format!(
+                        "Variant '{}' for provider '{}' attempts to set ExtraBody key '{}' which collides with a standard ChatRequest field. This would silently overwrite the field. Use a different key name.",
+                        vname, provider_name, key
+                    )));
+                }
+
                 let val: serde_json::Value = serde_json::from_str(json).map_err(|e| {
                     RsGuardError::Config(format!(
                         "Invalid hardcoded variant JSON for key '{}': {}",

@@ -111,10 +111,20 @@ struct CacheKey {
     variant: Option<String>,
     /// Sampling temperature.
     temperature: f32,
+    /// Effective API base URL (prevents cache poisoning across endpoint overrides).
+    base_url: String,
+    /// Maximum tokens cap (different caps must not share a cache entry).
+    max_tokens: Option<u32>,
 }
 
 impl CacheKey {
     /// Creates a new cache key from the given components.
+    ///
+    /// All parameters that affect the outgoing request MUST be included here:
+    /// omitting one risks cache poisoning or staleness (e.g. a `base_url`
+    /// override poisoning the entry for the real provider endpoint, or a
+    /// `max_tokens` cap serving a truncated response to a full-length run).
+    #[allow(clippy::too_many_arguments)]
     fn new(
         diff_content: &str,
         prompt: &str,
@@ -122,6 +132,8 @@ impl CacheKey {
         model: &str,
         variant: Option<&str>,
         temperature: f32,
+        base_url: &str,
+        max_tokens: Option<u32>,
     ) -> Self {
         let diff_hash = hash_content(diff_content);
         let prompt_hash = hash_content(prompt);
@@ -132,20 +144,44 @@ impl CacheKey {
             model: model.to_string(),
             variant: variant.map(|v| v.to_lowercase()),
             temperature,
+            base_url: base_url.to_string(),
+            max_tokens,
         }
     }
 
     /// Returns the cache key as a hex string.
+    ///
+    /// A `0x00` separator byte is written between variable-length fields so
+    /// that distinct field splits cannot produce the same hash
+    /// (e.g. provider="a", model="bc" vs provider="ab", model="c").
+    /// Fixed-length fields (diff_hash/prompt_hash are 64-char hex;
+    /// temperature is 4 bytes; max_tokens uses a presence tag) need no separator.
     fn as_string(&self) -> String {
         let mut hasher = Sha256::new();
         hasher.update(self.diff_hash.as_bytes());
+        hasher.update([0]);
         hasher.update(self.prompt_hash.as_bytes());
+        hasher.update([0]);
         hasher.update(self.provider.as_bytes());
+        hasher.update([0]);
         hasher.update(self.model.as_bytes());
+        hasher.update([0]);
         if let Some(ref variant) = self.variant {
             hasher.update(variant.as_bytes());
         }
+        hasher.update([0]);
+        hasher.update(self.base_url.as_bytes());
+        hasher.update([0]);
         hasher.update(self.temperature.to_le_bytes());
+        // Presence tag ensures Some(x) and None never collide, and distinguishes
+        // by value when set.
+        match self.max_tokens {
+            Some(n) => {
+                hasher.update([1]);
+                hasher.update(n.to_le_bytes());
+            }
+            None => hasher.update([0]),
+        }
         hex::encode(hasher.finalize())
     }
 }
@@ -264,6 +300,9 @@ impl DiffCache {
     /// * `model` — Model identifier.
     /// * `variant` — Provider-specific model variant.
     /// * `temperature` — Sampling temperature.
+    /// * `base_url` — Effective API base URL (prevents cross-endpoint poisoning).
+    /// * `max_tokens` — Optional maximum tokens cap (prevents truncation staleness).
+    #[allow(clippy::too_many_arguments)]
     pub fn get(
         &self,
         diff_content: &str,
@@ -272,12 +311,23 @@ impl DiffCache {
         model: &str,
         variant: Option<&str>,
         temperature: f32,
+        base_url: &str,
+        max_tokens: Option<u32>,
     ) -> Option<String> {
         if !self.config.enabled {
             return None;
         }
 
-        let key = CacheKey::new(diff_content, prompt, provider, model, variant, temperature);
+        let key = CacheKey::new(
+            diff_content,
+            prompt,
+            provider,
+            model,
+            variant,
+            temperature,
+            base_url,
+            max_tokens,
+        );
         let key_str = key.as_string();
         let path = self.cache_path(&key_str);
 
@@ -313,6 +363,8 @@ impl DiffCache {
     /// * `model` — Model identifier.
     /// * `variant` — Provider-specific model variant.
     /// * `temperature` — Sampling temperature.
+    /// * `base_url` — Effective API base URL.
+    /// * `max_tokens` — Optional maximum tokens cap.
     /// * `response` — The LLM response text to cache.
     ///
     /// # Errors
@@ -327,13 +379,24 @@ impl DiffCache {
         model: &str,
         variant: Option<&str>,
         temperature: f32,
+        base_url: &str,
+        max_tokens: Option<u32>,
         response: &str,
     ) -> Result<(), RsGuardError> {
         if !self.config.enabled {
             return Ok(());
         }
 
-        let key = CacheKey::new(diff_content, prompt, provider, model, variant, temperature);
+        let key = CacheKey::new(
+            diff_content,
+            prompt,
+            provider,
+            model,
+            variant,
+            temperature,
+            base_url,
+            max_tokens,
+        );
         let key_str = key.as_string();
         let path = self.cache_path(&key_str);
 
@@ -681,16 +744,139 @@ mod tests {
 
     #[test]
     fn test_cache_key_includes_all_parameters() {
-        let key1 = CacheKey::new("diff", "prompt", "deepseek", "model", None, 0.1);
-        let key2 = CacheKey::new("diff", "prompt", "deepseek", "model", None, 0.1);
-        let key3 = CacheKey::new("diff", "prompt", "deepseek", "model", None, 0.2);
-        let key4 = CacheKey::new("diff", "prompt", "openai", "model", None, 0.1);
-        let key5 = CacheKey::new("diff", "prompt", "deepseek", "model", Some("flash"), 0.1);
+        let key1 = CacheKey::new(
+            "diff",
+            "prompt",
+            "deepseek",
+            "model",
+            None,
+            0.1,
+            "https://default.example.com",
+            None,
+        );
+        let key2 = CacheKey::new(
+            "diff",
+            "prompt",
+            "deepseek",
+            "model",
+            None,
+            0.1,
+            "https://default.example.com",
+            None,
+        );
+        let key3 = CacheKey::new(
+            "diff",
+            "prompt",
+            "deepseek",
+            "model",
+            None,
+            0.2,
+            "https://default.example.com",
+            None,
+        );
+        let key4 = CacheKey::new(
+            "diff",
+            "prompt",
+            "openai",
+            "model",
+            None,
+            0.1,
+            "https://default.example.com",
+            None,
+        );
+        let key5 = CacheKey::new(
+            "diff",
+            "prompt",
+            "deepseek",
+            "model",
+            Some("flash"),
+            0.1,
+            "https://default.example.com",
+            None,
+        );
 
         assert_eq!(key1.as_string(), key2.as_string());
         assert_ne!(key1.as_string(), key3.as_string());
         assert_ne!(key1.as_string(), key4.as_string());
         assert_ne!(key1.as_string(), key5.as_string());
+    }
+
+    #[test]
+    fn test_cache_key_isolates_base_url_override() {
+        // Regression (F4): two runs with the same diff/prompt/provider/model
+        // but DIFFERENT base_url must NOT share a cache entry. Prevents a
+        // custom endpoint (e.g. a local mock) from poisoning the entry for
+        // the real provider endpoint.
+        let base = CacheKey::new(
+            "diff",
+            "prompt",
+            "deepseek",
+            "model",
+            None,
+            0.1,
+            "https://api.deepseek.com",
+            None,
+        );
+        let overridden = CacheKey::new(
+            "diff",
+            "prompt",
+            "deepseek",
+            "model",
+            None,
+            0.1,
+            "http://localhost:11434",
+            None,
+        );
+        assert_ne!(
+            base.as_string(),
+            overridden.as_string(),
+            "different base_url must produce different cache keys (poisoning risk)"
+        );
+    }
+
+    #[test]
+    fn test_cache_key_isolates_max_tokens() {
+        // Regression (F5): a run with max_tokens=Some(100) caches a truncated
+        // response; a run with max_tokens=None must NOT hit that entry.
+        let capped = CacheKey::new(
+            "diff",
+            "prompt",
+            "deepseek",
+            "model",
+            None,
+            0.1,
+            "https://api.deepseek.com",
+            Some(100),
+        );
+        let uncapped = CacheKey::new(
+            "diff",
+            "prompt",
+            "deepseek",
+            "model",
+            None,
+            0.1,
+            "https://api.deepseek.com",
+            None,
+        );
+        assert_ne!(
+            capped.as_string(),
+            uncapped.as_string(),
+            "different max_tokens must produce different cache keys (truncation staleness)"
+        );
+    }
+
+    #[test]
+    fn test_cache_key_separator_prevents_field_collision() {
+        // Regression (F6): provider="a", model="bc" must NOT collide with
+        // provider="ab", model="c". The 0x00 separator between variable-length
+        // fields guarantees this.
+        let k1 = CacheKey::new("diff", "prompt", "a", "bc", None, 0.1, "url", None);
+        let k2 = CacheKey::new("diff", "prompt", "ab", "c", None, 0.1, "url", None);
+        assert_ne!(
+            k1.as_string(),
+            k2.as_string(),
+            "field-split collision: separator not working"
+        );
     }
 
     #[test]
@@ -946,11 +1132,22 @@ mod tests {
                 "model",
                 None,
                 0.1,
+                "https://default.example.com",
+                None,
                 "cached response",
             )
             .unwrap();
         assert!(cache
-            .get("test content", "prompt", "deepseek", "model", None, 0.1)
+            .get(
+                "test content",
+                "prompt",
+                "deepseek",
+                "model",
+                None,
+                0.1,
+                "https://default.example.com",
+                None
+            )
             .is_none());
     }
 
@@ -974,6 +1171,8 @@ mod tests {
                 "deepseek-v4-flash",
                 None,
                 0.1,
+                "https://default.example.com",
+                None,
                 "llm response",
             )
             .unwrap();
@@ -984,6 +1183,8 @@ mod tests {
             "deepseek-v4-flash",
             None,
             0.1,
+            "https://default.example.com",
+            None,
         );
         assert_eq!(result, Some("llm response".to_string()));
     }
@@ -1007,7 +1208,9 @@ mod tests {
                 "deepseek",
                 "model",
                 None,
-                0.1
+                0.1,
+                "https://default.example.com",
+                None
             )
             .is_none());
     }
@@ -1032,17 +1235,37 @@ mod tests {
                 "model",
                 None,
                 0.1,
+                "https://default.example.com",
+                None,
                 "will expire",
             )
             .unwrap();
 
         // Should be expired and return None
-        let result = cache.get("expiring content", "prompt", "deepseek", "model", None, 0.1);
+        let result = cache.get(
+            "expiring content",
+            "prompt",
+            "deepseek",
+            "model",
+            None,
+            0.1,
+            "https://default.example.com",
+            None,
+        );
         assert!(result.is_none());
 
         // File should have been deleted
-        let key =
-            CacheKey::new("expiring content", "prompt", "deepseek", "model", None, 0.1).as_string();
+        let key = CacheKey::new(
+            "expiring content",
+            "prompt",
+            "deepseek",
+            "model",
+            None,
+            0.1,
+            "https://default.example.com",
+            None,
+        )
+        .as_string();
         assert!(!cache.cache_path(&key).exists());
     }
 
@@ -1075,14 +1298,43 @@ mod tests {
         let cache = DiffCache::new(config).unwrap();
 
         cache
-            .set("key", "prompt", "deepseek", "model", None, 0.1, "version 1")
+            .set(
+                "key",
+                "prompt",
+                "deepseek",
+                "model",
+                None,
+                0.1,
+                "https://default.example.com",
+                None,
+                "version 1",
+            )
             .unwrap();
         cache
-            .set("key", "prompt", "deepseek", "model", None, 0.1, "version 2")
+            .set(
+                "key",
+                "prompt",
+                "deepseek",
+                "model",
+                None,
+                0.1,
+                "https://default.example.com",
+                None,
+                "version 2",
+            )
             .unwrap();
 
         assert_eq!(
-            cache.get("key", "prompt", "deepseek", "model", None, 0.1),
+            cache.get(
+                "key",
+                "prompt",
+                "deepseek",
+                "model",
+                None,
+                0.1,
+                "https://default.example.com",
+                None
+            ),
             Some("version 2".to_string())
         );
     }
@@ -1109,6 +1361,8 @@ mod tests {
                     "model",
                     None,
                     0.1,
+                    "https://default.example.com",
+                    None,
                     &format!("response {}", i),
                 )
                 .unwrap();
@@ -1132,10 +1386,30 @@ mod tests {
         let cache = DiffCache::new(config).unwrap();
 
         cache
-            .set("key1", "prompt", "deepseek", "model", None, 0.1, "value1")
+            .set(
+                "key1",
+                "prompt",
+                "deepseek",
+                "model",
+                None,
+                0.1,
+                "https://default.example.com",
+                None,
+                "value1",
+            )
             .unwrap();
         cache
-            .set("key2", "prompt", "deepseek", "model", None, 0.1, "value2")
+            .set(
+                "key2",
+                "prompt",
+                "deepseek",
+                "model",
+                None,
+                0.1,
+                "https://default.example.com",
+                None,
+                "value2",
+            )
             .unwrap();
 
         let stats = cache.stats().unwrap();
@@ -1160,10 +1434,30 @@ mod tests {
         let cache = DiffCache::new(config).unwrap();
 
         cache
-            .set("key1", "prompt", "deepseek", "model", None, 0.1, "value1")
+            .set(
+                "key1",
+                "prompt",
+                "deepseek",
+                "model",
+                None,
+                0.1,
+                "https://default.example.com",
+                None,
+                "value1",
+            )
             .unwrap();
         cache
-            .set("key2", "prompt", "deepseek", "model", None, 0.1, "value2")
+            .set(
+                "key2",
+                "prompt",
+                "deepseek",
+                "model",
+                None,
+                0.1,
+                "https://default.example.com",
+                None,
+                "value2",
+            )
             .unwrap();
 
         let stats = cache.stats().unwrap();
@@ -1186,11 +1480,30 @@ mod tests {
 
         let multiline = "line1\nline2\nline3\nline4";
         cache
-            .set("key", "prompt", "deepseek", "model", None, 0.1, multiline)
+            .set(
+                "key",
+                "prompt",
+                "deepseek",
+                "model",
+                None,
+                0.1,
+                "https://default.example.com",
+                None,
+                multiline,
+            )
             .unwrap();
 
         assert_eq!(
-            cache.get("key", "prompt", "deepseek", "model", None, 0.1),
+            cache.get(
+                "key",
+                "prompt",
+                "deepseek",
+                "model",
+                None,
+                0.1,
+                "https://default.example.com",
+                None
+            ),
             Some(multiline.to_string())
         );
     }
@@ -1209,17 +1522,46 @@ mod tests {
 
         // Write a valid entry first
         cache
-            .set("key", "prompt", "deepseek", "model", None, 0.1, "response")
+            .set(
+                "key",
+                "prompt",
+                "deepseek",
+                "model",
+                None,
+                0.1,
+                "https://default.example.com",
+                None,
+                "response",
+            )
             .unwrap();
 
         // Corrupt the cache file by overwriting with garbage
-        let key = CacheKey::new("key", "prompt", "deepseek", "model", None, 0.1).as_string();
+        let key = CacheKey::new(
+            "key",
+            "prompt",
+            "deepseek",
+            "model",
+            None,
+            0.1,
+            "https://default.example.com",
+            None,
+        )
+        .as_string();
         let path = cache.cache_path(&key);
         std::fs::write(&path, "not a valid cache entry").unwrap();
 
         // Should return None (corrupted file treated as miss)
         assert!(cache
-            .get("key", "prompt", "deepseek", "model", None, 0.1)
+            .get(
+                "key",
+                "prompt",
+                "deepseek",
+                "model",
+                None,
+                0.1,
+                "https://default.example.com",
+                None
+            )
             .is_none());
     }
 
@@ -1237,17 +1579,46 @@ mod tests {
 
         // Write a valid entry first
         cache
-            .set("key2", "prompt", "deepseek", "model", None, 0.1, "response")
+            .set(
+                "key2",
+                "prompt",
+                "deepseek",
+                "model",
+                None,
+                0.1,
+                "https://default.example.com",
+                None,
+                "response",
+            )
             .unwrap();
 
         // Corrupt the timestamp
-        let key = CacheKey::new("key2", "prompt", "deepseek", "model", None, 0.1).as_string();
+        let key = CacheKey::new(
+            "key2",
+            "prompt",
+            "deepseek",
+            "model",
+            None,
+            0.1,
+            "https://default.example.com",
+            None,
+        )
+        .as_string();
         let path = cache.cache_path(&key);
         std::fs::write(&path, "not-a-number\nresponse body").unwrap();
 
         // Should return None
         assert!(cache
-            .get("key2", "prompt", "deepseek", "model", None, 0.1)
+            .get(
+                "key2",
+                "prompt",
+                "deepseek",
+                "model",
+                None,
+                0.1,
+                "https://default.example.com",
+                None
+            )
             .is_none());
     }
 
@@ -1265,17 +1636,46 @@ mod tests {
 
         // Write a valid entry first
         cache
-            .set("key3", "prompt", "deepseek", "model", None, 0.1, "response")
+            .set(
+                "key3",
+                "prompt",
+                "deepseek",
+                "model",
+                None,
+                0.1,
+                "https://default.example.com",
+                None,
+                "response",
+            )
             .unwrap();
 
         // Empty the cache file
-        let key = CacheKey::new("key3", "prompt", "deepseek", "model", None, 0.1).as_string();
+        let key = CacheKey::new(
+            "key3",
+            "prompt",
+            "deepseek",
+            "model",
+            None,
+            0.1,
+            "https://default.example.com",
+            None,
+        )
+        .as_string();
         let path = cache.cache_path(&key);
         std::fs::write(&path, "").unwrap();
 
         // Should return None
         assert!(cache
-            .get("key3", "prompt", "deepseek", "model", None, 0.1)
+            .get(
+                "key3",
+                "prompt",
+                "deepseek",
+                "model",
+                None,
+                0.1,
+                "https://default.example.com",
+                None
+            )
             .is_none());
     }
 
@@ -1293,17 +1693,46 @@ mod tests {
 
         // Write a valid entry first
         cache
-            .set("key4", "prompt", "deepseek", "model", None, 0.1, "response")
+            .set(
+                "key4",
+                "prompt",
+                "deepseek",
+                "model",
+                None,
+                0.1,
+                "https://default.example.com",
+                None,
+                "response",
+            )
             .unwrap();
 
         // Write binary data
-        let key = CacheKey::new("key4", "prompt", "deepseek", "model", None, 0.1).as_string();
+        let key = CacheKey::new(
+            "key4",
+            "prompt",
+            "deepseek",
+            "model",
+            None,
+            0.1,
+            "https://default.example.com",
+            None,
+        )
+        .as_string();
         let path = cache.cache_path(&key);
         std::fs::write(&path, [0xFF, 0xFE, 0x00, 0x01, 0x02]).unwrap();
 
         // Should return None (binary data can't be parsed as UTF-8 timestamp)
         assert!(cache
-            .get("key4", "prompt", "deepseek", "model", None, 0.1)
+            .get(
+                "key4",
+                "prompt",
+                "deepseek",
+                "model",
+                None,
+                0.1,
+                "https://default.example.com",
+                None
+            )
             .is_none());
     }
 
@@ -1346,9 +1775,28 @@ mod tests {
         assert!(custom_dir.exists(), "custom cache dir should be created");
 
         cache
-            .set("key", "prompt", "deepseek", "model", None, 0.1, "value")
+            .set(
+                "key",
+                "prompt",
+                "deepseek",
+                "model",
+                None,
+                0.1,
+                "https://default.example.com",
+                None,
+                "value",
+            )
             .unwrap();
-        let result = cache.get("key", "prompt", "deepseek", "model", None, 0.1);
+        let result = cache.get(
+            "key",
+            "prompt",
+            "deepseek",
+            "model",
+            None,
+            0.1,
+            "https://default.example.com",
+            None,
+        );
         assert_eq!(result, Some("value".to_string()));
     }
 

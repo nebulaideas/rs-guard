@@ -30,8 +30,9 @@ pub struct ReviewMetrics {
     pub estimated_tokens_out: usize,
     /// API latency in seconds.
     pub latency_secs: f64,
-    /// Estimated cost in cents (USD).
-    pub estimated_cost_cents: f64,
+    /// Estimated cost in cents (USD). `None` when pricing is unknown (F9).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub estimated_cost_cents: Option<f64>,
     /// Diff size in lines.
     pub diff_lines: usize,
     /// Parsed verdict string.
@@ -247,7 +248,7 @@ mod tests {
             estimated_tokens_in: 4230,
             estimated_tokens_out: 892,
             latency_secs: 8.4,
-            estimated_cost_cents: 3.0,
+            estimated_cost_cents: Some(3.0),
             diff_lines: 150,
             verdict: "POSITIVE".to_string(),
             state: "APPROVE".to_string(),
