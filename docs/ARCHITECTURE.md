@@ -66,11 +66,8 @@ graph LR
 
     llm["llm/"] --> factory
     llm --> providers
-    factory --> deepseek
-    factory --> kimi
-    factory --> qwen
-    factory --> openrouter
-    factory --> openai
+    factory --> generic_client : "GenericOpenAiCompatibleClient"
+    generic_client --> providers : "ProviderMeta lookup"
 
     config["config.rs"] --> llm
     config --> http

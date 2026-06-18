@@ -23,7 +23,7 @@ All workflows include:
 ## Quick Start
 
 1. Copy the desired workflow file into `.github/workflows/` in your repository.
-2. Ensure your repository has the required secrets configured (`DEEPSEEK_API_KEY`, `GITHUB_TOKEN`).
+2. Ensure your repository has the required secrets configured (your provider's API key secret (e.g. `DEEPSEEK_API_KEY`, `KIMI_API_KEY` — see docs/PROVIDERS.md), plus `GITHUB_TOKEN`).
 3. Customize the provider or model by editing the `env` section or adding CLI flags.
 
 ## Custom Prompts

@@ -11,6 +11,8 @@ This document covers how to configure each supported LLM provider for rs-guard.
 - [Qwen (Alibaba Cloud)](#qwen-alibaba-cloud)
 - [OpenRouter](#openrouter)
 - [OpenAI](#openai)
+- [Grok (xAI)](#grok-xai)
+- [GLM (Zhipu AI)](#glm-zhipu-ai)
 
 ---
 
@@ -328,12 +330,97 @@ base_url = "http://localhost:11434/v1"
 
 ---
 
+## Grok (xAI)
+
+### Quick Start
+
+```bash
+export XAI_API_KEY="your-api-key"
+```
+
+### Provider Details
+
+| Key | Value |
+| Base URL | `https://api.x.ai/v1` |
+| Default Model | `grok-3` |
+| Context Window | 128,000 tokens |
+| Auth Header | `Bearer {XAI_API_KEY}` |
+| Note | OpenAI-compatible endpoint |
+
+### CLI Usage
+
+```bash
+rs-guard --provider grok --model grok-3
+```
+
+### TOML Configuration
+
+```toml
+provider = "grok"
+model = "grok-3"
+
+[providers.grok]
+api_key_env = "XAI_API_KEY"
+base_url = "https://api.x.ai/v1"
+```
+
+### API Key Acquisition
+
+1. Visit [console.x.ai](https://console.x.ai)
+2. Sign in with your xAI account
+3. Navigate to **API Keys** and create a new key
+
+---
+
+## GLM (Zhipu AI)
+
+### Quick Start
+
+```bash
+export ZHIPUAI_API_KEY="your-api-key"
+```
+
+### Provider Details
+
+| Key | Value |
+| Base URL | `https://open.bigmodel.cn/api/paas/v4` |
+| Default Model | `glm-4` |
+| Context Window | 128,000 tokens |
+| Auth Header | `Bearer {ZHIPUAI_API_KEY}` |
+| Note | OpenAI-compatible endpoint (Zhipu/z.ai GLM-4) |
+
+### CLI Usage
+
+```bash
+rs-guard --provider glm --model glm-4
+```
+
+### TOML Configuration
+
+```toml
+provider = "glm"
+model = "glm-4"
+
+[providers.glm]
+api_key_env = "ZHIPUAI_API_KEY"
+base_url = "https://open.bigmodel.cn/api/paas/v4"
+```
+
+### API Key Acquisition
+
+1. Visit [open.bigmodel.cn](https://open.bigmodel.cn)
+2. Sign up for a Zhipu AI account
+3. Navigate to **API Keys** and create a new key
+
+---
+
 ## Environment Variables Reference
 
-| Variable             | Provider   | Required When                   |
-| -------------------- | ---------- | ------------------------------- |
-| `DEEPSEEK_API_KEY`   | DeepSeek   | `--provider deepseek` (default) |
-| `KIMI_API_KEY`       | Kimi       | `--provider kimi`               |
-| `DASHSCOPE_API_KEY`  | Qwen       | `--provider qwen`               |
-| `OPENROUTER_API_KEY` | OpenRouter | `--provider openrouter`         |
-| `OPENAI_API_KEY`     | OpenAI     | `--provider openai`             |
+| Variable | Provider | Required When |
+| `DEEPSEEK_API_KEY` | DeepSeek | `--provider deepseek` (default) |
+| `KIMI_API_KEY` | Kimi | `--provider kimi` |
+| `DASHSCOPE_API_KEY` | Qwen | `--provider qwen` |
+| `OPENROUTER_API_KEY` | OpenRouter | `--provider openrouter` |
+| `OPENAI_API_KEY` | OpenAI | `--provider openai` |
+| `XAI_API_KEY` | Grok | `--provider grok` |
+| `ZHIPUAI_API_KEY` | GLM | `--provider glm` |

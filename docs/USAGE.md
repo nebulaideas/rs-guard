@@ -31,7 +31,7 @@ rs-guard [OPTIONS]
 | `--prompt-file` | `-p`  | `.github/review-prompt.md` | Path to the system prompt markdown file. Uses embedded default if not found.       |
 | `--model`       | `-m`  | _(provider default)_       | LLM model identifier. Overrides TOML and provider defaults.                        |
 | `--temperature` | `-t`  | `0.1`                      | Sampling temperature (0.0 to 2.0). Lower values produce more deterministic output. |
-| `--provider`    |       | `deepseek`                 | LLM provider: `deepseek`, `kimi`, `qwen`, `openrouter`, `openai`.                  |
+| `--provider`    |       | `deepseek`                 | LLM provider: `deepseek`, `kimi`, `qwen`, `openrouter`, `openai`, `grok`, `glm`.     |
 | `--variant`     |       | (none)                     | Provider-specific model variant (e.g. `flash`/`pro` for deepseek). See PROVIDERS.md and CONFIGURATION.md. |
 | `--config`      | `-c`  | `.reviewer.toml`           | Path to the configuration TOML file.                                               |
 | `--max-tokens`  |       | `4096`                     | Maximum tokens for LLM completions.                                                |
@@ -82,6 +82,8 @@ rs-guard --dry-run
 | `DASHSCOPE_API_KEY`     | Qwen          | API key from [Alibaba Cloud DashScope](https://dashscope.aliyun.com)                    |
 | `OPENROUTER_API_KEY`    | OpenRouter    | API key from [OpenRouter](https://openrouter.ai)                                        |
 | `OPENAI_API_KEY`        | OpenAI        | API key from [OpenAI Platform](https://platform.openai.com)                             |
+| `XAI_API_KEY`           | Grok          | API key from [xAI](https://x.ai)                                                       |
+| `ZHIPUAI_API_KEY`       | GLM           | API key from [Zhipu AI](https://open.bigmodel.cn)                                      |
 | `GITHUB_TOKEN`          | CI mode       | Auto-provided by GitHub Actions; alternatively set to a PAT with `pull-requests: write` |
 | `PR_NUMBER`             | CI mode       | Pull request number                                                                     |
 | `REPO_FULL_NAME`        | CI mode       | Repository in `owner/repo` format                                                       |
@@ -193,7 +195,10 @@ jobs:
       - name: AI Code Review
         run: ./rs-guard
         env:
+          # Set the env var for your chosen provider:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          # KIMI_API_KEY: ${{ secrets.KIMI_API_KEY }}
+          # OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           REPO_FULL_NAME: ${{ github.repository }}
@@ -437,7 +442,10 @@ jobs:
       - name: AI Code Review
         run: ./rs-guard
         env:
+          # Set the env var for your chosen provider:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          # KIMI_API_KEY: ${{ secrets.KIMI_API_KEY }}
+          # OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           REPO_FULL_NAME: ${{ github.repository }}
@@ -519,7 +527,7 @@ Set the env var for your provider. Check [docs/PROVIDERS.md](PROVIDERS.md) for h
 
 ### `Unknown provider: 'xxx'`
 
-Supported providers: `deepseek`, `kimi`, `qwen`, `openrouter`, `openai`.
+Supported providers: `deepseek`, `kimi`, `qwen`, `openrouter`, `openai`, `grok`, `glm`.
 
 ### `Provider base URL is not a recognized LLM provider endpoint`
 

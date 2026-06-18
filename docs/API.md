@@ -28,14 +28,12 @@ src/
 ├── github.rs        # GitHub review submission
 ├── http.rs          # HTTP utilities + URL validation
 ├── llm/
-│   ├── mod.rs       # LlmProvider trait + shared types
-│   ├── deepseek.rs  # DeepSeek provider
-│   ├── kimi.rs      # Kimi provider
-│   ├── qwen.rs      # Qwen provider
-│   ├── openrouter.rs # OpenRouter provider
-│   ├── openai.rs    # OpenAI provider
-│   ├── factory.rs   # Provider factory
-│   └── providers.rs # Centralized provider metadata
+│   ├── mod.rs           # LlmProvider trait + shared types
+│   ├── generic_client.rs # GenericOpenAiCompatibleClient — serves all providers
+│   ├── factory.rs       # Provider factory
+│   └── providers.rs     # Centralized ProviderMeta metadata (one entry per provider)
+│                        # All providers are served by a single generic_client
+│                        # instance; adding a provider is a metadata entry here.
 ├── output.rs        # Console output + artifacts + metrics
 ├── pipeline.rs      # Pipeline orchestration
 ├── redact.rs        # Secret redaction
@@ -355,82 +353,11 @@ match result {
 
 > **Note on crate-internal functions:** The helper functions `build_llm_client()`, `chat_messages()`, and `send_chat_request()` used in the example below are all `pub(crate)` — they are only accessible from within the `rs-guard` crate itself. External provider implementations (e.g., libraries that depend on `rs-guard`) must use the public [`LlmProvider`] trait directly and implement their own HTTP client logic, message construction, and request handling. The guide below shows the pattern as it exists inside the crate for maintainers adding first-party providers.
 
-Adding a new LLM provider requires changes in four locations.
+With the generic-client refactor, all OpenAI-compatible providers are served by a single internal `GenericOpenAiCompatibleClient`. Adding a new provider is now a **metadata entry** in `src/llm/providers.rs` rather than a new module.
 
-### 1. Create Provider Module (`src/llm/newprovider.rs`)
+### 1. Add a `ProviderMeta` entry in `src/llm/providers.rs`
 
-```rust
-use crate::error::RsGuardError;
-use crate::llm::{chat_messages, build_llm_client, send_chat_request};
-use async_trait::async_trait;
-use reqwest::Client;
-use serde::Serialize;
-
-#[derive(Debug)]
-struct NewProviderClient {
-    api_key: String,
-    base_url: String,
-    model: String,
-    max_tokens: Option<u32>,
-    client: Client,
-}
-
-impl NewProviderClient {
-    pub fn new(api_key: &str) -> Result<Self, RsGuardError> {
-        // Validate API key format
-        // Build reqwest client
-        let client = build_llm_client("newprovider", api_key, &[])?;
-        Ok(Self {
-            api_key: api_key.to_string(),
-            base_url: "https://api.newprovider.com/v1".to_string(),
-            model: "default-model".to_string(),
-            max_tokens: None,
-            client,
-        })
-    }
-
-    pub fn with_base_url(&mut self, url: String) -> &mut Self {
-        self.base_url = url;
-        self
-    }
-
-    pub fn with_model(&mut self, model: String) -> &mut Self {
-        self.model = model;
-        self
-    }
-
-    pub fn with_max_tokens(&mut self, max_tokens: Option<u32>) -> &mut Self {
-        self.max_tokens = max_tokens;
-        self
-    }
-}
-
-#[async_trait]
-impl crate::llm::LlmProvider for NewProviderClient {
-    fn name(&self) -> &'static str {
-        "newprovider"
-    }
-
-    async fn chat_completion(
-        &self,
-        system_prompt: &str,
-        user_message: &str,
-        temperature: f32,
-    ) -> Result<String, RsGuardError> {
-        let body = serde_json::json!({
-            "model": self.model,
-            "messages": chat_messages(system_prompt, user_message),
-            "temperature": temperature,
-            "max_tokens": self.max_tokens,
-        });
-        send_chat_request(&self.client, &format!("{}/chat/completions", self.base_url), &body, "newprovider").await
-    }
-}
-```
-
-### 2. Register in `providers.rs`
-
-Add to `all_providers()`:
+Append to `all_providers()`:
 
 ```rust
 ProviderMeta {
@@ -443,42 +370,20 @@ ProviderMeta {
 }
 ```
 
-Also add the module to `src/llm/mod.rs`:
+The `factory.rs` module resolves the provider name to a `ProviderMeta` and constructs a `GenericOpenAiCompatibleClient` parameterized by that metadata — no new module or match arm is required.
 
-```rust
-pub mod newprovider;
-```
-
-### 3. Add Factory Match Arm (`src/llm/factory.rs`)
-
-```rust
-"newprovider" => {
-    let mut client = newprovider::NewProviderClient::new(api_key)?;
-    if let Some(ref url) = config.base_url {
-        client = client.with_base_url(url.clone());
-    }
-    client = client
-        .with_model(config.model.clone())
-        .with_max_tokens(config.max_tokens);
-    Ok(Box::new(client))
-}
-```
-
-### 4. Update `.reviewer.toml` Schema
+### 2. Update `.reviewer.toml` Schema
 
 Add the provider section in `docs/CONFIGURATION.md` and ensure the documentation example includes it.
 
 ### Verification Checklist
 
-After implementing a new provider:
+After adding a new provider:
 
-- [ ] Implement `LlmProvider` trait (name + chat_completion)
-- [ ] Add module to `src/llm/mod.rs`
 - [ ] Register provider metadata in `all_providers()` in `src/llm/providers.rs`
-- [ ] Add match arm in `src/llm/factory.rs`.
-- [ ] Add inline unit tests with mock response parsing
-- [ ] Add integration test using wiremock
+- [ ] Add integration test using wiremock against the new `ProviderMeta`
 - [ ] Update `docs/PROVIDERS.md` with setup instructions
+- [ ] Update `docs/CONFIGURATION.md` `.reviewer.toml` example
 - [ ] Verify CI pass (clippy, tests, format)
 
 ---

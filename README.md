@@ -13,7 +13,7 @@
 
 ## Features
 
-- 🤖 **Multi-provider LLM** — DeepSeek, Kimi (Moonshot AI), Qwen (Alibaba Cloud), OpenRouter, OpenAI
+- 🤖 **Multi-provider LLM** — DeepSeek, Kimi (Moonshot AI), Qwen (Alibaba Cloud), OpenRouter, OpenAI, Grok (xAI), GLM (Zhipu AI)
 - ⚡ **Response caching** — SHA-256 keyed, 24-hour TTL, 100 MB limit; skip with `--no-cache`
 - 🔄 **Automatic retry** — Exponential backoff (1s/2s/4s ±25% jitter) + optional circuit breaker
 - 🔍 **In-memory verdict parsing** — Structured metadata block (`Verdict` + four severity counts: `CriticalIssues`, `SecurityIssues`, `ImportantIssues`, `Suggestions`); no intermediate comment spam
@@ -49,13 +49,16 @@ export DEEPSEEK_API_KEY="your-api-key"
 - name: AI Code Review
   run: rs-guard
   env:
+    # Set the env var for your chosen provider:
     DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+    # KIMI_API_KEY: ${{ secrets.KIMI_API_KEY }}
+    # OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
     GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     PR_NUMBER: ${{ github.event.pull_request.number }}
     REPO_FULL_NAME: ${{ github.repository }}
 ```
 
-See [`examples/github-actions-workflow/`](examples/github-actions-workflow/) for full workflow files. Language-agnostic prompt templates are available in [`examples/prompts/`](examples/prompts/).
+See [`examples/github-actions-workflow/`](examples/github-actions-workflow/) for full workflow files. Language-agnostic prompt templates are available in [`examples/prompts/`](examples/prompts/). For a dedicated review identity (recommended over personal PATs), see [`docs/GITHUB_BOT_SETUP.md`](docs/GITHUB_BOT_SETUP.md).
 
 ---
 
@@ -153,6 +156,8 @@ See [docs/USAGE.md](docs/USAGE.md) for the complete reference including all envi
 | `DASHSCOPE_API_KEY`     | Qwen provider       | [Alibaba Cloud DashScope](https://dashscope.aliyun.com) |
 | `OPENROUTER_API_KEY`    | OpenRouter provider | [OpenRouter](https://openrouter.ai)                     |
 | `OPENAI_API_KEY`        | OpenAI provider     | [OpenAI Platform](https://platform.openai.com)          |
+| `XAI_API_KEY`           | Grok provider       | [xAI](https://x.ai)                                     |
+| `ZHIPUAI_API_KEY`       | GLM provider        | [Zhipu AI](https://open.bigmodel.cn)                    |
 | `GITHUB_TOKEN`          | CI mode             | Auto-provided by GitHub Actions                         |
 | `PR_NUMBER`             | CI mode             | Pull request number                                     |
 | `REPO_FULL_NAME`        | CI mode             | Repository in `owner/repo` format                       |
@@ -283,6 +288,8 @@ cargo doc --no-deps --open
 | [docs/PROVIDERS.md](docs/PROVIDERS.md)         | Per-provider setup and API key acquisition                                |
 | [docs/CONFIGURATION.md](docs/CONFIGURATION.md) | `.reviewer.toml` full schema reference                                    |
 | [docs/LOCAL_MODE.md](docs/LOCAL_MODE.md)       | Pre-commit hook setup                                                     |
+| [docs/GITHUB_BOT_SETUP.md](docs/GITHUB_BOT_SETUP.md) | Dedicated GitHub bot / machine-user identity for automated reviews  |
+| [docs/PERFORMANCE.md](docs/PERFORMANCE.md)     | Binary-size baselines, runtime benchmarks, CI cold-start tuning          |
 
 ---
 

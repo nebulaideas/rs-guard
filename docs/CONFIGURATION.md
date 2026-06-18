@@ -31,7 +31,7 @@ Place `.reviewer.toml` in your repository root (or pass `--config /path/to/confi
 
 ```toml
 # Top-level settings
-provider = "deepseek"           # LLM provider: deepseek | kimi | qwen | openrouter | openai
+provider = "deepseek"           # LLM provider: deepseek | kimi | qwen | openrouter | openai | grok | glm
 model = "deepseek-v4-flash"     # Model identifier (provider-specific)
 variant = "flash"               # Provider-specific model variant (e.g. "flash", "pro" for deepseek). Optional.
 temperature = 0.1               # Sampling temperature (0.0 to 2.0)
@@ -58,6 +58,16 @@ http_referer = "https://github.com/nebulaideas/rs-guard"
 [providers.openai]
 api_key_env = "OPENAI_API_KEY"
 base_url = "https://api.openai.com/v1"
+
+[providers.grok]
+api_key_env = "XAI_API_KEY"
+base_url = "https://api.x.ai/v1"
+# model = "grok-3"
+
+[providers.glm]
+api_key_env = "ZHIPUAI_API_KEY"
+base_url = "https://open.bigmodel.cn/api/paas/v4"
+# model = "glm-4"
 ```
 
 ### Field Reference
@@ -210,6 +220,8 @@ recompile from source.
 | `DASHSCOPE_API_KEY`     | Qwen provider       | API key from Alibaba Cloud DashScope.    |
 | `OPENROUTER_API_KEY`    | OpenRouter provider | API key from OpenRouter.                 |
 | `OPENAI_API_KEY`        | OpenAI provider     | API key from OpenAI.                     |
+| `XAI_API_KEY`           | Grok provider       | API key from xAI.                       |
+| `ZHIPUAI_API_KEY`       | GLM provider        | API key from Zhipu AI.                  |
 | `GITHUB_TOKEN`          | GitHub mode         | Auto-provided by GitHub Actions.         |
 | `PR_NUMBER`             | GitHub mode         | Pull request number.                     |
 | `REPO_FULL_NAME`        | GitHub mode         | Repository in `owner/repo` format.       |

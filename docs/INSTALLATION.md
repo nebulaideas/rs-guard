@@ -314,9 +314,11 @@ export DEEPSEEK_API_KEY="your-api-key"
 
 # Windows (PowerShell)
 $env:DEEPSEEK_API_KEY="your-api-key"
+# Or: $env:KIMI_API_KEY="..." / $env:OPENAI_API_KEY="..."
 
 # Windows (Command Prompt)
 set DEEPSEEK_API_KEY=your-api-key
+REM Or: set KIMI_API_KEY=... / set OPENAI_API_KEY=...
 ```
 
 **Optional:** Add to your shell profile for persistence:
@@ -324,6 +326,7 @@ set DEEPSEEK_API_KEY=your-api-key
 ```bash
 # ~/.bashrc or ~/.zshrc
 export DEEPSEEK_API_KEY="your-api-key"
+# Or: export KIMI_API_KEY="..." / export OPENAI_API_KEY="..."
 ```
 
 ### Step 3: Test in a Repository
@@ -339,7 +342,7 @@ git add .
 rs-guard
 
 # Or with explicit provider
-rs-guard --provider deepseek --model deepseek-v4-flash
+rs-guard --provider kimi --model kimi-k2.5
 ```
 
 ### Step 4: Set Up Pre-commit Hook (Optional)
