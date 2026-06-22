@@ -218,7 +218,7 @@ pub async fn run_pipeline(
     // base_url + max_tokens are part of the key to prevent cross-endpoint
     // poisoning and truncation staleness.
     let effective_base_url = config.provider_config.base_url.as_deref().unwrap_or("");
-    let llm_response = if let Some(cached) = cache.get(
+    let (llm_response, should_cache) = if let Some(cached) = cache.get(
         &diff_content,
         &config.prompt,
         &config.provider,
@@ -229,7 +229,7 @@ pub async fn run_pipeline(
         config.provider_config.max_tokens,
     ) {
         log::info!("Cache hit — using cached LLM response");
-        cached
+        (cached, false)
     } else {
         if !config.is_ci {
             println!("🤖 Calling {} ({})...", config.provider, config.model);
@@ -252,21 +252,7 @@ pub async fn run_pipeline(
             println!("✅ Response received ({} chars)", response.len());
         }
 
-        log::info!("Caching LLM response for future runs");
-        if let Err(e) = cache.set(
-            &diff_content,
-            &config.prompt,
-            &config.provider,
-            &config.model,
-            config.variant.as_deref(),
-            config.temperature,
-            effective_base_url,
-            config.provider_config.max_tokens,
-            &response,
-        ) {
-            log::warn!("Failed to cache LLM response: {}", e);
-        }
-        response
+        (response, !config.no_cache)
     };
 
     let latency = start.elapsed();
@@ -302,6 +288,23 @@ pub async fn run_pipeline(
 
     let (verdict, state) =
         parse_verdict(&llm_response).context("Failed to parse verdict from LLM response")?;
+
+    if should_cache {
+        log::info!("Caching LLM response for future runs");
+        if let Err(e) = cache.set(
+            &diff_content,
+            &config.prompt,
+            &config.provider,
+            &config.model,
+            config.variant.as_deref(),
+            config.temperature,
+            effective_base_url,
+            config.provider_config.max_tokens,
+            &llm_response,
+        ) {
+            log::warn!("Failed to cache LLM response: {}", e);
+        }
+    }
 
     log::info!(
         "Verdict: {} (CriticalIssues: {}, SecurityIssues: {}, ImportantIssues: {}, Suggestions: {}) -> State: {}",

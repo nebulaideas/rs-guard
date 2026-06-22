@@ -265,18 +265,11 @@ async fn test_full_pipeline_cache_hit() {
     let llm = MockServer::start().await;
 
     // Use unique diff content to avoid cache collisions with other tests
-    let unique_diff = format!(
-        "diff --git a/unique{}.rs b/unique{}.rs\n+line{}",
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos(),
-        42
-    );
+    let unique_id = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let unique_diff = format!("diff --git a/unique{unique_id}.rs b/unique{unique_id}.rs\n+line42");
 
     Mock::given(method("GET"))
         .and(path_regex(r"/repos/test-owner/test-repo/pulls/\d+"))
@@ -565,6 +558,131 @@ async fn test_full_pipeline_grok_approve() {
 
     let result = run_pipeline(config, None).await;
     assert!(matches!(result, Ok(PipelineResult::Success)));
+}
+
+#[tokio::test]
+async fn test_full_pipeline_empty_content_retried_then_succeeds() {
+    let github = MockServer::start().await;
+    let llm = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path_regex(r"/repos/test-owner/test-repo/pulls/\d+"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(VALID_DIFF))
+        .mount(&github)
+        .await;
+
+    // First call: empty content (thinking consumed budget) — retryable
+    Mock::given(method("POST"))
+        .and(path_regex(r"/chat/completions"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "choices": [{
+                "message": {
+                    "content": "",
+                    "reasoning_content": "long internal reasoning"
+                }
+            }]
+        })))
+        .up_to_n_times(1)
+        .mount(&llm)
+        .await;
+
+    // Second call: valid review
+    Mock::given(method("POST"))
+        .and(path_regex(r"/chat/completions"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "choices": [{"message": {"content": POSITIVE_RESPONSE}}]
+        })))
+        .mount(&llm)
+        .await;
+
+    Mock::given(method("POST"))
+        .and(path_regex(r"/repos/test-owner/test-repo/pulls/\d+/reviews"))
+        .respond_with(ResponseTemplate::new(200))
+        .mount(&github)
+        .await;
+
+    let mut config = ci_config(42, "deepseek", "test-token");
+    config.github_base_url = github.uri();
+    config.provider_config.base_url = Some(llm.uri());
+    config.no_cache = true;
+
+    let result = run_pipeline(config, None).await;
+    assert!(
+        matches!(result, Ok(PipelineResult::Success)),
+        "expected retry after empty content to succeed, got: {:?}",
+        result
+    );
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn test_full_pipeline_empty_content_not_cached_on_failure() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let cache_path = temp_dir.path().join("cache");
+
+    let github = MockServer::start().await;
+    let llm = MockServer::start().await;
+
+    let unique_id = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let unique_diff =
+        format!("diff --git a/empty-cache{unique_id}.rs b/empty-cache{unique_id}.rs\n+line99");
+
+    Mock::given(method("GET"))
+        .and(path_regex(r"/repos/test-owner/test-repo/pulls/\d+"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(&unique_diff))
+        .mount(&github)
+        .await;
+
+    // Always return empty content — exhaust retries, pipeline must fail
+    Mock::given(method("POST"))
+        .and(path_regex(r"/chat/completions"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "choices": [{
+                "message": {
+                    "content": "",
+                    "reasoning_content": "reasoning only"
+                }
+            }]
+        })))
+        .mount(&llm)
+        .await;
+
+    let mut config = ci_config(42, "deepseek", "test-token");
+    config.github_base_url = github.uri();
+    config.provider_config.base_url = Some(llm.uri());
+    config.no_cache = false;
+    config.cache_dir = Some(cache_path.to_string_lossy().into_owned());
+
+    let result = run_pipeline(config.clone(), None).await;
+    assert!(
+        result.is_err(),
+        "expected pipeline failure after empty retries"
+    );
+
+    // Cache must not contain a poisoned empty entry
+    let cache = rs_guard::cache::DiffCache::new(rs_guard::cache::CacheConfig {
+        enabled: true,
+        cache_dir: cache_path,
+        ..rs_guard::cache::CacheConfig::default()
+    })
+    .unwrap();
+    let cached = cache.get(
+        &unique_diff,
+        &config.prompt,
+        &config.provider,
+        &config.model,
+        config.variant.as_deref(),
+        config.temperature,
+        config.provider_config.base_url.as_deref().unwrap_or(""),
+        config.provider_config.max_tokens,
+    );
+    assert!(
+        cached.is_none(),
+        "empty/failed responses must not be cached"
+    );
 }
 
 #[tokio::test]

@@ -962,16 +962,51 @@ fn test_default_chunk_thresholds_when_not_set() {
 #[test]
 #[serial]
 fn test_default_max_tokens_applied_when_not_set() {
-    // When RS_GUARD_MAX_TOKENS is unset and TOML has no max_tokens,
-    // Config must use DEFAULT_MAX_TOKENS (4096) to prevent truncated verdicts.
+    // DeepSeek uses thinking models by default — floor is THINKING_MIN_MAX_TOKENS.
     with_env(&[("DEEPSEEK_API_KEY", "test-deepseek-key")], || {
         let config = Config::from_env(None).unwrap();
         assert_eq!(
             config.provider_config.max_tokens,
-            Some(rs_guard::config::DEFAULT_MAX_TOKENS),
-            "max_tokens should default to DEFAULT_MAX_TOKENS when not configured"
+            Some(rs_guard::config::THINKING_MIN_MAX_TOKENS),
+            "deepseek max_tokens should use THINKING_MIN_MAX_TOKENS when not configured"
         );
     });
+}
+
+#[test]
+#[serial]
+fn test_thinking_min_max_tokens_applied_for_kimi() {
+    with_env(
+        &[
+            ("KIMI_API_KEY", "test-kimi-key"),
+            ("RS_GUARD_PROVIDER", "kimi"),
+        ],
+        || {
+            let config = Config::from_env(None).unwrap();
+            assert_eq!(
+                config.provider_config.max_tokens,
+                Some(rs_guard::config::THINKING_MIN_MAX_TOKENS)
+            );
+        },
+    );
+}
+
+#[test]
+#[serial]
+fn test_non_thinking_provider_keeps_default_max_tokens() {
+    with_env(
+        &[
+            ("OPENAI_API_KEY", "test-openai-key"),
+            ("RS_GUARD_PROVIDER", "openai"),
+        ],
+        || {
+            let config = Config::from_env(None).unwrap();
+            assert_eq!(
+                config.provider_config.max_tokens,
+                Some(rs_guard::config::DEFAULT_MAX_TOKENS)
+            );
+        },
+    );
 }
 
 #[test]

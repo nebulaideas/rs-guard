@@ -74,6 +74,7 @@ pub struct ChatChoice {
 #[derive(Debug, Deserialize)]
 pub struct ChatMessageResponse {
     /// The generated text content.
+    #[serde(default)]
     pub content: String,
     /// Optional reasoning content (e.g. Kimi/Moonshot AI chain-of-thought).
     #[serde(default)]
@@ -240,7 +241,21 @@ pub(crate) async fn send_chat_request<B: Serialize + Send>(
             message: "Empty response from LLM".to_string(),
         })?;
 
-    if let Some(ref reasoning) = choice.message.reasoning_content {
+    resolve_assistant_content(&choice.message, provider_name).map_err(Into::into)
+}
+
+/// Extracts the assistant's final answer from a chat completion message.
+///
+/// Thinking models (DeepSeek v4, Kimi) may return chain-of-thought in
+/// `reasoning_content` while leaving `content` empty when the output token
+/// budget is exhausted. Empty `content` is treated as a transient failure
+/// (retryable via [`LlmError`] status 0) — never fall back to
+/// `reasoning_content`, which does not contain the structured review footer.
+fn resolve_assistant_content(
+    message: &ChatMessageResponse,
+    provider_name: &str,
+) -> Result<String, LlmError> {
+    if let Some(ref reasoning) = message.reasoning_content {
         log::debug!(
             "[{}] reasoning_content present ({} chars, content not logged)",
             provider_name,
@@ -248,7 +263,31 @@ pub(crate) async fn send_chat_request<B: Serialize + Send>(
         );
     }
 
-    Ok(choice.message.content)
+    if !message.content.trim().is_empty() {
+        return Ok(message.content.clone());
+    }
+
+    let reasoning_len = message
+        .reasoning_content
+        .as_ref()
+        .map(|r| r.len())
+        .unwrap_or(0);
+
+    log::warn!(
+        "[{}] Empty assistant content from LLM (reasoning_content: {} chars). \
+         Reasoning may have consumed the max_tokens budget — consider raising max_tokens.",
+        provider_name,
+        reasoning_len
+    );
+
+    Err(LlmError {
+        provider: provider_name.to_string(),
+        status: 0,
+        message: format!(
+            "Empty assistant content from LLM (reasoning_content: {reasoning_len} chars; \
+             reasoning may have consumed the token budget)"
+        ),
+    })
 }
 
 /// Provider-specific error information.
@@ -517,6 +556,53 @@ mod tests {
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(err.contains("500"), "Expected 500 error, got: {}", err);
+    }
+
+    #[tokio::test]
+    async fn test_send_chat_request_empty_content_with_reasoning_is_retryable() {
+        use wiremock::matchers::method;
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mock_server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "choices": [{
+                    "message": {
+                        "content": "",
+                        "reasoning_content": "Internal reasoning consumed the token budget"
+                    }
+                }]
+            })))
+            .mount(&mock_server)
+            .await;
+
+        let client = build_llm_client("deepseek", "key", &[]).unwrap();
+        let request = ChatRequest {
+            model: "deepseek-v4-pro".to_string(),
+            messages: chat_messages("system", "user"),
+            temperature: 0.1,
+            max_tokens: Some(4096),
+            result_format: None,
+            extra_body: HashMap::new(),
+        };
+        let result = send_chat_request(
+            &client,
+            &format!("{}/chat/completions", mock_server.uri()),
+            &request,
+            "deepseek",
+        )
+        .await;
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(matches!(err, RsGuardError::LlmApi { status: 0, .. }));
+        assert!(err.is_retryable());
+        let msg = err.to_string();
+        assert!(
+            msg.contains("Empty assistant content"),
+            "expected empty content error, got: {}",
+            msg
+        );
     }
 
     #[tokio::test]
