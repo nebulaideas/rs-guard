@@ -133,7 +133,7 @@ Cache the compiled binary across runs:
 - uses: actions/cache@v4
   with:
     path: ~/.cargo/bin/rs-guard
-    key: rs-guard-${{ runner.os }}-v1.2.0
+    key: rs-guard-${{ runner.os }}-v1.2.1
 - run: |
     if ! command -v rs-guard >/dev/null 2>&1; then
       cargo install rs-guard --locked
