@@ -90,6 +90,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.2.3] - 2026-06-21
+
+### Upgrade Notes
+
+- **New timeout configuration**: You can now control LLM request timeout via `--llm-timeout`, `RS_GUARD_LLM_TIMEOUT`, or `llm_timeout_secs` in `.reviewer.toml`.
+- **Improved defaults for thinking models**: When using `deepseek` (including `deepseek-v4-pro`) or `kimi` without an explicit timeout, rs-guard now defaults to **180 seconds** (previously 120s globally, 60s before v1.2.3). This greatly reduces flakiness on reasoning-heavy models.
+- **deepseek-v4-pro users**: We strongly recommend either:
+  - Using `--variant pro` (preferred), or
+  - Explicitly setting `max_tokens` (≥16384) and `llm_timeout_secs` (≥180) for complex PRs.
+- Existing configurations continue to work. The new auto-raise only applies when you have not set a value.
+
+### Added
+
+- **Configurable LLM request timeout** — `RS_GUARD_LLM_TIMEOUT` (env), `llm_timeout_secs` (TOML), and `--llm-timeout` (CLI). Default raised to 120 seconds (from 60) to support thinking models whose reasoning phase can take longer. The timeout is a total request timeout and is honored for all providers via the generic client.
+- `DEFAULT_LLM_TIMEOUT_SECS` constant (120) and corresponding field on `Config` / `ProviderConfig`.
+- **Auto-raised LLM timeout for thinking providers** — `deepseek` and `kimi` now automatically use a minimum of 180s when no explicit `llm_timeout_secs` / `RS_GUARD_LLM_TIMEOUT` is provided (mirrors the existing `max_tokens` floor logic). Introduces `THINKING_MIN_LLM_TIMEOUT_SECS`.
+
+### Changed
+
+- `build_llm_client` and `GenericOpenAiCompatibleClient::new` now accept an explicit timeout (falls back to default when not provided in `ProviderConfig`).
+- All internal HTTP clients for LLM calls respect the configured timeout.
+- Default timeout for `deepseek` (including `deepseek-v4-pro`) and `kimi` is now 180s when unset.
+
+### Fixed
+
+- Empty/null `content` with `reasoning_content` on thinking models is still treated as a retryable error (status 0). Cache writes remain deferred until after successful verdict parse.
+- Improved test coverage for reasoning content stripping (final content returned never includes internal `reasoning_content`).
+
+### Documentation
+
+- Added comprehensive **deepseek-v4-pro** guide in `docs/PROVIDERS.md`:
+  - Full examples for CLI (`--variant pro --max-tokens 16384 --llm-timeout 180`), environment variables, and TOML (top-level + `[providers.deepseek]`).
+  - Recommended settings and best practices for reasoning models.
+  - Complete GitHub Actions example (matching real CI usage patterns with `timeout-minutes` and `continue-on-error` advice).
+- Updated CONFIGURATION.md (field tables + example) and USAGE.md (CLI table + examples) with deepseek-v4-pro usage and the new auto-raised timeout behavior.
+- Enhanced troubleshooting for "Empty assistant content" and slow thinking-model responses.
+- Added precedence rules and CI reliability guidance for `deepseek-v4-pro`.
+
+### Known Issues
+
+- Extremely large or complex diffs using `deepseek-v4-pro` may still occasionally require manually raising `--llm-timeout` / `llm_timeout_secs` above 180s (e.g. 240–300). The auto-raise is a safety net, not a guarantee for every workload.
+- No other known issues at time of release.
+
+---
+
 ## [1.2.2] - 2026-06-21
 
 ### Fixed

@@ -11,8 +11,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 
-/// HTTP request timeout for LLM API calls.
-const LLM_REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+// Default timeout comes from crate::config::DEFAULT_LLM_TIMEOUT_SECS (120s).
 
 pub mod factory;
 mod generic_client;
@@ -149,6 +148,9 @@ pub struct ProviderConfig {
     /// performs a completion. See [`providers`] and the per-provider
     /// tables in `docs/PROVIDERS.md`.
     pub variant: Option<String>,
+    /// LLM request timeout in seconds (total). When None, the client uses
+    /// the crate default (120s as of v1.2.3).
+    pub timeout_secs: Option<u64>,
 }
 
 /// Sends a chat completion HTTP request and parses the response.
@@ -398,13 +400,14 @@ pub(crate) fn chat_messages(system_prompt: &str, user_message: &str) -> Vec<Chat
 /// Builds a [`reqwest::Client`] with standard LLM provider headers.
 ///
 /// Sets `Authorization: Bearer {api_key}`, `Content-Type: application/json`,
-/// and any additional headers. Uses [`LLM_REQUEST_TIMEOUT`].
+/// and any additional headers. Uses the provided `timeout`.
 ///
 /// # Arguments
 ///
 /// * `provider_name` — Provider name for error messages.
 /// * `api_key` — API key for Bearer authentication.
 /// * `extra_headers` — Additional headers to include (e.g. `HTTP-Referer`).
+/// * `timeout` — Total request timeout. Prefer values >= 60s for thinking models.
 ///
 /// # Errors
 ///
@@ -414,6 +417,7 @@ pub(crate) fn build_llm_client(
     provider_name: &str,
     api_key: &str,
     extra_headers: &[(&str, &str)],
+    timeout: std::time::Duration,
 ) -> Result<reqwest::Client, RsGuardError> {
     let mut headers = HeaderMap::new();
     headers.insert(
@@ -446,7 +450,7 @@ pub(crate) fn build_llm_client(
 
     reqwest::Client::builder()
         .default_headers(headers)
-        .timeout(LLM_REQUEST_TIMEOUT)
+        .timeout(timeout)
         .build()
         .map_err(|e| RsGuardError::Config(format!("Failed to build HTTP client: {}", e)))
 }
@@ -457,7 +461,12 @@ mod tests {
 
     #[test]
     fn test_build_llm_client_rejects_invalid_api_key() {
-        let result = build_llm_client("deepseek", "key\x00with\x01control", &[]);
+        let result = build_llm_client(
+            "deepseek",
+            "key\x00with\x01control",
+            &[],
+            std::time::Duration::from_secs(60),
+        );
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(
@@ -469,7 +478,12 @@ mod tests {
 
     #[test]
     fn test_build_llm_client_rejects_invalid_extra_header_name() {
-        let result = build_llm_client("testprov", "valid-key", &[("inv@lid header name", "value")]);
+        let result = build_llm_client(
+            "testprov",
+            "valid-key",
+            &[("inv@lid header name", "value")],
+            std::time::Duration::from_secs(60),
+        );
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(
@@ -481,7 +495,12 @@ mod tests {
 
     #[test]
     fn test_build_llm_client_rejects_invalid_extra_header_value() {
-        let result = build_llm_client("testprov", "valid-key", &[("X-Custom", "val\x00ue")]);
+        let result = build_llm_client(
+            "testprov",
+            "valid-key",
+            &[("X-Custom", "val\x00ue")],
+            std::time::Duration::from_secs(60),
+        );
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(
@@ -493,7 +512,12 @@ mod tests {
 
     #[test]
     fn test_build_llm_client_succeeds_with_valid_inputs() {
-        let result = build_llm_client("deepseek", "valid-key-123", &[]);
+        let result = build_llm_client(
+            "deepseek",
+            "valid-key-123",
+            &[],
+            std::time::Duration::from_secs(60),
+        );
         assert!(result.is_ok());
     }
 
@@ -503,6 +527,7 @@ mod tests {
             "openrouter",
             "valid-key",
             &[("HTTP-Referer", "https://example.com"), ("X-Title", "test")],
+            std::time::Duration::from_secs(60),
         );
         assert!(result.is_ok());
     }
@@ -530,7 +555,8 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let client = build_llm_client("testprov", "key", &[]).unwrap();
+        let client =
+            build_llm_client("testprov", "key", &[], std::time::Duration::from_secs(60)).unwrap();
         let request = ChatRequest {
             model: "test-model".to_string(),
             messages: chat_messages("system", "user"),
@@ -567,7 +593,8 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let client = build_llm_client("testprov", "key", &[]).unwrap();
+        let client =
+            build_llm_client("testprov", "key", &[], std::time::Duration::from_secs(60)).unwrap();
         let request = ChatRequest {
             model: "test-model".to_string(),
             messages: chat_messages("system", "user"),
@@ -604,7 +631,8 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let client = build_llm_client("testprov", "key", &[]).unwrap();
+        let client =
+            build_llm_client("testprov", "key", &[], std::time::Duration::from_secs(60)).unwrap();
         let request = ChatRequest {
             model: "test-model".to_string(),
             messages: chat_messages("system", "user"),
@@ -652,7 +680,8 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let client = build_llm_client("deepseek", "key", &[]).unwrap();
+        let client =
+            build_llm_client("deepseek", "key", &[], std::time::Duration::from_secs(60)).unwrap();
         let request = ChatRequest {
             model: "deepseek-v4-pro".to_string(),
             messages: chat_messages("system", "user"),
@@ -700,7 +729,8 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let client = build_llm_client("deepseek", "key", &[]).unwrap();
+        let client =
+            build_llm_client("deepseek", "key", &[], std::time::Duration::from_secs(60)).unwrap();
         let request = ChatRequest {
             model: "deepseek-v4-pro".to_string(),
             messages: chat_messages("system", "user"),
@@ -720,6 +750,52 @@ mod tests {
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(err.is_retryable());
+    }
+
+    #[tokio::test]
+    async fn test_send_chat_request_returns_only_content_reasoning_not_included() {
+        use wiremock::matchers::method;
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mock_server = MockServer::start().await;
+        // Response contains both reasoning_content (internal) and final content.
+        // The value returned by chat_completion must be ONLY the final content.
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "choices": [{
+                    "message": {
+                        "content": "Final review verdict here.",
+                        "reasoning_content": "SECRET REASONING that must not leak to caller or verdict"
+                    }
+                }]
+            })))
+            .mount(&mock_server)
+            .await;
+
+        let client =
+            build_llm_client("deepseek", "key", &[], std::time::Duration::from_secs(60)).unwrap();
+        let request = ChatRequest {
+            model: "deepseek-v4-pro".to_string(),
+            messages: chat_messages("system", "user"),
+            temperature: 0.1,
+            max_tokens: Some(4096),
+            result_format: None,
+            extra_body: HashMap::new(),
+        };
+        let result = send_chat_request(
+            &client,
+            &format!("{}/chat/completions", mock_server.uri()),
+            &request,
+            "deepseek",
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(result, "Final review verdict here.");
+        assert!(
+            !result.contains("SECRET REASONING"),
+            "reasoning_content must not appear in the content returned to pipeline"
+        );
     }
 
     #[test]
@@ -765,7 +841,8 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let client = build_llm_client("deepseek", "key", &[]).unwrap();
+        let client =
+            build_llm_client("deepseek", "key", &[], std::time::Duration::from_secs(60)).unwrap();
         let request = ChatRequest {
             model: "deepseek-v4-pro".to_string(),
             messages: chat_messages("system", "user"),
@@ -803,7 +880,8 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let client = build_llm_client("testprov", "key", &[]).unwrap();
+        let client =
+            build_llm_client("testprov", "key", &[], std::time::Duration::from_secs(60)).unwrap();
         let request = ChatRequest {
             model: "test-model".to_string(),
             messages: chat_messages("system", "user"),

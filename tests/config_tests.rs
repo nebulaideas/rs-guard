@@ -17,6 +17,7 @@ const ALL_TEST_ENV_VARS: &[&str] = &[
     "RS_GUARD_VARIANT",
     "RS_GUARD_TEMPERATURE",
     "RS_GUARD_MAX_TOKENS",
+    "RS_GUARD_LLM_TIMEOUT",
     "DEEPSEEK_API_KEY",
     "KIMI_API_KEY",
     "MY_KIMI_KEY",
@@ -1037,6 +1038,71 @@ max_tokens = 2048
         let config = Config::from_env(toml).unwrap();
         assert_eq!(config.provider_config.max_tokens, Some(2048));
     });
+}
+
+// ---------------------------------------------------------------------------
+// LLM timeout configuration (1.2.3)
+// ---------------------------------------------------------------------------
+
+#[test]
+#[serial]
+fn test_default_llm_timeout_secs_raised_for_deepseek() {
+    with_env(&[("DEEPSEEK_API_KEY", "test-deepseek-key")], || {
+        let config = Config::from_env(None).unwrap();
+        // Auto-raised for thinking models (deepseek-v4-pro etc.)
+        assert_eq!(
+            config.llm_timeout_secs, rs_guard::config::THINKING_MIN_LLM_TIMEOUT_SECS,
+            "deepseek should get auto-raised timeout (180s) when not explicit"
+        );
+    });
+}
+
+#[test]
+#[serial]
+fn test_env_llm_timeout_overrides_default() {
+    with_env(
+        &[
+            ("DEEPSEEK_API_KEY", "test-deepseek-key"),
+            ("RS_GUARD_LLM_TIMEOUT", "180"),
+        ],
+        || {
+            let config = Config::from_env(None).unwrap();
+            assert_eq!(config.llm_timeout_secs, 180);
+        },
+    );
+}
+
+#[test]
+#[serial]
+fn test_toml_llm_timeout_secs_overrides_default() {
+    let file = write_toml(
+        br#"provider = "deepseek"
+llm_timeout_secs = 300
+"#,
+    );
+    with_env(&[("DEEPSEEK_API_KEY", "test-deepseek-key")], || {
+        let toml = load_toml_config(file.path()).unwrap();
+        let config = Config::from_env(toml).unwrap();
+        assert_eq!(config.llm_timeout_secs, 300);
+    });
+}
+
+#[test]
+#[serial]
+fn test_non_thinking_provider_keeps_lower_default_timeout() {
+    with_env(
+        &[
+            ("OPENAI_API_KEY", "test-openai-key"),
+            ("RS_GUARD_PROVIDER", "openai"),
+        ],
+        || {
+            let config = Config::from_env(None).unwrap();
+            assert_eq!(
+                config.llm_timeout_secs,
+                rs_guard::config::DEFAULT_LLM_TIMEOUT_SECS
+            );
+        },
+    );
 }
 
 // ---------------------------------------------------------------------------

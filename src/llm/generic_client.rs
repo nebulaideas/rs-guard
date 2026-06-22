@@ -75,6 +75,7 @@ impl GenericOpenAiCompatibleClient {
         meta: &'static ProviderMeta,
         api_key: &str,
         extra_header_overrides: &[(&str, &str)],
+        timeout_secs: Option<u64>,
     ) -> Result<Self, RsGuardError> {
         // Merge the provider's default headers with config-supplied overrides.
         // Later entries (overrides) win on name collision: build an ordered
@@ -89,7 +90,11 @@ impl GenericOpenAiCompatibleClient {
             }
         }
 
-        let client = build_llm_client(meta.name, api_key, &headers)?;
+        let timeout = timeout_secs.map(std::time::Duration::from_secs).unwrap_or(
+            std::time::Duration::from_secs(crate::config::DEFAULT_LLM_TIMEOUT_SECS),
+        );
+
+        let client = build_llm_client(meta.name, api_key, &headers, timeout)?;
         Ok(Self {
             meta,
             base_url: meta.default_base_url.to_string(),
@@ -170,7 +175,7 @@ mod tests {
     fn build(provider_name: &str, server_uri: &str) -> GenericOpenAiCompatibleClient {
         let meta = find_provider(provider_name)
             .unwrap_or_else(|| panic!("provider '{}' must be registered", provider_name));
-        GenericOpenAiCompatibleClient::new(meta, "test-key", &[])
+        GenericOpenAiCompatibleClient::new(meta, "test-key", &[], None)
             .unwrap()
             .with_base_url(server_uri.to_string())
     }
@@ -292,6 +297,7 @@ mod tests {
             meta,
             "test-key",
             &[("HTTP-Referer", "https://my-bot.example.com")],
+            None,
         )
         .unwrap()
         .with_base_url(mock_server.uri());
@@ -322,6 +328,7 @@ mod tests {
             meta,
             "test-key",
             &[("X-Custom-Header", "custom-value")],
+            None,
         )
         .unwrap()
         .with_base_url(mock_server.uri());
@@ -351,6 +358,7 @@ mod tests {
                 ("HTTP-Referer", "https://custom.example.com"),
                 ("X-Title", "custom-title"),
             ],
+            None,
         )
         .unwrap()
         .with_base_url(mock_server.uri());
@@ -403,7 +411,7 @@ mod tests {
     async fn test_grok_uses_xai_base_url() {
         // Smoke: grok client's default base URL must be the xAI endpoint.
         let meta = find_provider("grok").unwrap();
-        let client = GenericOpenAiCompatibleClient::new(meta, "test-key", &[]).unwrap();
+        let client = GenericOpenAiCompatibleClient::new(meta, "test-key", &[], None).unwrap();
         assert_eq!(client.base_url, "https://api.x.ai/v1");
         assert_eq!(client.model, "grok-3");
     }
@@ -411,7 +419,7 @@ mod tests {
     #[tokio::test]
     async fn test_glm_uses_zhipu_base_url() {
         let meta = find_provider("glm").unwrap();
-        let client = GenericOpenAiCompatibleClient::new(meta, "test-key", &[]).unwrap();
+        let client = GenericOpenAiCompatibleClient::new(meta, "test-key", &[], None).unwrap();
         assert_eq!(client.base_url, "https://open.bigmodel.cn/api/paas/v4");
         assert_eq!(client.model, "glm-4");
     }

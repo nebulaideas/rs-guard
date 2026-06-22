@@ -35,6 +35,7 @@ rs-guard [OPTIONS]
 | `--variant`     |       | (none)                     | Provider-specific model variant (e.g. `flash`/`pro` for deepseek). See PROVIDERS.md and CONFIGURATION.md. |
 | `--config`      | `-c`  | `.reviewer.toml`           | Path to the configuration TOML file.                                               |
 | `--max-tokens`  |       | `4096`                     | Maximum tokens for LLM completions.                                                |
+| `--llm-timeout` |       | `120`                      | Total timeout in seconds for LLM API requests. Raise for thinking models.          |
 | `--diff-file`   | —     | _(none)_                   | Review a pre-existing diff file instead of fetching from GitHub API.               |
 | `--no-cache`    | —     | Off                        | Bypass the response cache and force a fresh LLM API call.                          |
 | `--dry-run`     | —     | Off                        | Run the full pipeline without submitting reviews or blocking commits.              |
@@ -59,7 +60,8 @@ rs-guard --provider deepseek --model deepseek-v4-flash
 rs-guard --provider kimi --model kimi-k2.5
 
 # DeepSeek with explicit variant (higher-level than --model for supported providers)
-rs-guard --provider deepseek --variant pro
+# For deepseek-v4-pro (reasoning model) also raise max-tokens and timeout
+rs-guard --provider deepseek --variant pro --max-tokens 16384 --llm-timeout 180
 
 # Review a pre-existing diff file
 rs-guard --diff-file pr-diff.diff
@@ -91,8 +93,9 @@ rs-guard --dry-run
 | `RS_GUARD_PROVIDER`     | Optional      | Override default provider via environment variable                                      |
 | `RS_GUARD_MODEL`        | Optional      | Override default model for the current provider                                         |
 | `RS_GUARD_TEMPERATURE`  | Optional      | Override default temperature via environment variable                                   |
-| `RS_GUARD_MAX_TOKENS`   | Optional      | Override max tokens via environment variable                                            |
-| `RS_GUARD_DIFF_FILE`    | Optional      | Alias for `--diff-file`                                                                 |
+| `RS_GUARD_MAX_TOKENS`    | Optional      | Override max tokens via environment variable                                            |
+| `RS_GUARD_LLM_TIMEOUT`   | Optional      | LLM request timeout seconds (default 120; raise for thinking models)                    |
+| `RS_GUARD_DIFF_FILE`     | Optional      | Alias for `--diff-file`                                                                 |
 | `RS_GUARD_METRICS_PATH` | Optional      | Custom path for `rs-guard-metrics.json` artifact                                        |
 | `GITHUB_API_URL`        | Optional      | Custom GitHub API base URL (e.g. GitHub Enterprise); default: `https://api.github.com`  |
 
@@ -552,6 +555,23 @@ GitHub has a 65536 character limit for review bodies. If your review exceeds thi
 ### `Cache hit — using cached LLM response`
 
 The same diff+prompt+provider+model+temperature combination was cached within the 24-hour TTL. Pass `--no-cache` for a fresh call.
+
+### Empty assistant content / "reasoning may have consumed the token budget" (DeepSeek / Kimi)
+
+Thinking models return `content: null` (or empty) + `reasoning_content` when the output budget is exhausted by chain-of-thought before the final answer.
+
+rs-guard treats this as a transient (retryable) error and will retry up to 3 times with backoff. The response is **never cached** until a successful verdict parse.
+
+**Fixes:**
+- Raise `max_tokens` (env `RS_GUARD_MAX_TOKENS`, `--max-tokens`, or TOML). For deepseek/kimi the default is auto-raised to 16,384 **only** when you have not set an explicit value.
+- Consider `--llm-timeout 180` or `RS_GUARD_LLM_TIMEOUT=180` if the model needs more wall time for reasoning.
+- Use a cheaper/faster variant when possible (e.g. `flash`).
+
+You will see a warning in logs containing the length of `reasoning_content`.
+
+### LLM request timing out
+
+Increase `--llm-timeout` / `RS_GUARD_LLM_TIMEOUT` (seconds). The default is 120s as of v1.2.3 (up from 60s) specifically to help thinking models.
 
 ### Review posted as `COMMENT` instead of `APPROVE`/`REQUEST_CHANGES`
 

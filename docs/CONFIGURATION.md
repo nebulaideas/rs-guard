@@ -36,6 +36,12 @@ model = "deepseek-v4-flash"     # Model identifier (provider-specific)
 variant = "flash"               # Provider-specific model variant (e.g. "flash", "pro" for deepseek). Optional.
 temperature = 0.1               # Sampling temperature (0.0 to 2.0)
 max_tokens = 8192               # Maximum tokens for LLM completion
+llm_timeout_secs = 180          # Total timeout for LLM HTTP calls in seconds (default 120)
+
+# Example for deepseek-v4-pro (complex reasoning)
+# variant = "pro"
+# max_tokens = 16384
+# llm_timeout_secs = 180
 
 # Per-provider configuration
 [providers.deepseek]
@@ -80,7 +86,8 @@ base_url = "https://open.bigmodel.cn/api/paas/v4"
 | `model`             | string  | provider-specific | Model identifier. See [PROVIDERS.md](PROVIDERS.md) for defaults.                                                                  |
 | `variant`           | string  | (none)            | Provider-specific model variant (e.g. "flash" / "pro" for deepseek). See [PROVIDERS.md](PROVIDERS.md). CLI/env/TOML precedence applies. |
 | `temperature`       | float   | `0.1`             | Sampling temperature (0.0 = deterministic, 2.0 = very random).                                                                    |
-| `max_tokens`        | integer | `4096`            | Maximum tokens in the LLM response. Defaults to 4096 to prevent the verdict block from being truncated by the provider.           |
+| `max_tokens`        | integer | `4096`            | Maximum tokens in the LLM response. Defaults to 4096 (or 16,384 for deepseek/kimi when not explicit) to prevent the verdict block from being truncated. |
+| `llm_timeout_secs`  | integer | `120` (180 for deepseek/kimi) | Total timeout (seconds) for LLM `/chat/completions` HTTP requests. Auto-raised to 180s for `deepseek` and `kimi` when not explicitly set (to support reasoning models like deepseek-v4-pro). Increase further for complex PRs. |
 | `chunk_head_lines`  | integer | `400`             | Lines preserved from the **start** of the diff when chunking. Increase for providers with large context windows (e.g. 128K).      |
 | `chunk_tail_lines`  | integer | `400`             | Lines preserved from the **end** of the diff when chunking. Combined default of 800 covers most PRs without truncation.           |
 | `cache_dir`         | string  | `.rs-guard/cache` | Custom cache directory path. Defaults to git-root (or CWD) relative `.rs-guard/cache`.                                           |

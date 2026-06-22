@@ -64,6 +64,10 @@ pub struct Args {
     #[arg(long, help = "Maximum tokens for LLM completions")]
     pub max_tokens: Option<u32>,
 
+    /// Timeout in seconds for LLM API requests (total).
+    #[arg(long, help = "Timeout in seconds for LLM API requests [default: 120]")]
+    pub llm_timeout: Option<u64>,
+
     /// Path to a pre-existing diff file to review instead of fetching from GitHub.
     ///
     /// When set, rs-guard reads the diff content from this file path

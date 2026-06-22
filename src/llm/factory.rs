@@ -53,7 +53,8 @@ pub fn create_provider(
         _ => Vec::new(),
     };
 
-    let mut client = GenericOpenAiCompatibleClient::new(meta, api_key, &header_overrides)?;
+    let mut client =
+        GenericOpenAiCompatibleClient::new(meta, api_key, &header_overrides, config.timeout_secs)?;
 
     if let Some(ref url) = config.base_url {
         client = client.with_base_url(url.clone());
@@ -77,6 +78,7 @@ mod tests {
             max_tokens: None,
             model: "test-model".to_string(),
             variant: None,
+            timeout_secs: None,
         }
     }
 

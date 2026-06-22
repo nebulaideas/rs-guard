@@ -18,6 +18,7 @@ fn default_config() -> ProviderConfig {
         max_tokens: None,
         model: "test-model".to_string(),
         variant: None,
+        timeout_secs: None,
     }
 }
 
@@ -29,6 +30,7 @@ fn config_at(provider: &str, server_uri: &str) -> ProviderConfig {
         max_tokens: None,
         model: provider_default_model(provider),
         variant: None,
+        timeout_secs: None,
     }
 }
 

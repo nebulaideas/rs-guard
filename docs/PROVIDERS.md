@@ -48,40 +48,119 @@ DeepSeek V4 exposes multiple models. Use the generic `variant` mechanism (CLI `-
 | `flash` | Fast, cost-effective (default)       | `deepseek-v4-flash`  |
 | `pro`   | Most capable for complex reasoning   | `deepseek-v4-pro`    |
 
-Example:
-```bash
-rs-guard --provider deepseek --variant pro
-# or
-export RS_GUARD_VARIANT=flash
+### Using deepseek-v4-pro (recommended for complex reviews)
+
+`deepseek-v4-pro` is a powerful reasoning model. Because it performs extensive chain-of-thought internally, it often returns `"content": null` (or empty) while populating `reasoning_content`. rs-guard automatically:
+
+- Treats empty final content as a **retryable** error (up to 3 attempts with backoff).
+- Skips caching the response until a successful verdict is parsed.
+- Raises the `max_tokens` floor to **16,384** when you do not set an explicit value.
+- Raises the LLM timeout floor to **180s** (from 120s) for `deepseek` / `kimi` when not explicitly set.
+
+**Best practices for deepseek-v4-pro**
+- Set `max_tokens` to at least 16,384 (or higher for very thorough reviews).
+- Use a longer timeout (180–300s) because reasoning can take significant time.
+- Prefer the `pro` **variant** over the raw model name — it is clearer and future-proof.
+- In CI (GitHub Actions), always pin explicit values and give the step enough `timeout-minutes`.
+
+#### Recommended GitHub Actions usage (the pattern that was flaky)
+
+```yaml
+- name: AI Code Review (deepseek-v4-pro)
+  run: |
+    ./rs-guard \
+      --prompt-file .github/review-prompt.md \
+      --provider deepseek \
+      --variant pro \
+      --max-tokens 16384 \
+      --llm-timeout 240
+  env:
+    DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+  # Give the step headroom — the model itself can be slow
+  timeout-minutes: 10
 ```
-In TOML:
+
+Or with environment variables (cleaner in workflows):
+
+```yaml
+env:
+  DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+  RS_GUARD_PROVIDER: deepseek
+  RS_GUARD_VARIANT: pro
+  RS_GUARD_MAX_TOKENS: 16384
+  RS_GUARD_LLM_TIMEOUT: 240
+```
+
+If you want the review posted without failing the build on `REQUEST_CHANGES`, use:
+
+```yaml
+continue-on-error: true
+```
+
+#### CLI + parameters
+
+```bash
+# Recommended way (variant + explicit settings)
+rs-guard \
+  --provider deepseek \
+  --variant pro \
+  --max-tokens 16384 \
+  --llm-timeout 180
+
+# Alternative: specify the model directly
+rs-guard --provider deepseek --model deepseek-v4-pro --max-tokens 20000
+```
+
+#### Environment variables (parameters)
+
+```bash
+export DEEPSEEK_API_KEY="sk-..."
+export RS_GUARD_PROVIDER="deepseek"
+export RS_GUARD_VARIANT="pro"
+export RS_GUARD_MAX_TOKENS="16384"
+export RS_GUARD_LLM_TIMEOUT="180"
+
+rs-guard
+```
+
+#### TOML configuration
+
+**Minimal .reviewer.toml using the variant (recommended):**
+
 ```toml
 provider = "deepseek"
-# variant = "pro"                # top-level
+variant = "pro"                 # resolves to deepseek-v4-pro
+
+# Important for reasoning models
+max_tokens = 16384
+llm_timeout_secs = 180
+
 [providers.deepseek]
-variant = "pro"
+# You can also put variant here for per-provider override
+# variant = "pro"
 ```
 
-### CLI Usage
-
-```bash
-rs-guard --provider deepseek --model deepseek-v4-flash
-# or use the higher-level variant (recommended when available):
-rs-guard --provider deepseek --variant flash
-```
-
-### TOML Configuration
+**Full example with per-provider section:**
 
 ```toml
 provider = "deepseek"
-model = "deepseek-v4-flash"
-# variant = "pro"                # top level (applies to selected provider)
+model = "deepseek-v4-pro"       # you can also use model directly
+
+max_tokens = 16384
+llm_timeout_secs = 180
 
 [providers.deepseek]
 api_key_env = "DEEPSEEK_API_KEY"
 base_url = "https://api.deepseek.com"
-# variant = "pro"                # per-provider override (highest TOML precedence)
+# variant = "pro"               # per-provider variant (takes precedence over top-level)
 ```
+
+**Precedence (highest to lowest):**
+1. CLI flags (`--variant`, `--model`, `--max-tokens`, `--llm-timeout`)
+2. Environment variables (`RS_GUARD_VARIANT`, `RS_GUARD_MODEL`, ...)
+3. `[providers.deepseek]` section in TOML
+4. Top-level keys in TOML (`variant = "pro"`, `max_tokens = ...`)
+5. Built-in defaults (`deepseek-v4-flash`, 120s / auto-raised 180s timeout for deepseek, auto 16k `max_tokens`)
 
 ### API Key Acquisition
 

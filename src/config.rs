@@ -28,6 +28,20 @@ pub const DEFAULT_MAX_TOKENS: u32 = 4096;
 /// `content`. Provider docs recommend >= 16k to avoid empty final answers.
 pub const THINKING_MIN_MAX_TOKENS: u32 = 16_384;
 
+/// Default timeout for LLM HTTP requests in seconds.
+///
+/// Raised to 120s (from 60s) in v1.2.3 to accommodate thinking models
+/// (DeepSeek, Kimi) where chain-of-thought reasoning can take substantial time
+/// before the final `content` is produced.
+pub const DEFAULT_LLM_TIMEOUT_SECS: u64 = 120;
+
+/// Minimum LLM timeout (seconds) for providers that use heavy chain-of-thought
+/// reasoning by default (DeepSeek V4 "pro", Kimi with thinking-on, etc.).
+///
+/// These models can take substantially longer to produce the final `content`
+/// because they spend tokens on internal reasoning first.
+pub const THINKING_MIN_LLM_TIMEOUT_SECS: u64 = 180;
+
 /// Default system prompt embedded in the binary.
 ///
 /// Used when no `--prompt-file` is specified or the file does not exist.
@@ -170,6 +184,8 @@ pub struct TomlConfig {
     pub temperature: Option<f32>,
     /// Maximum tokens for LLM completions.
     pub max_tokens: Option<u32>,
+    /// LLM request timeout in seconds (total time for the HTTP call).
+    pub llm_timeout_secs: Option<u64>,
     /// Lines to preserve from the start of the diff when chunking.
     ///
     /// Overrides [`crate::diff::DEFAULT_CHUNK_HEAD_LINES`].
@@ -200,6 +216,7 @@ const KNOWN_TOP_LEVEL_KEYS: &[&str] = &[
     "variant",
     "temperature",
     "max_tokens",
+    "llm_timeout_secs",
     "chunk_head_lines",
     "chunk_tail_lines",
     "providers",
@@ -553,6 +570,8 @@ pub struct Config {
     pub chunk_head_lines: usize,
     /// Lines to preserve from the end of the diff when chunking.
     pub chunk_tail_lines: usize,
+    /// Resolved LLM request timeout in seconds.
+    pub llm_timeout_secs: u64,
 }
 
 impl Config {
@@ -593,6 +612,7 @@ impl Config {
             auto_gitignore: true,
             chunk_head_lines: crate::diff::DEFAULT_CHUNK_HEAD_LINES,
             chunk_tail_lines: crate::diff::DEFAULT_CHUNK_TAIL_LINES,
+            llm_timeout_secs: DEFAULT_LLM_TIMEOUT_SECS,
         }
     }
 
@@ -727,6 +747,23 @@ impl Config {
             max_tokens = max_tokens.map(|t| t.max(THINKING_MIN_MAX_TOKENS));
         }
 
+        // LLM timeout (seconds): env > toml > DEFAULT_LLM_TIMEOUT_SECS (120)
+        // Thinking models (deepseek-v4-pro, Kimi thinking) can take much longer
+        // to emit final content after spending the budget on reasoning_content.
+        let env_timeout = std::env::var("RS_GUARD_LLM_TIMEOUT")
+            .ok()
+            .and_then(|s| s.parse().ok());
+        let toml_timeout = toml.as_ref().and_then(|t| t.llm_timeout_secs);
+        let timeout_is_explicit = env_timeout.is_some() || toml_timeout.is_some();
+
+        let mut llm_timeout_secs = env_timeout
+            .or(toml_timeout)
+            .unwrap_or(DEFAULT_LLM_TIMEOUT_SECS);
+
+        if !timeout_is_explicit && matches!(provider.as_str(), "deepseek" | "kimi") {
+            llm_timeout_secs = llm_timeout_secs.max(THINKING_MIN_LLM_TIMEOUT_SECS);
+        }
+
         // Chunking thresholds: toml > default
         let chunk_head_lines = toml
             .as_ref()
@@ -764,6 +801,7 @@ impl Config {
             max_tokens,
             model: model.clone(),
             variant: variant.clone(),
+            timeout_secs: Some(llm_timeout_secs),
         };
 
         let cache_dir = toml.as_ref().and_then(|t| t.cache_dir.clone());
@@ -810,13 +848,14 @@ impl Config {
             auto_gitignore,
             chunk_head_lines,
             chunk_tail_lines,
+            llm_timeout_secs,
         })
     }
 
     /// Applies CLI argument overrides to the configuration.
     ///
     /// CLI flags take precedence over environment variables and TOML for `model`,
-    /// `variant`, `temperature`, `provider`, and `max_tokens`. If the provider
+    /// `variant`, `temperature`, `provider`, `max_tokens`, and `llm_timeout`. If the provider
     /// changes, the API key is re-resolved (respecting TOML `api_key_env`
     /// overrides), the model is reset to the new provider's default unless
     /// explicitly set via the CLI `--model` flag, and the variant is re-resolved
@@ -902,6 +941,10 @@ impl Config {
         }
         if let Some(max_tokens) = args.max_tokens {
             self.provider_config.max_tokens = Some(max_tokens);
+        }
+        if let Some(t) = args.llm_timeout {
+            self.llm_timeout_secs = t;
+            self.provider_config.timeout_secs = Some(t);
         }
         if args.no_cache {
             self.no_cache = true;
