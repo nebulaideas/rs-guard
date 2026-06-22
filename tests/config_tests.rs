@@ -1051,7 +1051,8 @@ fn test_default_llm_timeout_secs_raised_for_deepseek() {
         let config = Config::from_env(None).unwrap();
         // Auto-raised for thinking models (deepseek-v4-pro etc.)
         assert_eq!(
-            config.llm_timeout_secs, rs_guard::config::THINKING_MIN_LLM_TIMEOUT_SECS,
+            config.llm_timeout_secs,
+            rs_guard::config::THINKING_MIN_LLM_TIMEOUT_SECS,
             "deepseek should get auto-raised timeout (180s) when not explicit"
         );
     });
