@@ -714,7 +714,7 @@ impl Config {
             .ok()
             .and_then(|s| s.parse().ok());
         let toml_max_tokens = toml.as_ref().and_then(|t| t.max_tokens);
-        let max_tokens_explicit = env_max_tokens.is_some() || toml_max_tokens.is_some();
+        let max_tokens_is_explicit = env_max_tokens.is_some() || toml_max_tokens.is_some();
 
         let mut max_tokens: Option<u32> = env_max_tokens
             .or(toml_max_tokens)
@@ -723,7 +723,7 @@ impl Config {
         // Thinking models (DeepSeek v4, Kimi) share max_tokens between
         // reasoning_content and content. Raise the floor when the user has not
         // set an explicit value — prevents 0-char content on deepseek-v4-pro.
-        if !max_tokens_explicit && matches!(provider.as_str(), "deepseek" | "kimi") {
+        if !max_tokens_is_explicit && matches!(provider.as_str(), "deepseek" | "kimi") {
             max_tokens = max_tokens.map(|t| t.max(THINKING_MIN_MAX_TOKENS));
         }
 

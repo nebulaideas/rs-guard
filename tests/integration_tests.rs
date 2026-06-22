@@ -265,18 +265,11 @@ async fn test_full_pipeline_cache_hit() {
     let llm = MockServer::start().await;
 
     // Use unique diff content to avoid cache collisions with other tests
-    let unique_diff = format!(
-        "diff --git a/unique{}.rs b/unique{}.rs\n+line{}",
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos(),
-        42
-    );
+    let unique_id = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let unique_diff = format!("diff --git a/unique{unique_id}.rs b/unique{unique_id}.rs\n+line42");
 
     Mock::given(method("GET"))
         .and(path_regex(r"/repos/test-owner/test-repo/pulls/\d+"))
@@ -630,18 +623,12 @@ async fn test_full_pipeline_empty_content_not_cached_on_failure() {
     let github = MockServer::start().await;
     let llm = MockServer::start().await;
 
-    let unique_diff = format!(
-        "diff --git a/empty-cache{}.rs b/empty-cache{}.rs\n+line{}",
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos(),
-        99
-    );
+    let unique_id = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let unique_diff =
+        format!("diff --git a/empty-cache{unique_id}.rs b/empty-cache{unique_id}.rs\n+line99");
 
     Mock::given(method("GET"))
         .and(path_regex(r"/repos/test-owner/test-repo/pulls/\d+"))

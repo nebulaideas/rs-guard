@@ -283,8 +283,10 @@ fn resolve_assistant_content(
     Err(LlmError {
         provider: provider_name.to_string(),
         status: 0,
-        message: "Empty assistant content from LLM (reasoning may have consumed the token budget)"
-            .to_string(),
+        message: format!(
+            "Empty assistant content from LLM (reasoning_content: {reasoning_len} chars; \
+             reasoning may have consumed the token budget)"
+        ),
     })
 }
 
