@@ -7,7 +7,8 @@
 use crate::error::RsGuardError;
 use async_trait::async_trait;
 use reqwest::header::{self, HeaderMap, HeaderValue};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
+use serde_json::Value;
 use std::collections::HashMap;
 
 /// HTTP request timeout for LLM API calls.
@@ -70,11 +71,20 @@ pub struct ChatChoice {
     pub message: ChatMessageResponse,
 }
 
+/// Deserializes a nullable JSON string as `String`, mapping `null` and absent
+/// values to empty (DeepSeek/Kimi thinking models emit `"content": null`).
+fn deserialize_nullable_string<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Ok(Option::<String>::deserialize(deserializer)?.unwrap_or_default())
+}
+
 /// Message content within a chat completion response choice.
 #[derive(Debug, Deserialize)]
 pub struct ChatMessageResponse {
     /// The generated text content.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_nullable_string")]
     pub content: String,
     /// Optional reasoning content (e.g. Kimi/Moonshot AI chain-of-thought).
     #[serde(default)]
@@ -215,8 +225,13 @@ pub(crate) async fn send_chat_request<B: Serialize + Send>(
         );
     }
 
+    let body = response.text().await.map_err(|e| LlmError {
+        provider: provider_name.to_string(),
+        status: 0,
+        message: format!("Failed to read response body: {e}"),
+    })?;
+
     if !status.is_success() {
-        let body = response.text().await.unwrap_or_default();
         return Err(LlmError {
             provider: provider_name.to_string(),
             status: status.as_u16(),
@@ -225,37 +240,94 @@ pub(crate) async fn send_chat_request<B: Serialize + Send>(
         .into());
     }
 
-    let chat_response: ChatResponse = response.json().await.map_err(|e| LlmError {
+    parse_completion_response_body(&body, provider_name).map_err(Into::into)
+}
+
+/// Parses an OpenAI-compatible `/chat/completions` JSON body and extracts the
+/// assistant's final `content` string.
+///
+/// Uses loose [`Value`] traversal instead of strict structs so provider-specific
+/// shapes (nullable `content`, multimodal content arrays, extra choice fields)
+/// do not fail deserialization.
+fn parse_completion_response_body(body: &str, provider_name: &str) -> Result<String, LlmError> {
+    let value: Value = serde_json::from_str(body).map_err(|e| LlmError {
         provider: provider_name.to_string(),
         status: 0,
-        message: format!("Failed to parse response: {}", e),
+        message: format!(
+            "Failed to parse response JSON: {e} (body_len={})",
+            body.len()
+        ),
     })?;
 
-    let choice = chat_response
-        .choices
-        .into_iter()
-        .next()
+    let choices = value
+        .get("choices")
+        .and_then(Value::as_array)
+        .filter(|c| !c.is_empty())
         .ok_or_else(|| LlmError {
             provider: provider_name.to_string(),
             status: 0,
             message: "Empty response from LLM".to_string(),
         })?;
 
-    resolve_assistant_content(&choice.message, provider_name).map_err(Into::into)
+    let message = choices[0].get("message").ok_or_else(|| LlmError {
+        provider: provider_name.to_string(),
+        status: 0,
+        message: "LLM response missing choices[0].message".to_string(),
+    })?;
+
+    let content = extract_text_field(message.get("content"));
+    let reasoning_content = extract_optional_text_field(message.get("reasoning_content"));
+
+    resolve_assistant_content(&content, reasoning_content.as_deref(), provider_name)
+}
+
+/// Extracts text from a chat `content` or `reasoning_content` field.
+///
+/// Accepts `string`, `null`, absent, or OpenAI-style multimodal arrays
+/// (`[{"type":"text","text":"..."}]`).
+fn extract_text_field(value: Option<&Value>) -> String {
+    match value {
+        None | Some(Value::Null) => String::new(),
+        Some(Value::String(s)) => s.clone(),
+        Some(Value::Array(parts)) => parts
+            .iter()
+            .filter_map(|part| {
+                part.get("text")
+                    .and_then(Value::as_str)
+                    .or_else(|| part.as_str())
+            })
+            .collect(),
+        _ => String::new(),
+    }
+}
+
+/// Like [`extract_text_field`], but returns `None` when the field is absent or null.
+fn extract_optional_text_field(value: Option<&Value>) -> Option<String> {
+    match value {
+        None | Some(Value::Null) => None,
+        Some(other) => {
+            let text = extract_text_field(Some(other));
+            if text.is_empty() {
+                None
+            } else {
+                Some(text)
+            }
+        }
+    }
 }
 
 /// Extracts the assistant's final answer from a chat completion message.
 ///
 /// Thinking models (DeepSeek v4, Kimi) may return chain-of-thought in
-/// `reasoning_content` while leaving `content` empty when the output token
-/// budget is exhausted. Empty `content` is treated as a transient failure
-/// (retryable via [`LlmError`] status 0) — never fall back to
-/// `reasoning_content`, which does not contain the structured review footer.
+/// `reasoning_content` while leaving `content` empty or JSON-null when the
+/// output token budget is exhausted. Empty `content` is a transient failure
+/// (retryable via [`LlmError`] status 0).
 fn resolve_assistant_content(
-    message: &ChatMessageResponse,
+    content: &str,
+    reasoning_content: Option<&str>,
     provider_name: &str,
 ) -> Result<String, LlmError> {
-    if let Some(ref reasoning) = message.reasoning_content {
+    if let Some(reasoning) = reasoning_content {
         log::debug!(
             "[{}] reasoning_content present ({} chars, content not logged)",
             provider_name,
@@ -263,15 +335,11 @@ fn resolve_assistant_content(
         );
     }
 
-    if !message.content.trim().is_empty() {
-        return Ok(message.content.clone());
+    if !content.trim().is_empty() {
+        return Ok(content.to_string());
     }
 
-    let reasoning_len = message
-        .reasoning_content
-        .as_ref()
-        .map(|r| r.len())
-        .unwrap_or(0);
+    let reasoning_len = reasoning_content.map(|r| r.len()).unwrap_or(0);
 
     log::warn!(
         "[{}] Empty assistant content from LLM (reasoning_content: {} chars). \
@@ -559,6 +627,62 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_send_chat_request_null_content_deepseek_shape_is_retryable() {
+        use wiremock::matchers::method;
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mock_server = MockServer::start().await;
+        // DeepSeek thinking-mode shape: content null, reasoning_content present
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": "test-id",
+                "object": "chat.completion",
+                "created": 1705651092,
+                "model": "deepseek-v4-pro",
+                "choices": [{
+                    "index": 0,
+                    "finish_reason": "length",
+                    "message": {
+                        "role": "assistant",
+                        "content": null,
+                        "reasoning_content": "long internal reasoning"
+                    }
+                }]
+            })))
+            .mount(&mock_server)
+            .await;
+
+        let client = build_llm_client("deepseek", "key", &[]).unwrap();
+        let request = ChatRequest {
+            model: "deepseek-v4-pro".to_string(),
+            messages: chat_messages("system", "user"),
+            temperature: 0.1,
+            max_tokens: Some(4096),
+            result_format: None,
+            extra_body: HashMap::new(),
+        };
+        let result = send_chat_request(
+            &client,
+            &format!("{}/chat/completions", mock_server.uri()),
+            &request,
+            "deepseek",
+        )
+        .await;
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(matches!(err, RsGuardError::LlmApi { status: 0, .. }));
+        assert!(err.is_retryable());
+        let msg = err.to_string();
+        assert!(
+            msg.contains("Empty assistant content"),
+            "expected empty content error, got: {}",
+            msg
+        );
+        assert!(msg.contains("reasoning_content: 23 chars"));
+    }
+
+    #[tokio::test]
     async fn test_send_chat_request_empty_content_with_reasoning_is_retryable() {
         use wiremock::matchers::method;
         use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -595,14 +719,70 @@ mod tests {
 
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert!(matches!(err, RsGuardError::LlmApi { status: 0, .. }));
         assert!(err.is_retryable());
-        let msg = err.to_string();
-        assert!(
-            msg.contains("Empty assistant content"),
-            "expected empty content error, got: {}",
-            msg
-        );
+    }
+
+    #[test]
+    fn test_extract_text_field_multimodal_array() {
+        let value = serde_json::json!([
+            {"type": "text", "text": "Hello "},
+            {"type": "text", "text": "world"}
+        ]);
+        assert_eq!(extract_text_field(Some(&value)), "Hello world");
+    }
+
+    #[test]
+    fn test_parse_completion_response_body_content_array() {
+        let body = serde_json::json!({
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": [{"type": "text", "text": "Review OK"}]
+                }
+            }]
+        })
+        .to_string();
+
+        let result = parse_completion_response_body(&body, "deepseek").unwrap();
+        assert_eq!(result, "Review OK");
+    }
+
+    #[tokio::test]
+    async fn test_send_chat_request_content_array_shape() {
+        use wiremock::matchers::method;
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mock_server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "choices": [{
+                    "message": {
+                        "role": "assistant",
+                        "content": [{"type": "text", "text": "Array content OK"}]
+                    }
+                }]
+            })))
+            .mount(&mock_server)
+            .await;
+
+        let client = build_llm_client("deepseek", "key", &[]).unwrap();
+        let request = ChatRequest {
+            model: "deepseek-v4-pro".to_string(),
+            messages: chat_messages("system", "user"),
+            temperature: 0.1,
+            max_tokens: None,
+            result_format: None,
+            extra_body: HashMap::new(),
+        };
+        let result = send_chat_request(
+            &client,
+            &format!("{}/chat/completions", mock_server.uri()),
+            &request,
+            "deepseek",
+        )
+        .await
+        .unwrap();
+        assert_eq!(result, "Array content OK");
     }
 
     #[tokio::test]

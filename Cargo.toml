@@ -1,6 +1,6 @@
 [package]
 name = "rs-guard"
-version = "1.2.1"
+version = "1.2.2"
 edition = "2021"
 authors = ["Nebula Ideas <hello@nebulaideas.dev>"]
 license = "MIT"

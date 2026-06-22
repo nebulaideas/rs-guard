@@ -571,13 +571,13 @@ async fn test_full_pipeline_empty_content_retried_then_succeeds() {
         .mount(&github)
         .await;
 
-    // First call: empty content (thinking consumed budget) — retryable
+    // First call: null content (DeepSeek thinking shape) — retryable
     Mock::given(method("POST"))
         .and(path_regex(r"/chat/completions"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "choices": [{
                 "message": {
-                    "content": "",
+                    "content": null,
                     "reasoning_content": "long internal reasoning"
                 }
             }]
@@ -609,7 +609,7 @@ async fn test_full_pipeline_empty_content_retried_then_succeeds() {
     let result = run_pipeline(config, None).await;
     assert!(
         matches!(result, Ok(PipelineResult::Success)),
-        "expected retry after empty content to succeed, got: {:?}",
+        "expected retry after null content to succeed, got: {:?}",
         result
     );
 }
@@ -636,13 +636,13 @@ async fn test_full_pipeline_empty_content_not_cached_on_failure() {
         .mount(&github)
         .await;
 
-    // Always return empty content — exhaust retries, pipeline must fail
+    // Always return null content — exhaust retries, pipeline must fail
     Mock::given(method("POST"))
         .and(path_regex(r"/chat/completions"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "choices": [{
                 "message": {
-                    "content": "",
+                    "content": null,
                     "reasoning_content": "reasoning only"
                 }
             }]

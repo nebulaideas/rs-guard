@@ -90,6 +90,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.2.2] - 2026-06-21
+
+### Fixed
+
+- **DeepSeek/Kimi thinking-model responses** — loose JSON parsing for
+  `/chat/completions` bodies: tolerates `"content": null`, multimodal content
+  arrays, and extra choice fields (previously caused `Failed to parse response:
+  error decoding response body`). Empty or null assistant `content` is a
+  retryable `LlmApi` error. Default `max_tokens` for `deepseek` and `kimi`
+  rises to 16,384 when not explicitly configured. Cache writes occur only after
+  a successful verdict parse.
+
+---
+
 ## [1.1.0] - 2026-06-17
 
 ### Added
