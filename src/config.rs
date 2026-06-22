@@ -21,6 +21,13 @@ use std::path::Path;
 /// output limits of every supported provider.
 pub const DEFAULT_MAX_TOKENS: u32 = 4096;
 
+/// Minimum `max_tokens` for providers whose models use chain-of-thought thinking
+/// by default (DeepSeek v4, Kimi).
+///
+/// Thinking models share the output budget between `reasoning_content` and
+/// `content`. Provider docs recommend >= 16k to avoid empty final answers.
+pub const THINKING_MIN_MAX_TOKENS: u32 = 16_384;
+
 /// Default system prompt embedded in the binary.
 ///
 /// Used when no `--prompt-file` is specified or the file does not exist.
@@ -703,11 +710,22 @@ impl Config {
         // the response before the [RS_GUARD_VERDICT_METADATA] block, which causes
         // the fallback tag-counting path to activate and may produce incorrect
         // APPROVE verdicts on clean diffs.
-        let max_tokens: Option<u32> = std::env::var("RS_GUARD_MAX_TOKENS")
+        let env_max_tokens = std::env::var("RS_GUARD_MAX_TOKENS")
             .ok()
-            .and_then(|s| s.parse().ok())
-            .or(toml.as_ref().and_then(|t| t.max_tokens))
+            .and_then(|s| s.parse().ok());
+        let toml_max_tokens = toml.as_ref().and_then(|t| t.max_tokens);
+        let max_tokens_explicit = env_max_tokens.is_some() || toml_max_tokens.is_some();
+
+        let mut max_tokens: Option<u32> = env_max_tokens
+            .or(toml_max_tokens)
             .or(Some(DEFAULT_MAX_TOKENS));
+
+        // Thinking models (DeepSeek v4, Kimi) share max_tokens between
+        // reasoning_content and content. Raise the floor when the user has not
+        // set an explicit value — prevents 0-char content on deepseek-v4-pro.
+        if !max_tokens_explicit && matches!(provider.as_str(), "deepseek" | "kimi") {
+            max_tokens = max_tokens.map(|t| t.max(THINKING_MIN_MAX_TOKENS));
+        }
 
         // Chunking thresholds: toml > default
         let chunk_head_lines = toml

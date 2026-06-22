@@ -5,7 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.2.1]
+
+### Fixed
+
+- **Empty LLM responses on thinking models (DeepSeek v4, Kimi)** — HTTP 200 with
+  0-char `content` no longer proceeds to verdict parsing. Empty assistant content
+  is now a retryable `LlmApi` error (up to 3 retries with backoff). Default
+  `max_tokens` for `deepseek` and `kimi` is raised to 16,384 when not explicitly
+  configured, because thinking models share the output budget between
+  `reasoning_content` and `content`. Cache writes are deferred until after a
+  successful verdict parse, preventing poisoned cache entries in local mode.
 
 ### Added
 
