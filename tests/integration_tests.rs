@@ -214,6 +214,50 @@ async fn test_full_pipeline_empty_diff() {
     assert!(matches!(result, Ok(PipelineResult::Success)));
 }
 
+/// Builds a valid diff body that exceeds the 1,500-line pipeline limit.
+fn oversized_diff_body() -> String {
+    let mut body = String::from("diff --git a/big.rs b/big.rs\n--- a/big.rs\n+++ b/big.rs\n");
+    for i in 0..1_600 {
+        body.push_str(&format!("+line {i}\n"));
+    }
+    body
+}
+
+#[tokio::test]
+async fn test_full_pipeline_ci_diff_too_large_submits_comment() {
+    let github = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path_regex(r"/repos/test-owner/test-repo/pulls/\d+"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(oversized_diff_body()))
+        .mount(&github)
+        .await;
+
+    Mock::given(method("POST"))
+        .and(path_regex(r"/repos/test-owner/test-repo/pulls/\d+/reviews"))
+        .respond_with(ResponseTemplate::new(200))
+        .mount(&github)
+        .await;
+
+    let mut config = ci_config(42, "deepseek", "test-token");
+    config.github_base_url = github.uri();
+    config.no_cache = true;
+
+    let result = run_pipeline(config, None).await;
+    assert!(matches!(result, Ok(PipelineResult::Success)));
+}
+
+#[tokio::test]
+async fn test_full_pipeline_empty_diff_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let diff_path = dir.path().join("empty.diff");
+    std::fs::write(&diff_path, "").unwrap();
+
+    let config = local_config();
+    let result = run_pipeline(config, Some(diff_path.to_str().unwrap())).await;
+    assert!(matches!(result, Ok(PipelineResult::Success)));
+}
+
 #[tokio::test]
 async fn test_full_pipeline_with_variant_deepseek_pro() {
     let github = MockServer::start().await;

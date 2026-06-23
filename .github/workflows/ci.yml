@@ -51,6 +51,29 @@ jobs:
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32
       - run: cargo test
 
+  coverage:
+    name: Code Coverage
+    runs-on: ubuntu-latest
+    steps:
+      # Pinned from actions/checkout@v5 (93cb6efe) to avoid Node.js 20 deprecation.
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+      # Pinned from dtolnay/rust-toolchain@stable (e97e2d8c).
+      - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9
+        with:
+          toolchain: stable
+          components: llvm-tools-preview
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32
+      # Pinned from taiki-e/install-action@v2.82.2 (installs and caches cargo-llvm-cov).
+      - uses: taiki-e/install-action@9e1e5806d4a4822de933115878265be9aaa786d9
+        with:
+          tool: cargo-llvm-cov
+      - run: cargo llvm-cov --all-features --workspace --lcov --output-path lcov.info
+      - uses: codecov/codecov-action@04b047e8bb82a0c002c8312c1c880fbc6a999d45 # v5
+        with:
+          files: ./lcov.info
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: true
+
   doc:
     name: Doc Tests
     runs-on: ubuntu-latest

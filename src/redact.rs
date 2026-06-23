@@ -111,6 +111,61 @@ mod tests {
     }
 
     #[test]
+    fn test_github_oauth_token_redacted() {
+        let text = "gho_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij";
+        let result = redact_secrets(text);
+        assert!(result.contains(REDACTED));
+        assert!(!result.contains("gho_"));
+    }
+
+    #[test]
+    fn test_github_user_token_redacted() {
+        let text = "ghu_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij";
+        let result = redact_secrets(text);
+        assert!(result.contains(REDACTED));
+    }
+
+    #[test]
+    fn test_github_server_token_redacted() {
+        let text = "ghs_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij";
+        let result = redact_secrets(text);
+        assert!(result.contains(REDACTED));
+    }
+
+    #[test]
+    fn test_github_refresh_token_redacted() {
+        let text = "ghr_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij";
+        let result = redact_secrets(text);
+        assert!(result.contains(REDACTED));
+    }
+
+    #[test]
+    fn test_rsa_private_key_redacted() {
+        let text = "-----BEGIN RSA PRIVATE KEY-----\nMIIE...\n-----END RSA PRIVATE KEY-----";
+        let result = redact_secrets(text);
+        assert!(result.contains(REDACTED));
+        assert!(!result.contains("MIIE"));
+    }
+
+    #[test]
+    fn test_passwd_variant_redacted() {
+        let text = "passwd = super_secret";
+        let result = redact_secrets(text);
+        assert!(result.contains(REDACTED));
+        assert!(!result.contains("super_secret"));
+    }
+
+    #[test]
+    fn test_multiple_secrets_redacted_separately() {
+        let text = "Bearer abc and sk-abcdefghijklmnopqrst and password: p@ss";
+        let result = redact_secrets(text);
+        assert!(result.contains(REDACTED));
+        assert!(!result.contains("abc"));
+        assert!(!result.contains("sk-abcdefghijklmnopqrst"));
+        assert!(!result.contains("p@ss"));
+    }
+
+    #[test]
     fn test_diff_content_no_false_positives() {
         let text =
             "diff --git a/src/main.rs b/src/main.rs\n+fn main() {\n+    println!(\"hello\");\n+}";

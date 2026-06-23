@@ -25,3 +25,4 @@ rs-guard.sha256
 .rs-guard/
 .rs-guard/cache
 .kiro/
+.DS_Store

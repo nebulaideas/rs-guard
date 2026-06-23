@@ -276,7 +276,12 @@ model = "qwen-plus"
 [providers.qwen]
 api_key_env = "DASHSCOPE_API_KEY"
 base_url = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+# result_format = "message"  # Optional; rs-guard sends "message" by default for Qwen
 ```
+
+To override the static default (for example on a custom compatible endpoint), set
+`result_format` under `[providers.<name>]` in `.reviewer.toml`. Blank values are
+ignored so the provider's built-in default still applies.
 
 ### API Key Acquisition
 
@@ -399,7 +404,12 @@ model = "llama3.1"
 [providers.openai]
 api_key_env = "OPENAI_API_KEY"
 base_url = "http://localhost:11434/v1"
+# result_format = "json_object"  # Only if the endpoint requires it
 ```
+
+If your custom endpoint requires a specific `result_format` (for example,
+`"json_object"`), set it per-provider in `.reviewer.toml`. rs-guard will send
+that value in the request body instead of the provider's static default.
 
 ### API Key Acquisition
 

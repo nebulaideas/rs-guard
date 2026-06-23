@@ -4,8 +4,9 @@
 //! workflow, and [`PipelineResult`] for communicating exit intentions.
 
 use crate::cache::{CacheConfig, DiffCache};
-use crate::config::Config;
+use crate::config::{CiConfig, Config};
 use crate::diff::{chunk_diff_with_params, fetch_file_diff, fetch_local_diff, fetch_pr_diff};
+use crate::error::RsGuardError;
 use crate::github::{dismiss_previous_reviews, submit_review};
 use crate::llm::factory::create_provider;
 use crate::output::{
@@ -28,6 +29,86 @@ pub enum PipelineResult {
     Success,
     /// Local mode returned `REQUEST_CHANGES` — exit code 2.
     ReviewBlocked,
+}
+
+/// Identifies the source of a diff fetch so that errors can be handled
+/// uniformly while keeping source-specific user-facing messages.
+enum DiffSource<'a> {
+    /// Diff was read from `--diff-file`.
+    File(&'a str),
+    /// Diff was fetched from GitHub in CI mode.
+    Ci { config: CiConfig },
+    /// Diff was read from `git diff --cached` in local mode.
+    Local,
+}
+
+/// Handles errors that can occur while fetching a diff.
+///
+/// `DiffTooLarge` and `EmptyDiff` are treated as non-fatal: the pipeline
+/// stops successfully with an explanatory message. Any other error is
+/// wrapped with source-specific context and returned.
+async fn handle_diff_fetch_error(
+    err: RsGuardError,
+    source: DiffSource<'_>,
+) -> anyhow::Result<PipelineResult> {
+    match err {
+        RsGuardError::DiffTooLarge {
+            size_bytes,
+            line_count,
+        } => {
+            if let DiffSource::Ci { config } = &source {
+                log::warn!(
+                    "Diff too large: {} bytes ({} lines). Submitting explanatory comment.",
+                    size_bytes,
+                    line_count
+                );
+                let msg = format!(
+                    "⚠️ **rs-guard**: This PR diff exceeds the review size limit ({} lines / {} bytes).\n\n\
+                    The diff is too large for an effective AI review. Consider breaking this PR into smaller, focused changes.",
+                    line_count, size_bytes
+                );
+                submit_review(
+                    &config.github_base_url,
+                    &config.repo_owner,
+                    &config.repo_name,
+                    config.pr_number,
+                    ReviewState::Comment,
+                    &msg,
+                    &config.github_token,
+                )
+                .await
+                .context("Failed to submit size-limit comment")?;
+            } else {
+                eprintln!(
+                    "⚠️  Diff too large: {} bytes ({} lines). Cannot review.",
+                    size_bytes, line_count
+                );
+            }
+            Ok(PipelineResult::Success)
+        }
+        RsGuardError::EmptyDiff => {
+            match source {
+                DiffSource::File(path) => {
+                    eprintln!("ℹ️  Diff file is empty: {}", path);
+                }
+                DiffSource::Ci { .. } => {
+                    log::warn!("PR diff is empty — nothing to review.");
+                }
+                DiffSource::Local => {
+                    eprintln!("ℹ️  No staged changes to review.");
+                }
+            }
+            Ok(PipelineResult::Success)
+        }
+        other => {
+            let context = match source {
+                DiffSource::File(_) => "Failed to read diff file",
+                DiffSource::Ci { .. } => "Failed to fetch PR diff",
+                DiffSource::Local => "Failed to fetch local diff",
+            };
+            Err(other).context(context)
+        }
+    }
 }
 
 /// Runs the full review pipeline with the given configuration.
@@ -56,24 +137,7 @@ pub async fn run_pipeline(
                 log_redacted("Diff content", &diff.content);
                 diff
             }
-            Err(e) => {
-                if let crate::error::RsGuardError::DiffTooLarge {
-                    size_bytes,
-                    line_count,
-                } = &e
-                {
-                    eprintln!(
-                        "⚠️  Diff too large: {} bytes ({} lines). Cannot review.",
-                        size_bytes, line_count
-                    );
-                    return Ok(PipelineResult::Success);
-                }
-                if let crate::error::RsGuardError::EmptyDiff = &e {
-                    eprintln!("ℹ️  Diff file is empty: {}", path);
-                    return Ok(PipelineResult::Success);
-                }
-                return Err(e).context("Failed to read diff file");
-            }
+            Err(e) => return handle_diff_fetch_error(e, DiffSource::File(path)).await,
         }
     } else if config.is_ci {
         log::info!("CI mode detected. Fetching PR diff...");
@@ -100,39 +164,7 @@ pub async fn run_pipeline(
                 diff
             }
             Err(e) => {
-                if let crate::error::RsGuardError::DiffTooLarge {
-                    size_bytes,
-                    line_count,
-                } = &e
-                {
-                    log::warn!(
-                        "Diff too large: {} bytes ({} lines). Submitting explanatory comment.",
-                        size_bytes,
-                        line_count
-                    );
-                    let msg = format!(
-                        "⚠️ **rs-guard**: This PR diff exceeds the review size limit ({} lines / {} bytes).\n\n\
-                        The diff is too large for an effective AI review. Consider breaking this PR into smaller, focused changes.",
-                        line_count, size_bytes
-                    );
-                    submit_review(
-                        &ci_config.github_base_url,
-                        &ci_config.repo_owner,
-                        &ci_config.repo_name,
-                        ci_config.pr_number,
-                        ReviewState::Comment,
-                        &msg,
-                        &ci_config.github_token,
-                    )
-                    .await
-                    .context("Failed to submit size-limit comment")?;
-                    return Ok(PipelineResult::Success);
-                }
-                if let crate::error::RsGuardError::EmptyDiff = &e {
-                    log::warn!("PR diff is empty — nothing to review.");
-                    return Ok(PipelineResult::Success);
-                }
-                return Err(e).context("Failed to fetch PR diff");
+                return handle_diff_fetch_error(e, DiffSource::Ci { config: ci_config }).await
             }
         }
     } else {
@@ -147,24 +179,7 @@ pub async fn run_pipeline(
                 log_redacted("Diff content", &diff.content);
                 diff
             }
-            Err(e) => {
-                if let crate::error::RsGuardError::DiffTooLarge {
-                    size_bytes,
-                    line_count,
-                } = &e
-                {
-                    eprintln!(
-                        "⚠️  Diff too large: {} bytes ({} lines). Cannot review.",
-                        size_bytes, line_count
-                    );
-                    return Ok(PipelineResult::Success);
-                }
-                if let crate::error::RsGuardError::EmptyDiff = &e {
-                    eprintln!("ℹ️  No staged changes to review.");
-                    return Ok(PipelineResult::Success);
-                }
-                return Err(e).context("Failed to fetch local diff");
-            }
+            Err(e) => return handle_diff_fetch_error(e, DiffSource::Local).await,
         }
     };
 
@@ -747,5 +762,71 @@ mod tests {
         let cost_val = cost.unwrap();
         assert!(cost_val.is_finite());
         assert!(cost_val > 0.0);
+    }
+
+    // --- Diff fetch error handling (shared `handle_diff_fetch_error` helper) ---
+
+    #[tokio::test]
+    async fn test_handle_diff_fetch_error_ci_diff_too_large_submits_comment() {
+        use wiremock::matchers::{method, path_regex};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let github = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path_regex(r"/repos/.+/pulls/\d+/reviews"))
+            .respond_with(ResponseTemplate::new(200))
+            .mount(&github)
+            .await;
+
+        let config = CiConfig {
+            github_token: "test-token".into(),
+            pr_number: 42,
+            repo_owner: "test-owner".into(),
+            repo_name: "test-repo".into(),
+            github_base_url: github.uri(),
+        };
+
+        let result = handle_diff_fetch_error(
+            RsGuardError::DiffTooLarge {
+                size_bytes: 200_000,
+                line_count: 2_000,
+            },
+            DiffSource::Ci { config },
+        )
+        .await;
+
+        assert_eq!(result.unwrap(), PipelineResult::Success);
+    }
+
+    #[tokio::test]
+    async fn test_handle_diff_fetch_error_file_empty_diff_returns_success() {
+        let result =
+            handle_diff_fetch_error(RsGuardError::EmptyDiff, DiffSource::File("/tmp/empty.diff"))
+                .await;
+        assert_eq!(result.unwrap(), PipelineResult::Success);
+    }
+
+    #[tokio::test]
+    async fn test_handle_diff_fetch_error_local_empty_diff_returns_success() {
+        let result = handle_diff_fetch_error(RsGuardError::EmptyDiff, DiffSource::Local).await;
+        assert_eq!(result.unwrap(), PipelineResult::Success);
+    }
+
+    #[tokio::test]
+    async fn test_handle_diff_fetch_error_file_io_error_propagates() {
+        let result = handle_diff_fetch_error(
+            RsGuardError::Io(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "missing file",
+            )),
+            DiffSource::File("/tmp/missing.diff"),
+        )
+        .await;
+
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Failed to read diff file"));
     }
 }

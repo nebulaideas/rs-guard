@@ -1,8 +1,8 @@
 //! Provider factory for creating LLM provider instances by name.
 //!
 //! Every OpenAI-compatible provider is backed by a single
-//! [`GenericOpenAiCompatibleClient`], configured entirely from the provider's
-//! [`ProviderMeta`] entry plus the resolved [`ProviderConfig`]. Adding a new
+//! `GenericOpenAiCompatibleClient`, configured entirely from the provider's
+//! `ProviderMeta` entry plus the resolved [`ProviderConfig`]. Adding a new
 //! provider therefore requires only a metadata entry (and, optionally, tests
 //! and documentation) — no per-provider client code.
 
@@ -62,7 +62,8 @@ pub fn create_provider(
     client = client
         .with_model(config.model.clone())
         .with_variant(config.variant.clone())
-        .with_max_tokens(config.max_tokens);
+        .with_max_tokens(config.max_tokens)
+        .with_result_format(config.result_format.clone());
 
     Ok(Box::new(client))
 }
@@ -78,6 +79,7 @@ mod tests {
             max_tokens: None,
             model: "test-model".to_string(),
             variant: None,
+            result_format: None,
             timeout_secs: None,
         }
     }

@@ -55,6 +55,7 @@ base_url = "https://api.moonshot.ai/v1"
 [providers.qwen]
 api_key_env = "DASHSCOPE_API_KEY"
 base_url = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+# result_format = "message"  # Optional override; Qwen defaults to "message" in code
 
 [providers.openrouter]
 api_key_env = "OPENROUTER_API_KEY"
@@ -64,6 +65,7 @@ http_referer = "https://github.com/nebulaideas/rs-guard"
 [providers.openai]
 api_key_env = "OPENAI_API_KEY"
 base_url = "https://api.openai.com/v1"
+# result_format = "json_object"  # Only for custom OpenAI-compatible endpoints
 
 [providers.grok]
 api_key_env = "XAI_API_KEY"
@@ -95,12 +97,13 @@ base_url = "https://open.bigmodel.cn/api/paas/v4"
 
 #### Provider Section Fields
 
-| Field          | Type   | Required | Description                                                                     |
-| -------------- | ------ | -------- | ------------------------------------------------------------------------------- |
-| `api_key_env`  | string | no       | Environment variable name for the API key. Defaults to provider-standard names. |
-| `base_url`     | string | no       | Custom API base URL. Defaults to provider's official endpoint.                  |
-| `http_referer` | string | no       | Attribution referer (OpenRouter only).                                          |
-| `variant`      | string | no       | Provider-specific model variant override for this provider.                     |
+| Field            | Type   | Required | Description                                                                     |
+| ---------------- | ------ | -------- | ------------------------------------------------------------------------------- |
+| `api_key_env`    | string | no       | Environment variable name for the API key. Defaults to provider-standard names. |
+| `base_url`       | string | no       | Custom API base URL. Defaults to provider's official endpoint.                  |
+| `http_referer`   | string | no       | Attribution referer (OpenRouter only).                                          |
+| `variant`        | string | no       | Provider-specific model variant override for this provider.                     |
+| `result_format`  | string | no       | Override the `result_format` field sent to the provider (e.g. `"message"`, `"json_object"`). Useful for custom OpenAI-compatible endpoints. |
 
 #### Circuit Breaker Section (`[circuit_breaker]`)
 

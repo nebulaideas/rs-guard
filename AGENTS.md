@@ -8,14 +8,16 @@
 
 **rs-guard** is a Rust-based AI code review CLI tool. It fetches Pull Request diffs from GitHub, sends them to an LLM provider for review, parses a structured verdict from the response, and submits the review state (`APPROVE`, `REQUEST_CHANGES`, or `COMMENT`) back to GitHub — all in a single execution.
 
-**Current Status:** Phases 1–7 are complete. The crate is published on crates.io and registered on crates.ai.
+**Current Status:** Phases 1–7 are complete; v1.3.0 is in progress on branch `feature/77-dynamic-result-format`. The crate is published on crates.io and registered on crates.ai.
 
 **Variant Feature Track (issues #65–#68, PR #70, merged 2026-06-17):** Generic `VariantEffect` (ModelAlias + ExtraBody) support added, with DeepSeek flash/pro and first ExtraBody use for Kimi thinking-on/off. Full CLI/config/env support, integration test coverage, and docs. Released as v1.1.0. See `docs/PROVIDERS.md` and the feature branch history.
 
 **Client Extraction (v1.2, issue #72):** The 5 duplicated per-provider clients (deepseek/kimi/qwen/openrouter/openai) were replaced by a single data-driven `GenericOpenAiCompatibleClient` (pub(crate)) parameterized by `ProviderMeta`. Grok (xAI) and GLM (Zhipu AI) became first-class. Provider-agnostic documentation pass + new bot-setup and performance guides. Released as v1.2.0.
 
+**Dynamic `result_format` (v1.3, issue #77):** `ChatRequest.result_format` and `ProviderMeta.result_format` moved to `Option<Cow<'static, str>>` to keep the zero-cost static path while supporting per-provider TOML overrides. Added a Codecov coverage job and badge, DRY diff-fetch error handling, and expanded config/redact/verdict test coverage.
+
 - **Repository:** `git@github.com:nebulaideas/rs-guard.git`
-- **Current Branch:** `main`
+- **Current Branch:** `feature/77-dynamic-result-format` (v1.3.0); `main` for releases
 - **License:** MIT License (Copyright 2026 Nebula Ideas)
 - **Language:** Rust (edition 2021, toolchain 1.82+)
 - **Crate:** [rs-guard on crates.io](https://crates.io/crates/rs-guard) | [docs.rs](https://docs.rs/rs-guard)
@@ -172,19 +174,19 @@ cargo audit
 
 | Module        | Test Count                        | Type               |
 | ------------- | --------------------------------- | ------------------ |
-| `verdict.rs`  | 22 (7 inline + 15 integration)    | Unit + Integration |
-| `config.rs`   | 21                                | Integration        |
-| `github.rs`   | 13                                | Inline (wiremock)  |
-| `output.rs`   | 6                                 | Inline             |
-| `cache.rs`    | 19                                | Inline             |
+| `verdict.rs`  | 56 (22 inline + 34 integration)   | Unit + Integration |
+| `config.rs`   | 49                                | Integration        |
+| `github.rs`   | 19                                | Inline (wiremock)  |
+| `output.rs`   | 11                                | Inline             |
+| `cache.rs`    | 31                                | Inline             |
 | `retry.rs`    | 17 (6 retry + 11 circuit breaker) | Inline             |
-| `provider*`   | 34 (12 inline + 22 integration)   | Unit + Integration |
-| `diff.rs`     | 26 (21 inline + 5 integration)    | Unit + Integration |
-| `redact.rs`   | 8                                 | Inline             |
-| `pipeline.rs` | 5                                 | Integration        |
-| `http.rs`     | 16                                | Inline             |
+| `provider*`   | 74 (45 inline + 29 integration)   | Unit + Integration |
+| `diff.rs`     | 40 (35 inline + 5 integration)    | Unit + Integration |
+| `redact.rs`   | 15                                | Inline             |
+| `pipeline.rs` | 37 (21 inline + 16 integration)   | Unit + Integration |
+| `http.rs`     | 18                                | Inline             |
 | `cli.rs`      | 3                                 | Inline             |
-| **Total**     | **~267**                          |                    |
+| **Total**     | **~450**                          |                    |
 
 ---
 
@@ -199,7 +201,7 @@ cargo audit
 | P0.3 — `output.rs` `impl Write` refactor + tests    | ✅ Done                                   |
 | P0.4 — `#![deny(missing_docs)]`                     | ✅ Done                                   |
 | P0.5 — Update AGENTS.md                             | ✅ Done (this file)                       |
-| P0.6 — DRY diff-fetch error handling                | ❌ Deferred (behaviors differ per source) |
+| P0.6 — DRY diff-fetch error handling                | ✅ Done — shared `handle_diff_fetch_error` helper in `pipeline.rs` |
 | P0.7 — Shared HTTP client builder                   | ✅ Done                                   |
 | P0.8 — `tests/test_data/` directory                 | ✅ Done                                   |
 | P0.9 — Full pipeline integration test (5 scenarios) | ✅ Done                                   |
@@ -285,7 +287,7 @@ cargo audit
 ## Notes for Agents
 
 - **Source code exists** — all ~3,800 lines across 13 modules.
-- **~267 tests** pass with `wiremock`, `serial_test`, and `tempfile` infrastructure.
+- **~450 tests** pass with `wiremock`, `serial_test`, and `tempfile` infrastructure.
 - **The implementation plan** (`docs/MVP_IMPLEMENTATION_PLAN.md`) is authoritative but section "Phase 0: Pre-requisite Cleanup" was added during Phase 3 implementation.
 - **`Config::empty()`** is a `#[doc(hidden)]` constructor for tests — not for production use.
 - **New modules** added since the original plan: `pipeline.rs`, `http.rs`, `redact.rs`, `cache.rs`, `llm/providers.rs`, `llm/generic_client.rs` (v1.2).

@@ -9,6 +9,7 @@ use async_trait::async_trait;
 use reqwest::header::{self, HeaderMap, HeaderValue};
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
+use std::borrow::Cow;
 use std::collections::HashMap;
 
 // Default timeout comes from crate::config::DEFAULT_LLM_TIMEOUT_SECS (120s).
@@ -44,8 +45,12 @@ pub struct ChatRequest {
     ///
     /// Some providers require an explicit result format field. When `None`,
     /// the field is omitted from the serialized request.
+    ///
+    /// Uses `Cow<'static, str>` so known providers keep a zero-cost borrowed
+    /// value while per-provider configuration overrides can supply an owned
+    /// dynamic value for custom OpenAI-compatible endpoints.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub result_format: Option<&'static str>,
+    pub result_format: Option<Cow<'static, str>>,
     /// Extra top-level fields contributed by `VariantEffect::ExtraBody`
     /// (e.g. "reasoning_effort" or provider-specific thinking toggles).
     ///
@@ -148,6 +153,12 @@ pub struct ProviderConfig {
     /// performs a completion. See [`providers`] and the per-provider
     /// tables in `docs/PROVIDERS.md`.
     pub variant: Option<String>,
+    /// Optional per-provider `result_format` override.
+    ///
+    /// When set, this value is sent in the request body instead of the
+    /// provider's static default. Useful for custom OpenAI-compatible
+    /// endpoints that require a specific result format.
+    pub result_format: Option<String>,
     /// LLM request timeout in seconds (total). When None, the client uses
     /// the crate default (120s as of v1.2.3).
     pub timeout_secs: Option<u64>,

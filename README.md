@@ -5,6 +5,7 @@
 **AI-powered code review CLI for GitHub Pull Requests.** Multi-provider LLM support, response caching, exponential backoff retry, and local pre-commit execution — all in a single Rust binary.
 
 [![CI](https://github.com/nebulaideas/rs-guard/actions/workflows/ci.yml/badge.svg)](https://github.com/nebulaideas/rs-guard/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/nebulaideas/rs-guard/branch/main/graph/badge.svg)](https://codecov.io/gh/nebulaideas/rs-guard)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![crates.io](https://img.shields.io/crates/v/rs-guard.svg)](https://crates.io/crates/rs-guard)
 [![docs.rs](https://docs.rs/rs-guard/badge.svg)](https://docs.rs/rs-guard)

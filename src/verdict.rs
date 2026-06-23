@@ -475,4 +475,49 @@ mod tests {
         assert_eq!(verdict.important_issues, 0);
         assert_eq!(verdict.suggestions, 0);
     }
+
+    #[test]
+    fn test_invalid_verdict_value_in_metadata_block() {
+        let response =
+            "[RS_GUARD_VERDICT_METADATA]\nVerdict: MAYBE\nCriticalIssues: 0\nSecurityIssues: 0\nImportantIssues: 0\nSuggestions: 0";
+        let result = parse_verdict(response);
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Invalid verdict value"),
+            "expected invalid verdict error"
+        );
+    }
+
+    #[test]
+    fn test_parse_three_important_issues_request_changes() {
+        // Three important issues is the exact threshold for REQUEST_CHANGES.
+        let response =
+            "[RS_GUARD_VERDICT_METADATA]\nVerdict: POSITIVE\nCriticalIssues: 0\nSecurityIssues: 0\nImportantIssues: 3\nSuggestions: 0";
+        let (verdict, state) = parse_verdict(response).unwrap();
+        assert_eq!(verdict.important_issues, 3);
+        assert_eq!(state, ReviewState::RequestChanges);
+    }
+
+    #[test]
+    fn test_evaluate_by_tags_counts_important_issue_variant() {
+        let response =
+            "Review complete.\n[Important Issue] Missing test\n[Important Issue] Poor naming";
+        let verdict = evaluate_by_tags(response);
+        assert_eq!(verdict.important_issues, 2);
+        assert_eq!(verdict.verdict, "POSITIVE");
+        assert_eq!(determine_review_state(&verdict), ReviewState::Comment);
+    }
+
+    #[test]
+    fn test_evaluate_by_tags_counts_suggestion_issue_variant() {
+        let response =
+            "Review complete.\n[Suggestion Issue] Use a constant\n[Suggestion] Add doc comment";
+        let verdict = evaluate_by_tags(response);
+        assert_eq!(verdict.suggestions, 2);
+        assert_eq!(verdict.verdict, "POSITIVE");
+        assert_eq!(determine_review_state(&verdict), ReviewState::Approve);
+    }
 }

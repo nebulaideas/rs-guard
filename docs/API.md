@@ -368,7 +368,7 @@ ProviderMeta {
     ci_allowed_hosts: &[("https", "api.newprovider.com")],
     context_window: 128_000,
     variants: &[],
-    result_format: None,  // Set to Some("message") if your provider requires it (e.g. Qwen)
+    result_format: None,  // Or Some(Cow::Borrowed("message")) for Qwen/DashScope
     default_extra_headers: &[],  // Add default headers if needed (e.g. OpenRouter attribution)
 }
 ```
@@ -377,7 +377,7 @@ The `factory.rs` module resolves the provider name to a `ProviderMeta` and const
 
 **Field explanations:**
 - `variants`: Provider-specific model variants (e.g. DeepSeek's `flash`/`pro`, Kimi's `thinking-on`/`thinking-off`). Leave empty if your provider has no variants.
-- `result_format`: Some providers (like Qwen/DashScope) require a `result_format: "message"` field in the request body. Set to `Some("message")` if needed, otherwise `None`.
+- `result_format`: Uses `Option<Cow<'static, str>>` so known providers keep a zero-cost borrowed value. Set to `Some(Cow::Borrowed("message"))` when the provider requires it (Qwen/DashScope); otherwise `None`. Per-provider TOML overrides (`[providers.<name>].result_format`) take precedence over this static default at runtime.
 - `default_extra_headers`: Default HTTP headers sent with every request. Use for provider-specific attribution (e.g. OpenRouter's `HTTP-Referer` and `X-Title`). Most providers don't need this.
 
 ### 2. Update `.reviewer.toml` Schema

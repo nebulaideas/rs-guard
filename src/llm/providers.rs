@@ -6,6 +6,7 @@
 //! instead of duplicating constants.
 
 use crate::error::RsGuardError;
+use std::borrow::Cow;
 use std::collections::HashMap;
 
 /// Convenient alias for `&'static str` (used in `VariantEffect` arms for
@@ -63,10 +64,14 @@ pub struct ProviderMeta {
     pub variants: &'static [ProviderVariant],
     /// Optional `result_format` field injected into the chat request body.
     ///
-    /// Set to `Some("message")` for providers whose OpenAI-compatible API
-    /// requires an explicit result format (currently Qwen/DashScope). `None`
-    /// for all other providers (standard OpenAI shape).
-    pub result_format: Option<&'static str>,
+    /// Set to `Some(Cow::Borrowed("message"))` for providers whose
+    /// OpenAI-compatible API requires an explicit result format (currently
+    /// Qwen/DashScope). `None` for all other providers (standard OpenAI shape).
+    ///
+    /// `Cow<'static, str>` allows the static metadata table to remain
+    /// zero-cost while still supporting dynamic per-provider overrides from
+    /// `.reviewer.toml`.
+    pub result_format: Option<Cow<'static, str>>,
     /// Default extra HTTP headers attached to every request for this provider
     /// (e.g. OpenRouter attribution headers `HTTP-Referer` + `X-Title`).
     ///
@@ -143,7 +148,7 @@ pub fn all_providers() -> &'static [ProviderMeta] {
             ],
             context_window: 128_000,
             variants: &[],
-            result_format: Some("message"),
+            result_format: Some(Cow::Borrowed("message")),
             default_extra_headers: &[],
         },
         ProviderMeta {
@@ -427,7 +432,7 @@ mod tests {
     #[test]
     fn test_qwen_result_format_is_message() {
         let m = find_provider("qwen").unwrap();
-        assert_eq!(m.result_format, Some("message"));
+        assert_eq!(m.result_format, Some(Cow::Borrowed("message")));
     }
 
     #[test]

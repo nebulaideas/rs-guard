@@ -18,6 +18,7 @@ fn default_config() -> ProviderConfig {
         max_tokens: None,
         model: "test-model".to_string(),
         variant: None,
+        result_format: None,
         timeout_secs: None,
     }
 }
@@ -30,6 +31,7 @@ fn config_at(provider: &str, server_uri: &str) -> ProviderConfig {
         max_tokens: None,
         model: provider_default_model(provider),
         variant: None,
+        result_format: None,
         timeout_secs: None,
     }
 }
@@ -238,6 +240,31 @@ async fn test_factory_applies_max_tokens() {
         .await;
     assert!(result.is_ok());
     assert!(result.unwrap().contains("max_tokens applied"));
+}
+
+#[tokio::test]
+async fn test_factory_applies_result_format_override() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/chat/completions"))
+        .and(body_partial_json(serde_json::json!({
+            "result_format": "json_object"
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "choices": [{ "message": { "content": "result_format override ok" } }]
+        })))
+        .mount(&mock_server)
+        .await;
+
+    let mut config = config_at("openai", &mock_server.uri());
+    config.result_format = Some("json_object".to_string());
+
+    let provider = create_provider("openai", "test-key", &config).unwrap();
+    let result = provider
+        .chat_completion("You are a reviewer.", "diff content", 0.1)
+        .await;
+    assert!(result.is_ok());
+    assert!(result.unwrap().contains("result_format override ok"));
 }
 
 #[tokio::test]
