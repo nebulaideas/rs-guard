@@ -57,6 +57,8 @@ jobs:
     steps:
       # Pinned from actions/checkout@v5 (93cb6efe) to avoid Node.js 20 deprecation.
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          fetch-depth: 0
       # Pinned from dtolnay/rust-toolchain@stable (e97e2d8c).
       - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9
         with:
@@ -72,6 +74,7 @@ jobs:
         with:
           files: ./lcov.info
           token: ${{ secrets.CODECOV_TOKEN }}
+          slug: nebulaideas/rs-guard
           fail_ci_if_error: true
 
   doc:
