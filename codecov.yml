@@ -26,11 +26,6 @@ comment:
   behavior: default
   require_changes: false
 
-# Rust LCOV reports from cargo-llvm-cov
-parsers:
-  lcov:
-    partials_as_hits: true
-
 ignore:
   - "tests/**"
   - "benches/**"
