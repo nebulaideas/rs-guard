@@ -17,7 +17,7 @@
 **Dynamic `result_format` (v1.3, issue #77):** `ChatRequest.result_format` and `ProviderMeta.result_format` moved to `Option<Cow<'static, str>>` to keep the zero-cost static path while supporting per-provider TOML overrides. Added a Codecov coverage job and badge, DRY diff-fetch error handling, and expanded config/redact/verdict test coverage.
 
 - **Repository:** `git@github.com:nebulaideas/rs-guard.git`
-- **Current Branch:** `main`
+- **Current Branch:** `feature/77-dynamic-result-format` (v1.3.0); `main` for releases
 - **License:** MIT License (Copyright 2026 Nebula Ideas)
 - **Language:** Rust (edition 2021, toolchain 1.82+)
 - **Crate:** [rs-guard on crates.io](https://crates.io/crates/rs-guard) | [docs.rs](https://docs.rs/rs-guard)

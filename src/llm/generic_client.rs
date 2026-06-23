@@ -142,7 +142,7 @@ impl GenericOpenAiCompatibleClient {
     /// When set, this value is sent in the request body instead of the
     /// provider's static default.
     pub(crate) fn with_result_format(mut self, result_format: Option<String>) -> Self {
-        self.result_format = result_format;
+        self.result_format = result_format.filter(|s| !s.is_empty());
         self
     }
 }
@@ -164,8 +164,9 @@ impl LlmProvider for GenericOpenAiCompatibleClient {
 
         let result_format = self
             .result_format
-            .as_ref()
-            .map(|s| Cow::Owned(s.clone()))
+            .clone()
+            .filter(|s| !s.is_empty())
+            .map(Cow::Owned)
             .or_else(|| self.meta.result_format.clone());
 
         let request = ChatRequest {
@@ -297,6 +298,25 @@ mod tests {
             build("openai", &mock_server.uri()).with_result_format(Some("json_object".to_string()));
         let result = client.chat_completion("system", "user", 0.1).await.unwrap();
         assert_eq!(result, "override ok");
+    }
+
+    #[tokio::test]
+    async fn test_empty_result_format_override_falls_back_to_static_default() {
+        let mock_server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/chat/completions"))
+            .and(body_partial_json(serde_json::json!({
+                "result_format": "message"
+            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "choices": [{ "message": { "content": "fallback ok" } }]
+            })))
+            .mount(&mock_server)
+            .await;
+
+        let client = build("qwen", &mock_server.uri()).with_result_format(Some(String::new()));
+        let result = client.chat_completion("system", "user", 0.1).await.unwrap();
+        assert_eq!(result, "fallback ok");
     }
 
     #[tokio::test]

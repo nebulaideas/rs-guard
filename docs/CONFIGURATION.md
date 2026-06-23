@@ -55,6 +55,7 @@ base_url = "https://api.moonshot.ai/v1"
 [providers.qwen]
 api_key_env = "DASHSCOPE_API_KEY"
 base_url = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+# result_format = "message"  # Optional override; Qwen defaults to "message" in code
 
 [providers.openrouter]
 api_key_env = "OPENROUTER_API_KEY"
@@ -64,6 +65,7 @@ http_referer = "https://github.com/nebulaideas/rs-guard"
 [providers.openai]
 api_key_env = "OPENAI_API_KEY"
 base_url = "https://api.openai.com/v1"
+# result_format = "json_object"  # Only for custom OpenAI-compatible endpoints
 
 [providers.grok]
 api_key_env = "XAI_API_KEY"

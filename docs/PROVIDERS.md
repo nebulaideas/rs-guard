@@ -276,7 +276,12 @@ model = "qwen-plus"
 [providers.qwen]
 api_key_env = "DASHSCOPE_API_KEY"
 base_url = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+# result_format = "message"  # Optional; rs-guard sends "message" by default for Qwen
 ```
+
+To override the static default (for example on a custom compatible endpoint), set
+`result_format` under `[providers.<name>]` in `.reviewer.toml`. Blank values are
+ignored so the provider's built-in default still applies.
 
 ### API Key Acquisition
 

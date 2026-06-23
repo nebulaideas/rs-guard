@@ -31,6 +31,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   overrides), redaction patterns (GitHub token variants, RSA keys, passwords),
   and verdict parsing (invalid verdict values, threshold issues, tag fallback
   variants).
+- Blank `result_format` values in TOML are ignored so static provider defaults
+  are preserved.
+- Pipeline diff-fetch error handling now has unit and integration test coverage.
+- Codecov upload is a required CI gate with patch coverage thresholds
+  (`codecov.yml`).
 
 ## [1.2.4]
 

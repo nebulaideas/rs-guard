@@ -212,6 +212,12 @@ pub struct TomlConfig {
     pub auto_gitignore: Option<bool>,
 }
 
+/// Returns `None` when `result_format` is unset or blank so static provider
+/// defaults (e.g. Qwen's `"message"`) are not overridden by an empty string.
+fn normalize_result_format(value: Option<String>) -> Option<String> {
+    value.filter(|s| !s.is_empty())
+}
+
 /// Known top-level keys in `.reviewer.toml`, used to detect typos and
 /// provide suggestions when an unknown key is encountered.
 const KNOWN_TOP_LEVEL_KEYS: &[&str] = &[
@@ -805,7 +811,8 @@ impl Config {
             max_tokens,
             model: model.clone(),
             variant: variant.clone(),
-            result_format: toml_provider.and_then(|p| p.result_format.clone()),
+            result_format: toml_provider
+                .and_then(|p| normalize_result_format(p.result_format.clone())),
             timeout_secs: Some(llm_timeout_secs),
         };
 
@@ -905,7 +912,7 @@ impl Config {
                 self.provider_config.http_referer =
                     toml_provider.and_then(|p| p.http_referer.clone());
                 self.provider_config.result_format =
-                    toml_provider.and_then(|p| p.result_format.clone());
+                    toml_provider.and_then(|p| normalize_result_format(p.result_format.clone()));
 
                 // Reset model to new provider's default unless CLI --model was used
                 if !self.model_set_via_cli && args.model.is_none() {
@@ -1111,6 +1118,34 @@ mod tests {
         let providers = HashMap::new();
         let result = resolve_api_key_env_var("deepseek", Some(&providers)).unwrap();
         assert_eq!(result, "DEEPSEEK_API_KEY");
+    }
+
+    #[test]
+    fn test_empty_result_format_treated_as_none() {
+        let mut providers = HashMap::new();
+        providers.insert(
+            "qwen".to_string(),
+            ProviderTomlConfig {
+                api_key_env: None,
+                base_url: None,
+                http_referer: None,
+                variant: None,
+                result_format: Some(String::new()),
+            },
+        );
+
+        let toml = TomlConfig {
+            provider: Some("qwen".to_string()),
+            providers: Some(providers),
+            ..Default::default()
+        };
+
+        let _guard = ENV_MUTEX.lock().unwrap();
+        std::env::set_var("DASHSCOPE_API_KEY", "test-key");
+        let config = Config::from_env(Some(toml)).unwrap();
+        std::env::remove_var("DASHSCOPE_API_KEY");
+
+        assert_eq!(config.provider_config.result_format, None);
     }
 
     #[test]
@@ -1583,6 +1618,16 @@ mod tests {
             providers: Some({
                 let mut map = HashMap::new();
                 map.insert(
+                    "deepseek".to_string(),
+                    ProviderTomlConfig {
+                        api_key_env: None,
+                        base_url: None,
+                        http_referer: None,
+                        variant: None,
+                        result_format: Some("json_object".to_string()),
+                    },
+                );
+                map.insert(
                     "kimi".to_string(),
                     ProviderTomlConfig {
                         api_key_env: None,
@@ -1600,6 +1645,10 @@ mod tests {
         let mut config = Config::from_env(Some(toml)).unwrap();
         assert_eq!(config.provider, "deepseek");
         assert!(config.variant.is_none());
+        assert_eq!(
+            config.provider_config.result_format,
+            Some("json_object".to_string())
+        );
 
         let args = crate::cli::Args::parse_from(["rs-guard", "--provider", "kimi"]);
         config.apply_args(&args).unwrap();
@@ -1607,6 +1656,7 @@ mod tests {
         assert_eq!(config.provider, "kimi");
         assert_eq!(config.api_key, "kimi-key");
         assert_eq!(config.variant, Some("thinking-on".to_string()));
+        assert_eq!(config.provider_config.result_format, None);
 
         std::env::remove_var("DEEPSEEK_API_KEY");
         std::env::remove_var("KIMI_API_KEY");

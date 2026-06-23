@@ -763,4 +763,70 @@ mod tests {
         assert!(cost_val.is_finite());
         assert!(cost_val > 0.0);
     }
+
+    // --- Diff fetch error handling (shared `handle_diff_fetch_error` helper) ---
+
+    #[tokio::test]
+    async fn test_handle_diff_fetch_error_ci_diff_too_large_submits_comment() {
+        use wiremock::matchers::{method, path_regex};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let github = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path_regex(r"/repos/.+/pulls/\d+/reviews"))
+            .respond_with(ResponseTemplate::new(200))
+            .mount(&github)
+            .await;
+
+        let config = CiConfig {
+            github_token: "test-token".into(),
+            pr_number: 42,
+            repo_owner: "test-owner".into(),
+            repo_name: "test-repo".into(),
+            github_base_url: github.uri(),
+        };
+
+        let result = handle_diff_fetch_error(
+            RsGuardError::DiffTooLarge {
+                size_bytes: 200_000,
+                line_count: 2_000,
+            },
+            DiffSource::Ci { config },
+        )
+        .await;
+
+        assert_eq!(result.unwrap(), PipelineResult::Success);
+    }
+
+    #[tokio::test]
+    async fn test_handle_diff_fetch_error_file_empty_diff_returns_success() {
+        let result =
+            handle_diff_fetch_error(RsGuardError::EmptyDiff, DiffSource::File("/tmp/empty.diff"))
+                .await;
+        assert_eq!(result.unwrap(), PipelineResult::Success);
+    }
+
+    #[tokio::test]
+    async fn test_handle_diff_fetch_error_local_empty_diff_returns_success() {
+        let result = handle_diff_fetch_error(RsGuardError::EmptyDiff, DiffSource::Local).await;
+        assert_eq!(result.unwrap(), PipelineResult::Success);
+    }
+
+    #[tokio::test]
+    async fn test_handle_diff_fetch_error_file_io_error_propagates() {
+        let result = handle_diff_fetch_error(
+            RsGuardError::Io(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "missing file",
+            )),
+            DiffSource::File("/tmp/missing.diff"),
+        )
+        .await;
+
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Failed to read diff file"));
+    }
 }

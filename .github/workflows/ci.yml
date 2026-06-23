@@ -63,12 +63,15 @@ jobs:
           toolchain: stable
           components: llvm-tools-preview
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32
-      - run: cargo install cargo-llvm-cov --locked
+      # Pinned from taiki-e/install-action (installs and caches cargo-llvm-cov).
+      - uses: taiki-e/install-action@37a3463a3380a0dfae44ad8c581ee287ce9485fb
+        with:
+          tool: cargo-llvm-cov
       - run: cargo llvm-cov --all-features --workspace --lcov --output-path lcov.info
       - uses: codecov/codecov-action@04b047e8bb82a0c002c8312c1c880fbc6a999d45 # v5
         with:
           files: ./lcov.info
-          fail_ci_if_error: false
+          fail_ci_if_error: true
 
   doc:
     name: Doc Tests
