@@ -480,6 +480,7 @@ fn test_apply_args_respects_toml_api_key_env_on_switch() {
                             base_url: None,
                             http_referer: None,
                             variant: None,
+                            result_format: None,
                         },
                     );
                     m
@@ -529,6 +530,7 @@ fn test_ssrf_rejection_in_ci_mode() {
                             base_url: Some("https://evil.example.com/v1".to_string()),
                             http_referer: None,
                             variant: None,
+                            result_format: None,
                         },
                     );
                     m
@@ -575,6 +577,7 @@ fn test_ssrf_allows_known_host_in_ci() {
                             base_url: Some("https://api.deepseek.com".to_string()),
                             http_referer: None,
                             variant: None,
+                            result_format: None,
                         },
                     );
                     m
@@ -612,6 +615,7 @@ fn test_ssrf_allows_any_host_in_local_mode() {
                         base_url: Some("https://my-local-llm.example.com/v1".to_string()),
                         http_referer: None,
                         variant: None,
+                        result_format: None,
                     },
                 );
                 m
@@ -657,6 +661,7 @@ fn test_ssrf_rejection_on_apply_args_switch_in_ci() {
                             base_url: None,
                             http_referer: None,
                             variant: None,
+                            result_format: None,
                         },
                     );
                     m.insert(
@@ -666,6 +671,7 @@ fn test_ssrf_rejection_on_apply_args_switch_in_ci() {
                             base_url: Some("https://evil.example.com/v1".to_string()),
                             http_referer: None,
                             variant: None,
+                            result_format: None,
                         },
                     );
                     m
@@ -715,6 +721,7 @@ fn test_base_url_cleared_on_switch_without_toml_entry() {
                             base_url: Some("https://api.deepseek.com".to_string()),
                             http_referer: None,
                             variant: None,
+                            result_format: None,
                         },
                     );
                     m
@@ -762,6 +769,7 @@ fn test_base_url_preserved_on_switch_with_toml_entry() {
                             base_url: Some("https://api.deepseek.com".to_string()),
                             http_referer: None,
                             variant: None,
+                            result_format: None,
                         },
                     );
                     m.insert(
@@ -771,6 +779,7 @@ fn test_base_url_preserved_on_switch_with_toml_entry() {
                             base_url: Some("http://localhost:8080/v1".to_string()),
                             http_referer: None,
                             variant: None,
+                            result_format: None,
                         },
                     );
                     m

@@ -151,6 +151,10 @@ pub struct ProviderTomlConfig {
     pub http_referer: Option<String>,
     /// Provider-specific model variant override.
     pub variant: Option<String>,
+    /// Optional `result_format` override for this provider.
+    ///
+    /// Overrides the static default (e.g. Qwen's `"message"`) when set.
+    pub result_format: Option<String>,
 }
 
 /// Circuit breaker configuration in the TOML file.
@@ -801,6 +805,7 @@ impl Config {
             max_tokens,
             model: model.clone(),
             variant: variant.clone(),
+            result_format: toml_provider.and_then(|p| p.result_format.clone()),
             timeout_secs: Some(llm_timeout_secs),
         };
 
@@ -899,6 +904,8 @@ impl Config {
                 self.provider_config.base_url = new_base_url;
                 self.provider_config.http_referer =
                     toml_provider.and_then(|p| p.http_referer.clone());
+                self.provider_config.result_format =
+                    toml_provider.and_then(|p| p.result_format.clone());
 
                 // Reset model to new provider's default unless CLI --model was used
                 if !self.model_set_via_cli && args.model.is_none() {
@@ -1091,6 +1098,7 @@ mod tests {
                 base_url: None,
                 http_referer: None,
                 variant: None,
+                result_format: None,
             },
         );
 
@@ -1103,6 +1111,39 @@ mod tests {
         let providers = HashMap::new();
         let result = resolve_api_key_env_var("deepseek", Some(&providers)).unwrap();
         assert_eq!(result, "DEEPSEEK_API_KEY");
+    }
+
+    #[test]
+    fn test_provider_config_result_format_override_preserved() {
+        // ProviderConfig must carry a per-provider result_format override so
+        // the factory can pass it to the generic client (issue #77).
+        let mut providers = HashMap::new();
+        providers.insert(
+            "qwen".to_string(),
+            ProviderTomlConfig {
+                api_key_env: None,
+                base_url: None,
+                http_referer: None,
+                variant: None,
+                result_format: Some("json_object".to_string()),
+            },
+        );
+
+        let toml = TomlConfig {
+            provider: Some("qwen".to_string()),
+            providers: Some(providers),
+            ..Default::default()
+        };
+
+        let _guard = ENV_MUTEX.lock().unwrap();
+        std::env::set_var("DASHSCOPE_API_KEY", "test-key");
+        let config = Config::from_env(Some(toml)).unwrap();
+        std::env::remove_var("DASHSCOPE_API_KEY");
+
+        assert_eq!(
+            config.provider_config.result_format,
+            Some("json_object".to_string())
+        );
     }
 
     #[test]
@@ -1439,5 +1480,163 @@ mod tests {
         let config = result.unwrap();
         assert_eq!(config.repo_owner, Some("owner".to_string()));
         assert_eq!(config.repo_name, Some("repo".to_string()));
+    }
+
+    #[test]
+    fn test_invalid_temperature_env_var_errors() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        std::env::set_var("DEEPSEEK_API_KEY", "test-key");
+        std::env::set_var("RS_GUARD_TEMPERATURE", "not-a-number");
+        let result = Config::from_env(None);
+        std::env::remove_var("DEEPSEEK_API_KEY");
+        std::env::remove_var("RS_GUARD_TEMPERATURE");
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Invalid RS_GUARD_TEMPERATURE"));
+    }
+
+    #[test]
+    fn test_temperature_out_of_range_errors() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        std::env::set_var("DEEPSEEK_API_KEY", "test-key");
+        std::env::set_var("RS_GUARD_TEMPERATURE", "3.0");
+        let result = Config::from_env(None);
+        std::env::remove_var("DEEPSEEK_API_KEY");
+        std::env::remove_var("RS_GUARD_TEMPERATURE");
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("between 0.0 and 2.0"));
+    }
+
+    #[test]
+    fn test_thinking_model_max_tokens_floor() {
+        // When no explicit max_tokens is set, DeepSeek/Kimi get a raised floor.
+        let _guard = ENV_MUTEX.lock().unwrap();
+        std::env::set_var("DEEPSEEK_API_KEY", "test-key");
+        let result = Config::from_env(None).unwrap();
+        std::env::remove_var("DEEPSEEK_API_KEY");
+        assert_eq!(
+            result.provider_config.max_tokens,
+            Some(THINKING_MIN_MAX_TOKENS)
+        );
+    }
+
+    #[test]
+    fn test_explicit_max_tokens_overrides_thinking_floor() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        std::env::set_var("DEEPSEEK_API_KEY", "test-key");
+        std::env::set_var("RS_GUARD_MAX_TOKENS", "1024");
+        let result = Config::from_env(None).unwrap();
+        std::env::remove_var("DEEPSEEK_API_KEY");
+        std::env::remove_var("RS_GUARD_MAX_TOKENS");
+        assert_eq!(result.provider_config.max_tokens, Some(1024));
+    }
+
+    #[test]
+    fn test_validate_toml_unknown_key_suggests_closest() {
+        let raw: toml::Value = toml::from_str("providor = \"deepseek\"").unwrap();
+        let result = validate_toml_value(&raw, std::path::Path::new(".reviewer.toml"));
+        assert!(result.is_err());
+        let msg = result.unwrap_err().to_string();
+        assert!(msg.contains("Unknown key `providor`"));
+        assert!(msg.contains("Did you mean `provider`?"));
+    }
+
+    #[test]
+    fn test_validate_toml_provider_as_table_errors() {
+        let raw: toml::Value = toml::from_str("[provider.deepseek]\napi_key_env = \"X\"").unwrap();
+        let result = validate_toml_value(&raw, std::path::Path::new(".reviewer.toml"));
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("`[provider.deepseek]` is the singular form"));
+    }
+
+    #[test]
+    fn test_load_toml_config_invalid_toml_errors() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(".reviewer.toml");
+        std::fs::write(&path, "not valid toml [[").unwrap();
+        let result = load_toml_config(&path);
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Failed to parse config file"));
+    }
+
+    #[test]
+    fn test_apply_args_switches_provider_and_re_resolves_variant() {
+        use clap::Parser;
+
+        let _guard = ENV_MUTEX.lock().unwrap();
+        std::env::set_var("DEEPSEEK_API_KEY", "ds-key");
+        std::env::set_var("KIMI_API_KEY", "kimi-key");
+
+        let toml = TomlConfig {
+            provider: Some("deepseek".to_string()),
+            providers: Some({
+                let mut map = HashMap::new();
+                map.insert(
+                    "kimi".to_string(),
+                    ProviderTomlConfig {
+                        api_key_env: None,
+                        base_url: None,
+                        http_referer: None,
+                        variant: Some("thinking-on".to_string()),
+                        result_format: None,
+                    },
+                );
+                map
+            }),
+            ..Default::default()
+        };
+
+        let mut config = Config::from_env(Some(toml)).unwrap();
+        assert_eq!(config.provider, "deepseek");
+        assert!(config.variant.is_none());
+
+        let args = crate::cli::Args::parse_from(["rs-guard", "--provider", "kimi"]);
+        config.apply_args(&args).unwrap();
+
+        assert_eq!(config.provider, "kimi");
+        assert_eq!(config.api_key, "kimi-key");
+        assert_eq!(config.variant, Some("thinking-on".to_string()));
+
+        std::env::remove_var("DEEPSEEK_API_KEY");
+        std::env::remove_var("KIMI_API_KEY");
+    }
+
+    #[test]
+    fn test_pricing_override_from_toml() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        std::env::set_var("DEEPSEEK_API_KEY", "test-key");
+
+        let toml = TomlConfig {
+            provider: Some("deepseek".to_string()),
+            pricing: Some({
+                let mut map = HashMap::new();
+                map.insert(
+                    "deepseek".to_string(),
+                    PricingTomlConfig {
+                        input_per_million: 10,
+                        output_per_million: 50,
+                    },
+                );
+                map
+            }),
+            ..Default::default()
+        };
+
+        let config = Config::from_env(Some(toml)).unwrap();
+        std::env::remove_var("DEEPSEEK_API_KEY");
+        assert!(config.pricing.is_some());
+        let pricing = config.pricing.as_ref().unwrap();
+        assert_eq!(pricing.get("deepseek").unwrap().input_per_million, 10);
     }
 }

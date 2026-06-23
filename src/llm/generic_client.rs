@@ -25,6 +25,7 @@ use crate::llm::{
     build_llm_client, chat_messages, providers, send_chat_request, ChatRequest, LlmProvider,
 };
 use async_trait::async_trait;
+use std::borrow::Cow;
 
 use super::providers::ProviderMeta;
 
@@ -46,6 +47,8 @@ pub(crate) struct GenericOpenAiCompatibleClient {
     variant: Option<String>,
     /// Optional maximum tokens cap.
     max_tokens: Option<u32>,
+    /// Optional per-provider `result_format` override.
+    result_format: Option<String>,
     /// Pre-built reqwest client with auth + provider headers.
     client: reqwest::Client,
 }
@@ -101,6 +104,7 @@ impl GenericOpenAiCompatibleClient {
             model: meta.default_model.to_string(),
             variant: None,
             max_tokens: None,
+            result_format: None,
             client,
         })
     }
@@ -132,6 +136,15 @@ impl GenericOpenAiCompatibleClient {
         self.max_tokens = max_tokens;
         self
     }
+
+    /// Sets a per-provider `result_format` override.
+    ///
+    /// When set, this value is sent in the request body instead of the
+    /// provider's static default.
+    pub(crate) fn with_result_format(mut self, result_format: Option<String>) -> Self {
+        self.result_format = result_format;
+        self
+    }
 }
 
 #[async_trait]
@@ -149,11 +162,17 @@ impl LlmProvider for GenericOpenAiCompatibleClient {
         let (effective_model, extra_body) =
             providers::apply_variant(self.meta.name, &self.model, self.variant.as_deref())?;
 
+        let result_format = self
+            .result_format
+            .as_ref()
+            .map(|s| Cow::Owned(s.clone()))
+            .or_else(|| self.meta.result_format.clone());
+
         let request = ChatRequest {
             model: effective_model,
             messages: chat_messages(system_prompt, user_message),
             temperature,
-            result_format: self.meta.result_format,
+            result_format,
             max_tokens: self.max_tokens,
             extra_body,
         };
@@ -256,6 +275,49 @@ mod tests {
             "standard provider must not send result_format; got: {}",
             body
         );
+    }
+
+    #[tokio::test]
+    async fn test_result_format_override_injected_into_body() {
+        // A provider without a static result_format can be given a dynamic one
+        // via ProviderConfig, satisfying the use case from issue #77.
+        let mock_server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/chat/completions"))
+            .and(body_partial_json(serde_json::json!({
+                "result_format": "json_object"
+            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "choices": [{ "message": { "content": "override ok" } }]
+            })))
+            .mount(&mock_server)
+            .await;
+
+        let client =
+            build("openai", &mock_server.uri()).with_result_format(Some("json_object".to_string()));
+        let result = client.chat_completion("system", "user", 0.1).await.unwrap();
+        assert_eq!(result, "override ok");
+    }
+
+    #[tokio::test]
+    async fn test_result_format_override_takes_precedence_over_static_default() {
+        // When both a static default and an override are present, the override wins.
+        let mock_server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/chat/completions"))
+            .and(body_partial_json(serde_json::json!({
+                "result_format": "custom_format"
+            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "choices": [{ "message": { "content": "precedence ok" } }]
+            })))
+            .mount(&mock_server)
+            .await;
+
+        let client =
+            build("qwen", &mock_server.uri()).with_result_format(Some("custom_format".to_string()));
+        let result = client.chat_completion("system", "user", 0.1).await.unwrap();
+        assert_eq!(result, "precedence ok");
     }
 
     #[tokio::test]

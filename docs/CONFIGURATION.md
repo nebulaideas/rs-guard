@@ -95,12 +95,13 @@ base_url = "https://open.bigmodel.cn/api/paas/v4"
 
 #### Provider Section Fields
 
-| Field          | Type   | Required | Description                                                                     |
-| -------------- | ------ | -------- | ------------------------------------------------------------------------------- |
-| `api_key_env`  | string | no       | Environment variable name for the API key. Defaults to provider-standard names. |
-| `base_url`     | string | no       | Custom API base URL. Defaults to provider's official endpoint.                  |
-| `http_referer` | string | no       | Attribution referer (OpenRouter only).                                          |
-| `variant`      | string | no       | Provider-specific model variant override for this provider.                     |
+| Field            | Type   | Required | Description                                                                     |
+| ---------------- | ------ | -------- | ------------------------------------------------------------------------------- |
+| `api_key_env`    | string | no       | Environment variable name for the API key. Defaults to provider-standard names. |
+| `base_url`       | string | no       | Custom API base URL. Defaults to provider's official endpoint.                  |
+| `http_referer`   | string | no       | Attribution referer (OpenRouter only).                                          |
+| `variant`        | string | no       | Provider-specific model variant override for this provider.                     |
+| `result_format`  | string | no       | Override the `result_format` field sent to the provider (e.g. `"message"`, `"json_object"`). Useful for custom OpenAI-compatible endpoints. |
 
 #### Circuit Breaker Section (`[circuit_breaker]`)
 

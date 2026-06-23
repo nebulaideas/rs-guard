@@ -4,6 +4,34 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [1.3.0]
+
+### Added
+
+- **Per-provider `result_format` override** — `.reviewer.toml` now supports
+  `result_format` under `[providers.<name>]`, allowing custom OpenAI-compatible
+  endpoints to request formats such as `"json_object"`. Closes #77.
+- **Dynamic `result_format` internals** — `ChatRequest.result_format` and
+  `ProviderMeta.result_format` are now `Option<Cow<'static, str>>`, keeping the
+  zero-cost static path for Qwen while supporting owned dynamic overrides.
+- **Coverage reporting** — CI now runs `cargo llvm-cov` and uploads an LCOV
+  report to Codecov; a coverage badge has been added to the README.
+
+### Changed
+
+- **DRY diff-fetch error handling** — `DiffTooLarge`, `EmptyDiff`, and generic
+  fetch errors are now handled by a shared helper in `pipeline.rs`, reducing
+  triplication across file, CI, and local diff sources.
+
+### Improved
+
+- Expanded test coverage for config edge cases (invalid temperature, thinking
+  model token floors, TOML typo suggestions, provider switching, pricing
+  overrides), redaction patterns (GitHub token variants, RSA keys, passwords),
+  and verdict parsing (invalid verdict values, threshold issues, tag fallback
+  variants).
+
 ## [1.2.4]
 
 ### Added

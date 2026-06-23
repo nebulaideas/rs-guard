@@ -399,7 +399,12 @@ model = "llama3.1"
 [providers.openai]
 api_key_env = "OPENAI_API_KEY"
 base_url = "http://localhost:11434/v1"
+# result_format = "json_object"  # Only if the endpoint requires it
 ```
+
+If your custom endpoint requires a specific `result_format` (for example,
+`"json_object"`), set it per-provider in `.reviewer.toml`. rs-guard will send
+that value in the request body instead of the provider's static default.
 
 ### API Key Acquisition
 
