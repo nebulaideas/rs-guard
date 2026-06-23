@@ -63,8 +63,8 @@ jobs:
           toolchain: stable
           components: llvm-tools-preview
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32
-      # Pinned from taiki-e/install-action (installs and caches cargo-llvm-cov).
-      - uses: taiki-e/install-action@37a3463a3380a0dfae44ad8c581ee287ce9485fb
+      # Pinned from taiki-e/install-action@v2.82.2 (installs and caches cargo-llvm-cov).
+      - uses: taiki-e/install-action@9e1e5806d4a4822de933115878265be9aaa786d9
         with:
           tool: cargo-llvm-cov
       - run: cargo llvm-cov --all-features --workspace --lcov --output-path lcov.info
