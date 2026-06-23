@@ -14,7 +14,7 @@
 
 **Client Extraction (v1.2, issue #72):** The 5 duplicated per-provider clients (deepseek/kimi/qwen/openrouter/openai) were replaced by a single data-driven `GenericOpenAiCompatibleClient` (pub(crate)) parameterized by `ProviderMeta`. Grok (xAI) and GLM (Zhipu AI) became first-class. Provider-agnostic documentation pass + new bot-setup and performance guides. Released as v1.2.0.
 
-**Dynamic `result_format` (v1.3, issue #77):** `ChatRequest.result_format` and `ProviderMeta.result_format` moved to `Option<Cow<'static, str>>` to keep the zero-cost static path while supporting per-provider TOML overrides. Added a Codecov coverage job and badge, DRY diff-fetch error handling, and expanded config/redact/verdict test coverage.
+**Dynamic `result_format` (v1.3, issue #77):** `ChatRequest.result_format` and `ProviderMeta.result_format` moved to `Option<Cow<'static, str>>` to keep the zero-cost static path while supporting per-provider TOML overrides. DRY diff-fetch error handling and expanded config/redact/verdict test coverage.
 
 - **Repository:** `git@github.com:nebulaideas/rs-guard.git`
 - **Current Branch:** `feature/77-dynamic-result-format` (v1.3.0); `main` for releases

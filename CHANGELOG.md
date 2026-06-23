@@ -15,8 +15,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Dynamic `result_format` internals** — `ChatRequest.result_format` and
   `ProviderMeta.result_format` are now `Option<Cow<'static, str>>`, keeping the
   zero-cost static path for Qwen while supporting owned dynamic overrides.
-- **Coverage reporting** — CI now runs `cargo llvm-cov` and uploads an LCOV
-  report to Codecov; a coverage badge has been added to the README.
 
 ### Changed
 
@@ -34,8 +32,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Blank `result_format` values in TOML are ignored so static provider defaults
   are preserved.
 - Pipeline diff-fetch error handling now has unit and integration test coverage.
-- Codecov upload is a required CI gate with patch coverage thresholds
-  (`codecov.yml`).
 
 ## [1.2.4]
 
