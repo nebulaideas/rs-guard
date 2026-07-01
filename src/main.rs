@@ -1,12 +1,13 @@
 //! rs-guard CLI entry point.
 //!
-//! Parses CLI args, loads configuration, runs the pipeline, and maps
-//! [`PipelineResult`] to process exit codes.
+//! Parses CLI args, loads configuration, dispatches subcommands, runs the
+//! review pipeline, and maps [`PipelineResult`] to process exit codes.
 
 use clap::Parser;
-use rs_guard::cli::Args;
+use rs_guard::cli::{Cli, Commands};
 use rs_guard::config::{load_toml_config, Config};
 use rs_guard::pipeline::{run_pipeline, PipelineResult};
+use rs_guard::scaffold;
 use std::process;
 
 fn exit_on_error<T>(result: Result<T, impl std::fmt::Display>, context: &str) -> T {
@@ -19,7 +20,23 @@ fn exit_on_error<T>(result: Result<T, impl std::fmt::Display>, context: &str) ->
 #[tokio::main]
 async fn main() {
     env_logger::init();
-    let args = Args::parse();
+    let cli = Cli::parse();
+
+    if let Some(command) = cli.command {
+        let result = match command {
+            Commands::Init(args) => scaffold::run_init(&args),
+            Commands::GeneratePrompt(args) => scaffold::run_generate_prompt(&args),
+            Commands::GenerateWorkflow(args) => scaffold::run_generate_workflow(&args),
+            Commands::ValidateConfig(args) => scaffold::run_validate_config(&args),
+        };
+        if let Err(e) = result {
+            eprintln!("Error: {:#}", e);
+            process::exit(1);
+        }
+        return;
+    }
+
+    let args = cli.review;
 
     let toml_config = exit_on_error(
         load_toml_config(&args.config),

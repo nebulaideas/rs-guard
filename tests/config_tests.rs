@@ -18,6 +18,7 @@ const ALL_TEST_ENV_VARS: &[&str] = &[
     "RS_GUARD_TEMPERATURE",
     "RS_GUARD_MAX_TOKENS",
     "RS_GUARD_LLM_TIMEOUT",
+    "RS_GUARD_IMPORTANT_THRESHOLD",
     "DEEPSEEK_API_KEY",
     "KIMI_API_KEY",
     "MY_KIMI_KEY",
@@ -185,8 +186,8 @@ fn test_provider_switch_via_apply_args() {
             let mut config = Config::from_env(toml).unwrap();
             assert_eq!(config.provider, "deepseek");
 
-            let args = rs_guard::cli::Args::parse_from(["rs-guard", "--provider", "kimi"]);
-            config.apply_args(&args).unwrap();
+            let cli = rs_guard::cli::Cli::parse_from(["rs-guard", "--provider", "kimi"]);
+            config.apply_args(&cli.review).unwrap();
 
             assert_eq!(config.provider, "kimi");
             assert_eq!(config.api_key, "test-kimi-key");
@@ -210,8 +211,8 @@ fn test_cli_model_override() {
         let mut config = Config::from_env(toml).unwrap();
         assert_eq!(config.model, "deepseek-v4-flash");
 
-        let args = rs_guard::cli::Args::parse_from(["rs-guard", "--model", "custom-model"]);
-        config.apply_args(&args).unwrap();
+        let cli = rs_guard::cli::Cli::parse_from(["rs-guard", "--model", "custom-model"]);
+        config.apply_args(&cli.review).unwrap();
 
         assert_eq!(config.model, "custom-model");
     });
@@ -235,8 +236,8 @@ fn test_cli_variant_override() {
         assert_eq!(config.variant, Some("flash".to_string()));
         assert_eq!(config.provider_config.variant, Some("flash".to_string()));
 
-        let args = rs_guard::cli::Args::parse_from(["rs-guard", "--variant", "pro"]);
-        config.apply_args(&args).unwrap();
+        let cli = rs_guard::cli::Cli::parse_from(["rs-guard", "--variant", "pro"]);
+        config.apply_args(&cli.review).unwrap();
 
         assert_eq!(config.variant, Some("pro".to_string()));
         assert_eq!(config.provider_config.variant, Some("pro".to_string()));
@@ -381,8 +382,8 @@ fn test_model_resets_on_provider_change_when_not_explicit() {
             let mut config = Config::from_env(toml).unwrap();
             assert_eq!(config.model, "deepseek-v4-flash");
 
-            let args = rs_guard::cli::Args::parse_from(["rs-guard", "--provider", "kimi"]);
-            config.apply_args(&args).unwrap();
+            let cli = rs_guard::cli::Cli::parse_from(["rs-guard", "--provider", "kimi"]);
+            config.apply_args(&cli.review).unwrap();
 
             assert_eq!(config.provider, "kimi");
             assert_eq!(config.model, "kimi-k2.5");
@@ -411,8 +412,8 @@ fn test_toml_model_not_carried_across_provider_change() {
             let mut config = Config::from_env(toml).unwrap();
             assert_eq!(config.model, "my-custom-model");
 
-            let args = rs_guard::cli::Args::parse_from(["rs-guard", "--provider", "kimi"]);
-            config.apply_args(&args).unwrap();
+            let cli = rs_guard::cli::Cli::parse_from(["rs-guard", "--provider", "kimi"]);
+            config.apply_args(&cli.review).unwrap();
 
             assert_eq!(config.provider, "kimi");
             assert_eq!(config.model, "kimi-k2.5");
@@ -439,14 +440,14 @@ fn test_cli_model_preserved_across_provider_change() {
             });
 
             let mut config = Config::from_env(toml).unwrap();
-            let args = rs_guard::cli::Args::parse_from([
+            let cli = rs_guard::cli::Cli::parse_from([
                 "rs-guard",
                 "--provider",
                 "kimi",
                 "--model",
                 "cli-model",
             ]);
-            config.apply_args(&args).unwrap();
+            config.apply_args(&cli.review).unwrap();
 
             assert_eq!(config.provider, "kimi");
             assert_eq!(config.model, "cli-model");
@@ -491,8 +492,8 @@ fn test_apply_args_respects_toml_api_key_env_on_switch() {
             let mut config = Config::from_env(toml).unwrap();
             assert_eq!(config.provider, "deepseek");
 
-            let args = rs_guard::cli::Args::parse_from(["rs-guard", "--provider", "kimi"]);
-            config.apply_args(&args).unwrap();
+            let cli = rs_guard::cli::Cli::parse_from(["rs-guard", "--provider", "kimi"]);
+            config.apply_args(&cli.review).unwrap();
 
             assert_eq!(config.provider, "kimi");
             assert_eq!(config.api_key, "custom-kimi-key");
@@ -682,8 +683,8 @@ fn test_ssrf_rejection_on_apply_args_switch_in_ci() {
             let mut config = Config::from_env(toml).unwrap();
             assert_eq!(config.provider, "deepseek");
 
-            let args = rs_guard::cli::Args::parse_from(["rs-guard", "--provider", "kimi"]);
-            let result = config.apply_args(&args);
+            let cli = rs_guard::cli::Cli::parse_from(["rs-guard", "--provider", "kimi"]);
+            let result = config.apply_args(&cli.review);
             assert!(result.is_err());
             let err = result.unwrap_err().to_string();
             assert!(err.contains("not in the CI allowlist"));
@@ -735,8 +736,8 @@ fn test_base_url_cleared_on_switch_without_toml_entry() {
                 Some("https://api.deepseek.com".to_string())
             );
 
-            let args = rs_guard::cli::Args::parse_from(["rs-guard", "--provider", "kimi"]);
-            config.apply_args(&args).unwrap();
+            let cli = rs_guard::cli::Cli::parse_from(["rs-guard", "--provider", "kimi"]);
+            config.apply_args(&cli.review).unwrap();
             assert_eq!(config.provider, "kimi");
             assert_eq!(config.provider_config.base_url, None);
         },
@@ -788,8 +789,8 @@ fn test_base_url_preserved_on_switch_with_toml_entry() {
             });
 
             let mut config = Config::from_env(toml).unwrap();
-            let args = rs_guard::cli::Args::parse_from(["rs-guard", "--provider", "kimi"]);
-            config.apply_args(&args).unwrap();
+            let cli = rs_guard::cli::Cli::parse_from(["rs-guard", "--provider", "kimi"]);
+            config.apply_args(&cli.review).unwrap();
 
             assert_eq!(
                 config.provider_config.base_url,
@@ -820,14 +821,14 @@ fn test_model_synced_after_switch_with_cli_model() {
             let mut config = Config::from_env(toml).unwrap();
             assert_eq!(config.provider_config.model, "deepseek-v4-flash");
 
-            let args = rs_guard::cli::Args::parse_from([
+            let cli = rs_guard::cli::Cli::parse_from([
                 "rs-guard",
                 "--provider",
                 "kimi",
                 "--model",
                 "my-custom-model",
             ]);
-            config.apply_args(&args).unwrap();
+            config.apply_args(&cli.review).unwrap();
 
             assert_eq!(config.model, "my-custom-model");
             assert_eq!(config.provider_config.model, "my-custom-model");
@@ -919,6 +920,100 @@ fn test_temperature_env_var_negative_returns_error() {
             assert!(
                 result.is_err(),
                 "expected error for negative temperature -0.1, got Ok"
+            );
+        },
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Strict numeric env-var parsing
+// ---------------------------------------------------------------------------
+
+#[test]
+#[serial]
+fn test_invalid_max_tokens_env_var_returns_error() {
+    with_env(
+        &[
+            ("DEEPSEEK_API_KEY", "test-deepseek-key"),
+            ("RS_GUARD_MAX_TOKENS", "not-a-number"),
+        ],
+        || {
+            let result = Config::from_env(None);
+            assert!(result.is_err(), "expected error for invalid max_tokens");
+            let err = result.unwrap_err().to_string();
+            assert!(
+                err.contains("RS_GUARD_MAX_TOKENS"),
+                "expected RS_GUARD_MAX_TOKENS error, got: {}",
+                err
+            );
+        },
+    );
+}
+
+#[test]
+#[serial]
+fn test_invalid_llm_timeout_env_var_returns_error() {
+    with_env(
+        &[
+            ("DEEPSEEK_API_KEY", "test-deepseek-key"),
+            ("RS_GUARD_LLM_TIMEOUT", "fast"),
+        ],
+        || {
+            let result = Config::from_env(None);
+            assert!(result.is_err(), "expected error for invalid llm_timeout");
+            let err = result.unwrap_err().to_string();
+            assert!(
+                err.contains("RS_GUARD_LLM_TIMEOUT"),
+                "expected RS_GUARD_LLM_TIMEOUT error, got: {}",
+                err
+            );
+        },
+    );
+}
+
+#[test]
+#[serial]
+fn test_invalid_important_threshold_env_var_returns_error() {
+    with_env(
+        &[
+            ("DEEPSEEK_API_KEY", "test-deepseek-key"),
+            ("RS_GUARD_IMPORTANT_THRESHOLD", "many"),
+        ],
+        || {
+            let result = Config::from_env(None);
+            assert!(
+                result.is_err(),
+                "expected error for invalid important_threshold"
+            );
+            let err = result.unwrap_err().to_string();
+            assert!(
+                err.contains("RS_GUARD_IMPORTANT_THRESHOLD"),
+                "expected RS_GUARD_IMPORTANT_THRESHOLD error, got: {}",
+                err
+            );
+        },
+    );
+}
+
+#[test]
+#[serial]
+fn test_invalid_pr_number_env_var_returns_error() {
+    with_env(
+        &[
+            ("DEEPSEEK_API_KEY", "test-deepseek-key"),
+            ("GITHUB_ACTIONS", "true"),
+            ("GITHUB_TOKEN", "test-token"),
+            ("REPO_FULL_NAME", "owner/repo"),
+            ("PR_NUMBER", "forty-two"),
+        ],
+        || {
+            let result = Config::from_env(None);
+            assert!(result.is_err(), "expected error for invalid PR_NUMBER");
+            let err = result.unwrap_err().to_string();
+            assert!(
+                err.contains("PR_NUMBER"),
+                "expected PR_NUMBER error, got: {}",
+                err
             );
         },
     );
@@ -1047,6 +1142,77 @@ max_tokens = 2048
         let config = Config::from_env(toml).unwrap();
         assert_eq!(config.provider_config.max_tokens, Some(2048));
     });
+}
+
+// ---------------------------------------------------------------------------
+// Important issues threshold configuration (1.4.0)
+// ---------------------------------------------------------------------------
+
+#[test]
+#[serial]
+fn test_default_important_threshold_is_three() {
+    with_env(&[("DEEPSEEK_API_KEY", "test-deepseek-key")], || {
+        let config = Config::from_env(None).unwrap();
+        assert_eq!(config.important_threshold, 3);
+    });
+}
+
+#[test]
+#[serial]
+fn test_toml_important_threshold_overrides_default() {
+    let file = write_toml(
+        br#"provider = "deepseek"
+important_issues_threshold = 1
+"#,
+    );
+    with_env(&[("DEEPSEEK_API_KEY", "test-deepseek-key")], || {
+        let toml = load_toml_config(file.path()).unwrap();
+        let config = Config::from_env(toml).unwrap();
+        assert_eq!(config.important_threshold, 1);
+    });
+}
+
+#[test]
+#[serial]
+fn test_env_important_threshold_overrides_toml() {
+    let file = write_toml(
+        br#"provider = "deepseek"
+important_issues_threshold = 5
+"#,
+    );
+    with_env(
+        &[
+            ("DEEPSEEK_API_KEY", "test-deepseek-key"),
+            ("RS_GUARD_IMPORTANT_THRESHOLD", "2"),
+        ],
+        || {
+            let toml = load_toml_config(file.path()).unwrap();
+            let config = Config::from_env(toml).unwrap();
+            assert_eq!(config.important_threshold, 2);
+        },
+    );
+}
+
+#[test]
+#[serial]
+fn test_cli_important_threshold_overrides_env() {
+    let file = write_toml(
+        br#"provider = "deepseek"
+"#,
+    );
+    with_env(
+        &[
+            ("DEEPSEEK_API_KEY", "test-deepseek-key"),
+            ("RS_GUARD_IMPORTANT_THRESHOLD", "2"),
+        ],
+        || {
+            let toml = load_toml_config(file.path()).unwrap();
+            let mut config = Config::from_env(toml).unwrap();
+            let cli = rs_guard::cli::Cli::parse_from(["rs-guard", "--important-threshold", "1"]);
+            config.apply_args(&cli.review).unwrap();
+            assert_eq!(config.important_threshold, 1);
+        },
+    );
 }
 
 // ---------------------------------------------------------------------------

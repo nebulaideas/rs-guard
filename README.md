@@ -58,7 +58,9 @@ export DEEPSEEK_API_KEY="your-api-key"
     REPO_FULL_NAME: ${{ github.repository }}
 ```
 
-See [`examples/github-actions-workflow/`](examples/github-actions-workflow/) for full workflow files. Language-agnostic prompt templates are available in [`examples/prompts/`](examples/prompts/). For a dedicated review identity (recommended over personal PATs), see [`docs/GITHUB_BOT_SETUP.md`](docs/GITHUB_BOT_SETUP.md).
+See [`examples/github-actions-workflow/`](examples/github-actions-workflow/) for full workflow files, or run `rs-guard generate-workflow` to emit one tailored to your provider. Language-agnostic prompt templates are available in [`examples/prompts/`](examples/prompts/); use `rs-guard generate-prompt` to customize them. For a dedicated review identity (recommended over personal PATs), see [`docs/GITHUB_BOT_SETUP.md`](docs/GITHUB_BOT_SETUP.md).
+
+**Quick setup:** run `rs-guard init` to scaffold `.github/workflows/rs-guard-review.yml`, `.github/review-prompt.md`, and `.reviewer.toml` in one step.
 
 **Performance in CI:** The release binary is ~3.9 MB (arm64). For faster CI cold starts, consider caching the binary or using the pre-built releases. See [docs/PERFORMANCE.md](docs/PERFORMANCE.md) for detailed baselines and optimization tips.
 

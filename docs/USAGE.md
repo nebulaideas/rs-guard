@@ -36,11 +36,62 @@ rs-guard [OPTIONS]
 | `--config`      | `-c`  | `.reviewer.toml`           | Path to the configuration TOML file.                                               |
 | `--max-tokens`  |       | `4096`                     | Maximum tokens for LLM completions.                                                |
 | `--llm-timeout` |       | `120`                      | Total timeout in seconds for LLM API requests. Raise for thinking models.          |
+| `--important-threshold` | | `3`                    | Number of `[Important]` issues required to `REQUEST_CHANGES`.                      |
 | `--diff-file`   | —     | _(none)_                   | Review a pre-existing diff file instead of fetching from GitHub API.               |
 | `--no-cache`    | —     | Off                        | Bypass the response cache and force a fresh LLM API call.                          |
 | `--dry-run`     | —     | Off                        | Run the full pipeline without submitting reviews or blocking commits.              |
 | `--help`        | `-h`  |                            | Display usage information and exit.                                                |
 | `--version`     | `-V`  |                            | Display version and exit.                                                          |
+
+### Subcommands
+
+rs-guard provides setup-automation subcommands to scaffold configuration and
+workflow files without copying examples by hand:
+
+| Subcommand        | Description                                                                      |
+| ----------------- | -------------------------------------------------------------------------------- |
+| `init`            | Scaffold `.github/workflows/rs-guard-review.yml`, `.github/review-prompt.md`, and `.reviewer.toml` in the current repository. |
+| `generate-prompt` | Generate a review prompt from a template with optional focus items and language guardrails. |
+| `generate-workflow` | Generate a GitHub Actions workflow pinned to the current release version.       |
+| `validate-config` | Load and validate `.reviewer.toml` without calling any external API.             |
+
+Examples:
+
+```bash
+# Scaffold rs-guard for a Rust project using Kimi
+rs-guard init --type rust --provider kimi
+
+# Generate a backend-focused prompt with custom focus items
+rs-guard generate-prompt --template backend-api \
+  --focus "No N+1 queries" \
+  --focus "Use parameterized queries" \
+  --language rust \
+  --output .github/review-prompt.md
+
+# Generate a fork-safe workflow for OpenAI
+rs-guard generate-workflow --provider openai --model gpt-4o-mini --fork-safe
+
+# Validate configuration before committing
+rs-guard validate-config
+```
+
+### Project Type Detection
+
+`rs-guard init` tries to detect your project type from files in the working directory:
+
+| Detected files | Project type | Notes |
+| -------------- | ------------ | ----- |
+| `Cargo.toml` | `rust` | Detects Rust crates and workspaces. |
+| `package.json` | `frontend-spa` or `backend-api` | Inspects dependencies for React, Vue, Express, Fastify, NestJS, etc. Defaults to `frontend-spa` when ambiguous. |
+| `go.mod` | `cli-tooling` | Go module. |
+| `pyproject.toml` / `requirements.txt` | `backend-api` | Python project. |
+| none of the above | `general` | Language-agnostic review. |
+
+Override auto-detection with `--type`:
+
+```bash
+rs-guard init --type backend-api --provider openai
+```
 
 ### Mode Detection
 
@@ -95,6 +146,7 @@ rs-guard --dry-run
 | `RS_GUARD_TEMPERATURE`  | Optional      | Override default temperature via environment variable                                   |
 | `RS_GUARD_MAX_TOKENS`    | Optional      | Override max tokens via environment variable                                            |
 | `RS_GUARD_LLM_TIMEOUT`   | Optional      | LLM request timeout seconds (default 120; raise for thinking models)                    |
+| `RS_GUARD_IMPORTANT_THRESHOLD` | Optional | `[Important]` issues threshold (default 3)                                       |
 | `RS_GUARD_DIFF_FILE`     | Optional      | Alias for `--diff-file`                                                                 |
 | `RS_GUARD_METRICS_PATH` | Optional      | Custom path for `rs-guard-metrics.json` artifact                                        |
 | `GITHUB_API_URL`        | Optional      | Custom GitHub API base URL (e.g. GitHub Enterprise); default: `https://api.github.com`  |

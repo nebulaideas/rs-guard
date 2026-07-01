@@ -160,10 +160,11 @@ pub struct ProviderConfig {
 
 | Item                               | Description                                                                       |
 | ---------------------------------- | --------------------------------------------------------------------------------- |
-| `parse_verdict(response: &str)`    | Extracts `[RS_GUARD_VERDICT_METADATA]` block and returns `(Verdict, ReviewState)` |
+| `parse_verdict(response: &str, important_threshold: u32)` | Extracts `[RS_GUARD_VERDICT_METADATA]` block and returns `(Verdict, ReviewState)` |
 | `Verdict`                          | Review verdict with bug/security counts                                           |
 | `ReviewState`                      | `Approve` / `RequestChanges` / `Comment`                                          |
 | `evaluate_by_tags(response: &str)` | Tag-based fallback for when metadata block is missing                             |
+| `determine_review_state(verdict: &Verdict, important_threshold: u32)` | Maps a parsed verdict to a GitHub review state            |
 
 ### `config`
 
@@ -171,7 +172,7 @@ pub struct ProviderConfig {
 | -------------------------------------------------- | --------------------------------------------- |
 | `Config`                                           | Resolved application configuration            |
 | `Config::from_env(toml: Option<TomlConfig>)`       | Resolves env vars with optional TOML defaults |
-| `Config::apply_args(&mut self, args: &Args)`       | Applies CLI overrides                         |
+| `Config::apply_args(&mut self, args: &ReviewArgs)` | Applies CLI overrides                         |
 | `Config::load_prompt_file(&mut self, path: &Path)` | Loads prompt from file                        |
 | `Config::validate_for_ci(&self)`                   | Validates required CI fields                  |
 | `load_toml_config(path: &Path)`                    | Parses `.reviewer.toml`                       |
@@ -289,7 +290,7 @@ CriticalBugs: 0
 SecurityIssues: 0
 "#;
 
-let (verdict, state) = verdict::parse_verdict(llm_response).unwrap();
+let (verdict, state) = verdict::parse_verdict(llm_response, 3).unwrap();
 assert_eq!(verdict.verdict, "POSITIVE");
 assert_eq!(state, verdict::ReviewState::Approve);
 ```
@@ -303,7 +304,7 @@ let response = "Good changes!
 [Critical Bug]
 [Critical Bug]
 [Critical Bug]";
-let (verdict, state) = verdict::parse_verdict(response).unwrap();
+let (verdict, state) = verdict::parse_verdict(response, 3).unwrap();
 assert_eq!(state, verdict::ReviewState::RequestChanges); // 3 critical bugs
 ```
 

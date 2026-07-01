@@ -5,7 +5,6 @@
 //!
 //! Configuration resolution order: CLI flags > Environment variables > TOML file > Defaults
 
-use crate::cli::Args;
 use crate::error::RsGuardError;
 use crate::http::{validate_github_base_url, validate_provider_base_url};
 use crate::llm::providers::{self, find_provider};
@@ -210,6 +209,8 @@ pub struct TomlConfig {
     pub pricing: Option<HashMap<String, PricingTomlConfig>>,
     /// Whether to automatically add the cache directory to `.gitignore`.
     pub auto_gitignore: Option<bool>,
+    /// Number of "Important" issues required to trigger REQUEST_CHANGES.
+    pub important_issues_threshold: Option<u32>,
 }
 
 /// Returns `None` when `result_format` is unset or blank so static provider
@@ -234,6 +235,7 @@ const KNOWN_TOP_LEVEL_KEYS: &[&str] = &[
     "circuit_breaker",
     "pricing",
     "auto_gitignore",
+    "important_issues_threshold",
 ];
 
 /// Returns the closest known top-level key to `unknown`, or `None` if no
@@ -508,6 +510,274 @@ fn resolve_api_key_env_var(
     standard_api_key_env_var(provider).map(|s| s.to_string())
 }
 
+/// Parses an optional unsigned integer environment variable.
+///
+/// Returns `Ok(None)` when the variable is unset. Returns an error when the
+/// variable is set but cannot be parsed, so misconfiguration is caught early
+/// instead of silently falling back to a default.
+fn parse_optional_env_u32(var: &str) -> Result<Option<u32>, RsGuardError> {
+    match std::env::var(var) {
+        Ok(value) => value.parse().map(Some).map_err(|_| {
+            RsGuardError::Config(format!(
+                "Invalid {}: must be a non-negative integer, got '{}'",
+                var, value
+            ))
+        }),
+        Err(_) => Ok(None),
+    }
+}
+
+/// Parses an optional unsigned 64-bit integer environment variable.
+///
+/// Returns `Ok(None)` when the variable is unset. Returns an error when the
+/// variable is set but cannot be parsed.
+fn parse_optional_env_u64(var: &str) -> Result<Option<u64>, RsGuardError> {
+    match std::env::var(var) {
+        Ok(value) => value.parse().map(Some).map_err(|_| {
+            RsGuardError::Config(format!(
+                "Invalid {}: must be a non-negative integer, got '{}'",
+                var, value
+            ))
+        }),
+        Err(_) => Ok(None),
+    }
+}
+
+/// Resolves the provider name from env > toml > default, validating it is known.
+fn resolve_provider(toml: Option<&TomlConfig>) -> Result<String, RsGuardError> {
+    let provider = std::env::var("RS_GUARD_PROVIDER")
+        .ok()
+        .or_else(|| toml.and_then(|t| t.provider.clone()))
+        .unwrap_or_else(|| "deepseek".to_string());
+    standard_api_key_env_var(&provider)?;
+    Ok(provider)
+}
+
+/// Resolves the API key for a provider from its env var (with TOML override).
+fn resolve_api_key(
+    provider: &str,
+    toml_providers: Option<&HashMap<String, ProviderTomlConfig>>,
+) -> Result<String, RsGuardError> {
+    let api_key_env = resolve_api_key_env_var(provider, toml_providers)?;
+    std::env::var(&api_key_env).map_err(|_| {
+        RsGuardError::Config(format!(
+            "API key not found. Set {} for provider '{}'",
+            api_key_env, provider
+        ))
+    })
+}
+
+/// Resolves GitHub-related fields and validates `REPO_FULL_NAME`.
+#[allow(clippy::type_complexity)]
+fn resolve_github_fields() -> Result<
+    (
+        Option<String>,
+        Option<u64>,
+        Option<String>,
+        Option<String>,
+        String,
+    ),
+    RsGuardError,
+> {
+    let github_token = std::env::var("GITHUB_TOKEN").ok();
+    let pr_number = parse_optional_env_u64("PR_NUMBER")?;
+    let repo_full_name = std::env::var("REPO_FULL_NAME").ok();
+
+    let (repo_owner, repo_name) = match repo_full_name {
+        Some(full) => {
+            let parts: Vec<&str> = full.splitn(2, '/').collect();
+            if parts.len() != 2 {
+                return Err(RsGuardError::Config(format!(
+                    "REPO_FULL_NAME must be in 'owner/repo' format, got: '{}'",
+                    full
+                )));
+            }
+            let owner = parts[0];
+            let repo = parts[1];
+
+            if owner.is_empty() || repo.is_empty() {
+                return Err(RsGuardError::Config(format!(
+                    "REPO_FULL_NAME owner and repo cannot be empty, got: '{}'",
+                    full
+                )));
+            }
+
+            if owner.contains('/') || repo.contains('/') {
+                return Err(RsGuardError::Config(format!(
+                    "REPO_FULL_NAME must be in 'owner/repo' format (no additional slashes), got: '{}'",
+                    full
+                )));
+            }
+
+            (Some(owner.to_string()), Some(repo.to_string()))
+        }
+        None => (None, None),
+    };
+
+    let github_base_url =
+        std::env::var("GITHUB_API_URL").unwrap_or_else(|_| "https://api.github.com".to_string());
+
+    Ok((
+        github_token,
+        pr_number,
+        repo_owner,
+        repo_name,
+        github_base_url,
+    ))
+}
+
+/// Resolves the model from env > toml > provider default.
+fn resolve_model(provider: &str, toml: Option<&TomlConfig>) -> String {
+    let env_model = std::env::var("RS_GUARD_MODEL").ok();
+    let toml_model = toml.and_then(|t| t.model.clone());
+    env_model.or(toml_model).unwrap_or_else(|| {
+        default_model(provider)
+            .expect("provider already validated above")
+            .to_string()
+    })
+}
+
+/// Resolves temperature from env > toml > 0.1, validating the range [0.0, 2.0].
+fn resolve_temperature(toml: Option<&TomlConfig>) -> Result<f32, RsGuardError> {
+    let temperature = match std::env::var("RS_GUARD_TEMPERATURE") {
+        Ok(val) => val.parse::<f32>().map_err(|_| {
+            RsGuardError::Config(format!(
+                "Invalid RS_GUARD_TEMPERATURE '{}': must be a number between 0.0 and 2.0",
+                val
+            ))
+        })?,
+        Err(_) => toml.and_then(|t| t.temperature).unwrap_or(0.1),
+    };
+    if !(0.0..=2.0).contains(&temperature) {
+        return Err(RsGuardError::Config(format!(
+            "Temperature must be between 0.0 and 2.0, got: {}",
+            temperature
+        )));
+    }
+    Ok(temperature)
+}
+
+/// Resolves max_tokens from env > toml > default, applying the thinking-model floor.
+///
+/// Returns `(max_tokens, is_explicit)` where `is_explicit` indicates whether the
+/// value came from env or TOML (and therefore should not be raised by the floor).
+fn resolve_max_tokens(
+    provider: &str,
+    toml: Option<&TomlConfig>,
+) -> Result<(Option<u32>, bool), RsGuardError> {
+    let env_max_tokens = parse_optional_env_u32("RS_GUARD_MAX_TOKENS")?;
+    let toml_max_tokens = toml.and_then(|t| t.max_tokens);
+    let is_explicit = env_max_tokens.is_some() || toml_max_tokens.is_some();
+
+    let mut max_tokens: Option<u32> = env_max_tokens
+        .or(toml_max_tokens)
+        .or(Some(DEFAULT_MAX_TOKENS));
+
+    if !is_explicit && matches!(provider, "deepseek" | "kimi") {
+        max_tokens = max_tokens.map(|t| t.max(THINKING_MIN_MAX_TOKENS));
+    }
+
+    Ok((max_tokens, is_explicit))
+}
+
+/// Resolves the LLM timeout from env > toml > default, applying the thinking-model floor.
+///
+/// Returns `(timeout_secs, is_explicit)` where `is_explicit` indicates whether the
+/// value came from env or TOML (and therefore should not be raised by the floor).
+fn resolve_llm_timeout(
+    provider: &str,
+    toml: Option<&TomlConfig>,
+) -> Result<(u64, bool), RsGuardError> {
+    let env_timeout = parse_optional_env_u64("RS_GUARD_LLM_TIMEOUT")?;
+    let toml_timeout = toml.and_then(|t| t.llm_timeout_secs);
+    let is_explicit = env_timeout.is_some() || toml_timeout.is_some();
+
+    let mut llm_timeout_secs = env_timeout
+        .or(toml_timeout)
+        .unwrap_or(DEFAULT_LLM_TIMEOUT_SECS);
+
+    if !is_explicit && matches!(provider, "deepseek" | "kimi") {
+        llm_timeout_secs = llm_timeout_secs.max(THINKING_MIN_LLM_TIMEOUT_SECS);
+    }
+
+    Ok((llm_timeout_secs, is_explicit))
+}
+
+/// Resolves the important-issues threshold from env > toml > 3.
+fn resolve_important_threshold(toml: Option<&TomlConfig>) -> Result<u32, RsGuardError> {
+    Ok(parse_optional_env_u32("RS_GUARD_IMPORTANT_THRESHOLD")?
+        .or(toml.and_then(|t| t.important_issues_threshold))
+        .unwrap_or(3))
+}
+
+/// Resolves and validates the provider base URL from TOML.
+fn resolve_base_url(
+    toml_provider: Option<&ProviderTomlConfig>,
+    is_ci: bool,
+) -> Result<Option<String>, RsGuardError> {
+    let base_url = toml_provider.and_then(|p| p.base_url.clone());
+    if is_ci {
+        if let Some(ref url) = base_url {
+            validate_provider_base_url(url)?;
+        }
+    } else if let Some(ref url) = base_url {
+        validate_local_provider_base_url(url)?;
+    }
+    Ok(base_url)
+}
+
+/// Resolves the variant from env > toml per-provider > toml top-level.
+///
+/// Returns `(variant, top_level_variant)`.
+fn resolve_variant(
+    toml: Option<&TomlConfig>,
+    toml_provider: Option<&ProviderTomlConfig>,
+) -> (Option<String>, Option<String>) {
+    let env_variant = std::env::var("RS_GUARD_VARIANT").ok();
+    let toml_provider_variant = toml_provider.and_then(|p| p.variant.clone());
+    let top_level_variant = toml.and_then(|t| t.variant.clone());
+    let variant = env_variant
+        .clone()
+        .or(toml_provider_variant.clone())
+        .or(top_level_variant.clone());
+    (variant, top_level_variant)
+}
+
+/// Builds the `ProviderConfig` from resolved pieces and TOML overrides.
+fn build_provider_config(
+    toml_provider: Option<&ProviderTomlConfig>,
+    base_url: Option<String>,
+    max_tokens: Option<u32>,
+    model: String,
+    variant: Option<String>,
+    llm_timeout_secs: u64,
+) -> ProviderConfig {
+    ProviderConfig {
+        base_url,
+        http_referer: toml_provider.and_then(|p| p.http_referer.clone()),
+        max_tokens,
+        model: model.clone(),
+        variant: variant.clone(),
+        result_format: toml_provider.and_then(|p| normalize_result_format(p.result_format.clone())),
+        timeout_secs: Some(llm_timeout_secs),
+    }
+}
+
+/// Resolves the optional circuit breaker from TOML configuration.
+fn resolve_circuit_breaker(toml: Option<&TomlConfig>) -> Option<crate::retry::CircuitBreaker> {
+    toml.and_then(|t| t.circuit_breaker.as_ref())
+        .and_then(|cb| {
+            if cb.enabled {
+                Some(crate::retry::CircuitBreaker::new(
+                    cb.threshold.unwrap_or(3),
+                    cb.cooldown_secs.unwrap_or(60),
+                ))
+            } else {
+                None
+            }
+        })
+}
+
 /// Validated CI configuration with all required fields present.
 ///
 /// Created by [`Config::validate_for_ci()`] when running in CI mode.
@@ -582,6 +852,8 @@ pub struct Config {
     pub chunk_tail_lines: usize,
     /// Resolved LLM request timeout in seconds.
     pub llm_timeout_secs: u64,
+    /// Number of "Important" issues required to trigger REQUEST_CHANGES.
+    pub important_threshold: u32,
 }
 
 impl Config {
@@ -623,6 +895,7 @@ impl Config {
             chunk_head_lines: crate::diff::DEFAULT_CHUNK_HEAD_LINES,
             chunk_tail_lines: crate::diff::DEFAULT_CHUNK_TAIL_LINES,
             llm_timeout_secs: DEFAULT_LLM_TIMEOUT_SECS,
+            important_threshold: 3,
         }
     }
 
@@ -646,135 +919,17 @@ impl Config {
             .and_then(|t| t.providers.clone())
             .unwrap_or_default();
 
-        // Provider: env > toml > default
-        let provider = std::env::var("RS_GUARD_PROVIDER")
-            .ok()
-            .or_else(|| toml.as_ref().and_then(|t| t.provider.clone()))
-            .unwrap_or_else(|| "deepseek".to_string());
+        let provider = resolve_provider(toml.as_ref())?;
+        let api_key = resolve_api_key(&provider, Some(&toml_providers))?;
+        let (github_token, pr_number, repo_owner, repo_name, github_base_url) =
+            resolve_github_fields()?;
+        let model = resolve_model(&provider, toml.as_ref());
+        let temperature = resolve_temperature(toml.as_ref())?;
+        let (max_tokens, _max_tokens_is_explicit) = resolve_max_tokens(&provider, toml.as_ref())?;
+        let (llm_timeout_secs, _timeout_is_explicit) =
+            resolve_llm_timeout(&provider, toml.as_ref())?;
+        let important_threshold = resolve_important_threshold(toml.as_ref())?;
 
-        // Validate provider is known
-        standard_api_key_env_var(&provider)?;
-
-        // Resolve API key env var: TOML override > standard mapping
-        let api_key_env = resolve_api_key_env_var(&provider, Some(&toml_providers))?;
-
-        let api_key = std::env::var(&api_key_env).map_err(|_| {
-            RsGuardError::Config(format!(
-                "API key not found. Set {} for provider '{}'",
-                api_key_env, provider
-            ))
-        })?;
-
-        let github_token = std::env::var("GITHUB_TOKEN").ok();
-        let pr_number = std::env::var("PR_NUMBER").ok().and_then(|s| s.parse().ok());
-        let repo_full_name = std::env::var("REPO_FULL_NAME").ok();
-
-        let (repo_owner, repo_name) = match repo_full_name {
-            Some(full) => {
-                let parts: Vec<&str> = full.splitn(2, '/').collect();
-                if parts.len() != 2 {
-                    return Err(RsGuardError::Config(format!(
-                        "REPO_FULL_NAME must be in 'owner/repo' format, got: '{}'",
-                        full
-                    )));
-                }
-                let owner = parts[0];
-                let repo = parts[1];
-
-                // Validate non-empty
-                if owner.is_empty() || repo.is_empty() {
-                    return Err(RsGuardError::Config(format!(
-                        "REPO_FULL_NAME owner and repo cannot be empty, got: '{}'",
-                        full
-                    )));
-                }
-
-                // Validate no additional slashes in either part
-                if owner.contains('/') || repo.contains('/') {
-                    return Err(RsGuardError::Config(format!(
-                        "REPO_FULL_NAME must be in 'owner/repo' format (no additional slashes), got: '{}'",
-                        full
-                    )));
-                }
-
-                (Some(owner.to_string()), Some(repo.to_string()))
-            }
-            None => (None, None),
-        };
-
-        let github_base_url = std::env::var("GITHUB_API_URL")
-            .unwrap_or_else(|_| "https://api.github.com".to_string());
-
-        // Model: env > toml > provider default
-        let env_model = std::env::var("RS_GUARD_MODEL").ok();
-        let toml_model = toml.as_ref().and_then(|t| t.model.clone());
-        let model = env_model.or(toml_model).unwrap_or_else(|| {
-            default_model(&provider)
-                .expect("provider already validated above")
-                .to_string()
-        });
-
-        // Temperature: env > toml > default (validated to [0.0, 2.0])
-        // An unparseable RS_GUARD_TEMPERATURE value is an explicit configuration
-        // error — it is never silently ignored so that misconfiguration is caught
-        // early rather than producing unexpected reviews.
-        let temperature = match std::env::var("RS_GUARD_TEMPERATURE") {
-            Ok(val) => val.parse::<f32>().map_err(|_| {
-                RsGuardError::Config(format!(
-                    "Invalid RS_GUARD_TEMPERATURE '{}': must be a number between 0.0 and 2.0",
-                    val
-                ))
-            })?,
-            Err(_) => toml.as_ref().and_then(|t| t.temperature).unwrap_or(0.1),
-        };
-        if !(0.0..=2.0).contains(&temperature) {
-            return Err(RsGuardError::Config(format!(
-                "Temperature must be between 0.0 and 2.0, got: {}",
-                temperature
-            )));
-        }
-
-        // Max tokens: env > toml > DEFAULT_MAX_TOKENS (4096)
-        //
-        // Never allow None here — a None max_tokens lets the provider truncate
-        // the response before the [RS_GUARD_VERDICT_METADATA] block, which causes
-        // the fallback tag-counting path to activate and may produce incorrect
-        // APPROVE verdicts on clean diffs.
-        let env_max_tokens = std::env::var("RS_GUARD_MAX_TOKENS")
-            .ok()
-            .and_then(|s| s.parse().ok());
-        let toml_max_tokens = toml.as_ref().and_then(|t| t.max_tokens);
-        let max_tokens_is_explicit = env_max_tokens.is_some() || toml_max_tokens.is_some();
-
-        let mut max_tokens: Option<u32> = env_max_tokens
-            .or(toml_max_tokens)
-            .or(Some(DEFAULT_MAX_TOKENS));
-
-        // Thinking models (DeepSeek v4, Kimi) share max_tokens between
-        // reasoning_content and content. Raise the floor when the user has not
-        // set an explicit value — prevents 0-char content on deepseek-v4-pro.
-        if !max_tokens_is_explicit && matches!(provider.as_str(), "deepseek" | "kimi") {
-            max_tokens = max_tokens.map(|t| t.max(THINKING_MIN_MAX_TOKENS));
-        }
-
-        // LLM timeout (seconds): env > toml > DEFAULT_LLM_TIMEOUT_SECS (120)
-        // Thinking models (deepseek-v4-pro, Kimi thinking) can take much longer
-        // to emit final content after spending the budget on reasoning_content.
-        let env_timeout = std::env::var("RS_GUARD_LLM_TIMEOUT")
-            .ok()
-            .and_then(|s| s.parse().ok());
-        let toml_timeout = toml.as_ref().and_then(|t| t.llm_timeout_secs);
-        let timeout_is_explicit = env_timeout.is_some() || toml_timeout.is_some();
-
-        let mut llm_timeout_secs = env_timeout
-            .or(toml_timeout)
-            .unwrap_or(DEFAULT_LLM_TIMEOUT_SECS);
-
-        if !timeout_is_explicit && matches!(provider.as_str(), "deepseek" | "kimi") {
-            llm_timeout_secs = llm_timeout_secs.max(THINKING_MIN_LLM_TIMEOUT_SECS);
-        }
-
-        // Chunking thresholds: toml > default
         let chunk_head_lines = toml
             .as_ref()
             .and_then(|t| t.chunk_head_lines)
@@ -784,54 +939,19 @@ impl Config {
             .and_then(|t| t.chunk_tail_lines)
             .unwrap_or(crate::diff::DEFAULT_CHUNK_TAIL_LINES);
 
-        // Provider config from TOML — validate base_url against SSRF allowlist in CI
-        // In local mode, warn about potentially dangerous URLs to prevent accidental token exfiltration
         let toml_provider = toml_providers.get(&provider);
-        let base_url = toml_provider.and_then(|p| p.base_url.clone());
-        if is_ci {
-            if let Some(ref url) = base_url {
-                validate_provider_base_url(url)?;
-            }
-        } else if let Some(ref url) = base_url {
-            validate_local_provider_base_url(url)?;
-        }
-
-        // Variant: env > toml per-provider > toml top-level
-        let env_variant = std::env::var("RS_GUARD_VARIANT").ok();
-        let toml_provider_variant = toml_provider.and_then(|p| p.variant.clone());
-        let top_level_variant = toml.as_ref().and_then(|t| t.variant.clone());
-        let variant = env_variant
-            .clone()
-            .or(toml_provider_variant.clone())
-            .or(top_level_variant.clone());
-
-        let provider_config = ProviderConfig {
+        let base_url = resolve_base_url(toml_provider, is_ci)?;
+        let (variant, top_level_variant) = resolve_variant(toml.as_ref(), toml_provider);
+        let provider_config = build_provider_config(
+            toml_provider,
             base_url,
-            http_referer: toml_provider.and_then(|p| p.http_referer.clone()),
             max_tokens,
-            model: model.clone(),
-            variant: variant.clone(),
-            result_format: toml_provider
-                .and_then(|p| normalize_result_format(p.result_format.clone())),
-            timeout_secs: Some(llm_timeout_secs),
-        };
-
+            model.clone(),
+            variant.clone(),
+            llm_timeout_secs,
+        );
         let cache_dir = toml.as_ref().and_then(|t| t.cache_dir.clone());
-
-        let circuit_breaker = toml
-            .as_ref()
-            .and_then(|t| t.circuit_breaker.as_ref())
-            .and_then(|cb| {
-                if cb.enabled {
-                    Some(crate::retry::CircuitBreaker::new(
-                        cb.threshold.unwrap_or(3),
-                        cb.cooldown_secs.unwrap_or(60),
-                    ))
-                } else {
-                    None
-                }
-            });
-
+        let circuit_breaker = resolve_circuit_breaker(toml.as_ref());
         let pricing = toml.as_ref().and_then(|t| t.pricing.clone());
         let auto_gitignore = toml.as_ref().and_then(|t| t.auto_gitignore).unwrap_or(true);
 
@@ -861,6 +981,7 @@ impl Config {
             chunk_head_lines,
             chunk_tail_lines,
             llm_timeout_secs,
+            important_threshold,
         })
     }
 
@@ -877,7 +998,7 @@ impl Config {
     ///
     /// Returns [`RsGuardError::Config`] if the provider changes and the
     /// new provider's API key environment variable is not set.
-    pub fn apply_args(&mut self, args: &Args) -> Result<(), RsGuardError> {
+    pub fn apply_args(&mut self, args: &crate::cli::ReviewArgs) -> Result<(), RsGuardError> {
         if let Some(ref provider) = args.provider {
             if *provider != self.provider {
                 let new_env = resolve_api_key_env_var(provider, Some(&self.toml_providers))?;
@@ -965,6 +1086,9 @@ impl Config {
         }
         if args.dry_run {
             self.dry_run = true;
+        }
+        if let Some(threshold) = args.important_threshold {
+            self.important_threshold = threshold;
         }
 
         Ok(())
@@ -1403,8 +1527,8 @@ mod tests {
         let mut config = Config::empty();
         assert!(!config.dry_run);
 
-        let args = crate::cli::Args::parse_from(["rs-guard", "--dry-run"]);
-        config.apply_args(&args).unwrap();
+        let cli = crate::cli::Cli::parse_from(["rs-guard", "--dry-run"]);
+        config.apply_args(&cli.review).unwrap();
         assert!(config.dry_run);
     }
 
@@ -1650,8 +1774,8 @@ mod tests {
             Some("json_object".to_string())
         );
 
-        let args = crate::cli::Args::parse_from(["rs-guard", "--provider", "kimi"]);
-        config.apply_args(&args).unwrap();
+        let cli = crate::cli::Cli::parse_from(["rs-guard", "--provider", "kimi"]);
+        config.apply_args(&cli.review).unwrap();
 
         assert_eq!(config.provider, "kimi");
         assert_eq!(config.api_key, "kimi-key");

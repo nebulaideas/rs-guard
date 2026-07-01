@@ -18,10 +18,6 @@ use std::sync::LazyLock;
 /// which can produce incorrect verdicts.
 const METADATA_SCAN_WINDOW: usize = 4096;
 
-/// Minimum number of `[Important]` issues required to trigger `REQUEST_CHANGES`.
-/// Below this threshold, important issues produce a `COMMENT` instead.
-const IMPORTANT_ISSUES_THRESHOLD: u32 = 3;
-
 /// Marker string that identifies the verdict metadata block.
 const METADATA_MARKER: &str = "[RS_GUARD_VERDICT_METADATA]";
 
@@ -212,14 +208,14 @@ pub fn evaluate_by_tags(response: &str) -> Verdict {
 ///
 /// Uses an asymmetric safety model:
 /// - `NEGATIVE` verdict, any `[Security]` issues, or any `[Critical]` issues → `REQUEST_CHANGES`.
-/// - `[Important]` issues ≥ `IMPORTANT_ISSUES_THRESHOLD` → `REQUEST_CHANGES`.
-/// - `[Important]` issues 1–2 → `COMMENT` (human review recommended).
+/// - `[Important]` issues ≥ `important_threshold` → `REQUEST_CHANGES`.
+/// - `[Important]` issues 1..`important_threshold` → `COMMENT` (human review recommended).
 /// - All counts zero and verdict `POSITIVE` → `APPROVE`.
-pub fn determine_review_state(verdict: &Verdict) -> ReviewState {
+pub fn determine_review_state(verdict: &Verdict, important_threshold: u32) -> ReviewState {
     if verdict.verdict == "NEGATIVE"
         || verdict.security_issues > 0
         || verdict.critical_issues > 0
-        || verdict.important_issues >= IMPORTANT_ISSUES_THRESHOLD
+        || (important_threshold > 0 && verdict.important_issues >= important_threshold)
     {
         ReviewState::RequestChanges
     } else if verdict.important_issues > 0 {
@@ -240,7 +236,10 @@ pub fn determine_review_state(verdict: &Verdict) -> ReviewState {
 /// Returns [`RsGuardError::VerdictParse`] if:
 /// - The response is empty or whitespace-only
 /// - The verdict value is neither `"POSITIVE"` nor `"NEGATIVE"`
-pub fn parse_verdict(response: &str) -> Result<(Verdict, ReviewState), RsGuardError> {
+pub fn parse_verdict(
+    response: &str,
+    important_threshold: u32,
+) -> Result<(Verdict, ReviewState), RsGuardError> {
     // Validate response is not empty or whitespace-only
     if response.trim().is_empty() {
         return Err(RsGuardError::VerdictParse(
@@ -257,7 +256,7 @@ pub fn parse_verdict(response: &str) -> Result<(Verdict, ReviewState), RsGuardEr
         )));
     }
 
-    let state = determine_review_state(&verdict);
+    let state = determine_review_state(&verdict, important_threshold);
     Ok((verdict, state))
 }
 
@@ -274,7 +273,7 @@ mod tests {
         assert_eq!(verdict.security_issues, 0);
         assert_eq!(verdict.important_issues, 0);
         assert_eq!(verdict.suggestions, 0);
-        assert_eq!(determine_review_state(&verdict), ReviewState::Approve);
+        assert_eq!(determine_review_state(&verdict, 3), ReviewState::Approve);
     }
 
     #[test]
@@ -282,7 +281,7 @@ mod tests {
         let response = "Some review text\n\n[RS_GUARD_VERDICT_METADATA]\nVerdict: NEGATIVE\nCriticalIssues: 0\nSecurityIssues: 0\nImportantIssues: 0\nSuggestions: 0";
         let verdict = parse_metadata_block(response).unwrap();
         assert_eq!(
-            determine_review_state(&verdict),
+            determine_review_state(&verdict, 3),
             ReviewState::RequestChanges
         );
     }
@@ -293,7 +292,7 @@ mod tests {
             "[RS_GUARD_VERDICT_METADATA]\nVerdict: POSITIVE\nCriticalIssues: 1\nSecurityIssues: 0\nImportantIssues: 0\nSuggestions: 0";
         let verdict = parse_metadata_block(response).unwrap();
         assert_eq!(
-            determine_review_state(&verdict),
+            determine_review_state(&verdict, 3),
             ReviewState::RequestChanges
         );
     }
@@ -304,7 +303,7 @@ mod tests {
             "[RS_GUARD_VERDICT_METADATA]\nVerdict: POSITIVE\nCriticalIssues: 0\nSecurityIssues: 1\nImportantIssues: 0\nSuggestions: 0";
         let verdict = parse_metadata_block(response).unwrap();
         assert_eq!(
-            determine_review_state(&verdict),
+            determine_review_state(&verdict, 3),
             ReviewState::RequestChanges
         );
     }
@@ -316,7 +315,7 @@ mod tests {
         assert_eq!(verdict.critical_issues, 1);
         assert_eq!(verdict.security_issues, 1);
         assert_eq!(
-            determine_review_state(&verdict),
+            determine_review_state(&verdict, 3),
             ReviewState::RequestChanges
         );
     }
@@ -329,7 +328,7 @@ mod tests {
         assert_eq!(verdict.security_issues, 0);
         assert_eq!(verdict.important_issues, 0);
         assert_eq!(verdict.suggestions, 0);
-        assert_eq!(determine_review_state(&verdict), ReviewState::Approve);
+        assert_eq!(determine_review_state(&verdict, 3), ReviewState::Approve);
     }
 
     #[test]
@@ -337,7 +336,7 @@ mod tests {
         let response =
             "[RS_GUARD_VERDICT_METADATA]\nVerdict: POSITIVE\nCriticalIssues: 0\nSecurityIssues: 0\nImportantIssues: 1\nSuggestions: 0";
         let verdict = parse_metadata_block(response).unwrap();
-        assert_eq!(determine_review_state(&verdict), ReviewState::Comment);
+        assert_eq!(determine_review_state(&verdict, 3), ReviewState::Comment);
     }
 
     /// Regression test for the GitHub REST API `event` field values.
@@ -398,7 +397,7 @@ mod tests {
     #[test]
     fn test_empty_response_returns_error() {
         let response = "";
-        let result = parse_verdict(response);
+        let result = parse_verdict(response, 3);
         assert!(result.is_err());
         assert!(result
             .unwrap_err()
@@ -409,7 +408,7 @@ mod tests {
     #[test]
     fn test_whitespace_only_response_returns_error() {
         let response = "   \n\t  \n  ";
-        let result = parse_verdict(response);
+        let result = parse_verdict(response, 3);
         assert!(result.is_err());
         assert!(result
             .unwrap_err()
@@ -420,7 +419,7 @@ mod tests {
     #[test]
     fn test_valid_response_parses_successfully() {
         let response = "Some review text\n\n[RS_GUARD_VERDICT_METADATA]\nVerdict: POSITIVE\nCriticalIssues: 0\nSecurityIssues: 0\nImportantIssues: 0\nSuggestions: 0";
-        let result = parse_verdict(response);
+        let result = parse_verdict(response, 3);
         assert!(result.is_ok());
         let (verdict, state) = result.unwrap();
         assert_eq!(verdict.verdict, "POSITIVE");
@@ -480,7 +479,7 @@ mod tests {
     fn test_invalid_verdict_value_in_metadata_block() {
         let response =
             "[RS_GUARD_VERDICT_METADATA]\nVerdict: MAYBE\nCriticalIssues: 0\nSecurityIssues: 0\nImportantIssues: 0\nSuggestions: 0";
-        let result = parse_verdict(response);
+        let result = parse_verdict(response, 3);
         assert!(result.is_err());
         assert!(
             result
@@ -496,7 +495,7 @@ mod tests {
         // Three important issues is the exact threshold for REQUEST_CHANGES.
         let response =
             "[RS_GUARD_VERDICT_METADATA]\nVerdict: POSITIVE\nCriticalIssues: 0\nSecurityIssues: 0\nImportantIssues: 3\nSuggestions: 0";
-        let (verdict, state) = parse_verdict(response).unwrap();
+        let (verdict, state) = parse_verdict(response, 3).unwrap();
         assert_eq!(verdict.important_issues, 3);
         assert_eq!(state, ReviewState::RequestChanges);
     }
@@ -508,7 +507,7 @@ mod tests {
         let verdict = evaluate_by_tags(response);
         assert_eq!(verdict.important_issues, 2);
         assert_eq!(verdict.verdict, "POSITIVE");
-        assert_eq!(determine_review_state(&verdict), ReviewState::Comment);
+        assert_eq!(determine_review_state(&verdict, 3), ReviewState::Comment);
     }
 
     #[test]
@@ -518,6 +517,6 @@ mod tests {
         let verdict = evaluate_by_tags(response);
         assert_eq!(verdict.suggestions, 2);
         assert_eq!(verdict.verdict, "POSITIVE");
-        assert_eq!(determine_review_state(&verdict), ReviewState::Approve);
+        assert_eq!(determine_review_state(&verdict, 3), ReviewState::Approve);
     }
 }

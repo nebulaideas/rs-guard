@@ -8,7 +8,9 @@
 
 **rs-guard** is a Rust-based AI code review CLI tool. It fetches Pull Request diffs from GitHub, sends them to an LLM provider for review, parses a structured verdict from the response, and submits the review state (`APPROVE`, `REQUEST_CHANGES`, or `COMMENT`) back to GitHub — all in a single execution.
 
-**Current Status:** Phases 1–7 are complete; v1.3.0 is in progress on branch `feature/77-dynamic-result-format`. The crate is published on crates.io and registered on crates.ai.
+**Current Status:** Phases 1–7 are complete; v1.4.0 is in progress on branch `feature/84-cli-scaffolding`. The crate is published on crates.io and registered on crates.ai.
+
+**Scaffolding Commands (v1.4.0):** `rs-guard init`, `rs-guard generate-prompt`, `rs-guard generate-workflow`, and `rs-guard validate-config` make adoption self-service. `init` detects project type and scaffolds workflow, prompt, and config files. `generate-prompt` and `generate-workflow` emit files from built-in templates. `important_issues_threshold` is now configurable via CLI/env/TOML.
 
 **Variant Feature Track (issues #65–#68, PR #70, merged 2026-06-17):** Generic `VariantEffect` (ModelAlias + ExtraBody) support added, with DeepSeek flash/pro and first ExtraBody use for Kimi thinking-on/off. Full CLI/config/env support, integration test coverage, and docs. Released as v1.1.0. See `docs/PROVIDERS.md` and the feature branch history.
 
@@ -80,6 +82,7 @@ rs-guard/
 │   ├── output.rs                  # Terminal output + artifact + metrics writing
 │   ├── redact.rs                  # Secret redaction
 │   ├── retry.rs                   # Retry logic + circuit breaker
+│   ├── scaffold.rs                # init / generate-prompt / generate-workflow / validate-config
 │   └── verdict.rs                 # Verdict parsing + review state
 ├── benches/
 │   └── verdict.rs                 # Criterion benchmarks (5 scenarios)
@@ -132,11 +135,11 @@ rs-guard/
 | Print functions          | Accept `impl Write` for testability                                                        |
 | `Config::empty()`        | Test-only constructor for integration tests                                                |
 | `#![deny(missing_docs)]` | Enforced at crate level                                                                    |
-| Cache keying             | SHA-256 over (diff \| prompt \| provider \| model \| temperature) — all parameters matter  |
+| Cache keying             | SHA-256 over (diff \| prompt \| provider \| model \| variant \| temperature \| base_url \| max_tokens \| result_format) — all parameters matter |
 | Cache timestamps         | Stored in file content (line 1), not mtime — reliable across clock changes and file copies |
 | Cache size limit         | 100 MB default with LRU cleanup — prevents unbounded disk usage                            |
 | Circuit breaker          | Simple Closed/Open only (no half-open), opt-in, default disabled                           |
-| Cost calculation         | Integer cents, not floating point — avoids precision issues                                |
+| Cost calculation         | `f64` cents to avoid integer truncation for small diffs; `None` when pricing is unknown |
 | Diff chunking            | `Cow<str>` return — zero allocation when no truncation needed                              |
 
 ---

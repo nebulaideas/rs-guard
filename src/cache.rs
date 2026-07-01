@@ -115,6 +115,8 @@ struct CacheKey {
     base_url: String,
     /// Maximum tokens cap (different caps must not share a cache entry).
     max_tokens: Option<u32>,
+    /// Optional `result_format` override (changes the request body shape).
+    result_format: Option<String>,
 }
 
 impl CacheKey {
@@ -134,6 +136,7 @@ impl CacheKey {
         temperature: f32,
         base_url: &str,
         max_tokens: Option<u32>,
+        result_format: Option<&str>,
     ) -> Self {
         let diff_hash = hash_content(diff_content);
         let prompt_hash = hash_content(prompt);
@@ -146,6 +149,7 @@ impl CacheKey {
             temperature,
             base_url: base_url.to_string(),
             max_tokens,
+            result_format: result_format.map(|s| s.to_lowercase()),
         }
     }
 
@@ -179,6 +183,14 @@ impl CacheKey {
             Some(n) => {
                 hasher.update([1]);
                 hasher.update(n.to_le_bytes());
+            }
+            None => hasher.update([0]),
+        }
+        // Same presence-tag pattern for result_format.
+        match self.result_format {
+            Some(ref fmt) => {
+                hasher.update([1]);
+                hasher.update(fmt.as_bytes());
             }
             None => hasher.update([0]),
         }
@@ -302,6 +314,8 @@ impl DiffCache {
     /// * `temperature` — Sampling temperature.
     /// * `base_url` — Effective API base URL (prevents cross-endpoint poisoning).
     /// * `max_tokens` — Optional maximum tokens cap (prevents truncation staleness).
+    /// * `result_format` — Optional `result_format` override (prevents cache poisoning
+    ///   across providers that change request body shape).
     #[allow(clippy::too_many_arguments)]
     pub fn get(
         &self,
@@ -313,6 +327,7 @@ impl DiffCache {
         temperature: f32,
         base_url: &str,
         max_tokens: Option<u32>,
+        result_format: Option<&str>,
     ) -> Option<String> {
         if !self.config.enabled {
             return None;
@@ -327,6 +342,7 @@ impl DiffCache {
             temperature,
             base_url,
             max_tokens,
+            result_format,
         );
         let key_str = key.as_string();
         let path = self.cache_path(&key_str);
@@ -365,6 +381,7 @@ impl DiffCache {
     /// * `temperature` — Sampling temperature.
     /// * `base_url` — Effective API base URL.
     /// * `max_tokens` — Optional maximum tokens cap.
+    /// * `result_format` — Optional `result_format` override.
     /// * `response` — The LLM response text to cache.
     ///
     /// # Errors
@@ -381,6 +398,7 @@ impl DiffCache {
         temperature: f32,
         base_url: &str,
         max_tokens: Option<u32>,
+        result_format: Option<&str>,
         response: &str,
     ) -> Result<(), RsGuardError> {
         if !self.config.enabled {
@@ -396,6 +414,7 @@ impl DiffCache {
             temperature,
             base_url,
             max_tokens,
+            result_format,
         );
         let key_str = key.as_string();
         let path = self.cache_path(&key_str);
@@ -753,6 +772,7 @@ mod tests {
             0.1,
             "https://default.example.com",
             None,
+            None,
         );
         let key2 = CacheKey::new(
             "diff",
@@ -762,6 +782,7 @@ mod tests {
             None,
             0.1,
             "https://default.example.com",
+            None,
             None,
         );
         let key3 = CacheKey::new(
@@ -773,6 +794,7 @@ mod tests {
             0.2,
             "https://default.example.com",
             None,
+            None,
         );
         let key4 = CacheKey::new(
             "diff",
@@ -783,6 +805,7 @@ mod tests {
             0.1,
             "https://default.example.com",
             None,
+            None,
         );
         let key5 = CacheKey::new(
             "diff",
@@ -792,6 +815,7 @@ mod tests {
             Some("flash"),
             0.1,
             "https://default.example.com",
+            None,
             None,
         );
 
@@ -816,6 +840,7 @@ mod tests {
             0.1,
             "https://api.deepseek.com",
             None,
+            None,
         );
         let overridden = CacheKey::new(
             "diff",
@@ -825,6 +850,7 @@ mod tests {
             None,
             0.1,
             "http://localhost:11434",
+            None,
             None,
         );
         assert_ne!(
@@ -847,6 +873,7 @@ mod tests {
             0.1,
             "https://api.deepseek.com",
             Some(100),
+            None,
         );
         let uncapped = CacheKey::new(
             "diff",
@@ -856,6 +883,7 @@ mod tests {
             None,
             0.1,
             "https://api.deepseek.com",
+            None,
             None,
         );
         assert_ne!(
@@ -870,12 +898,61 @@ mod tests {
         // Regression (F6): provider="a", model="bc" must NOT collide with
         // provider="ab", model="c". The 0x00 separator between variable-length
         // fields guarantees this.
-        let k1 = CacheKey::new("diff", "prompt", "a", "bc", None, 0.1, "url", None);
-        let k2 = CacheKey::new("diff", "prompt", "ab", "c", None, 0.1, "url", None);
+        let k1 = CacheKey::new("diff", "prompt", "a", "bc", None, 0.1, "url", None, None);
+        let k2 = CacheKey::new("diff", "prompt", "ab", "c", None, 0.1, "url", None, None);
         assert_ne!(
             k1.as_string(),
             k2.as_string(),
             "field-split collision: separator not working"
+        );
+    }
+
+    #[test]
+    fn test_cache_key_isolates_result_format() {
+        // Regression: different result_format values must produce different
+        // cache keys because they change the request body sent to the provider.
+        let default_format = CacheKey::new(
+            "diff",
+            "prompt",
+            "qwen",
+            "qwen-plus",
+            None,
+            0.1,
+            "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+            None,
+            None,
+        );
+        let message_format = CacheKey::new(
+            "diff",
+            "prompt",
+            "qwen",
+            "qwen-plus",
+            None,
+            0.1,
+            "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+            None,
+            Some("message"),
+        );
+        let json_format = CacheKey::new(
+            "diff",
+            "prompt",
+            "qwen",
+            "qwen-plus",
+            None,
+            0.1,
+            "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+            None,
+            Some("json_object"),
+        );
+        assert_ne!(
+            default_format.as_string(),
+            message_format.as_string(),
+            "different result_format must produce different cache keys"
+        );
+        assert_ne!(
+            message_format.as_string(),
+            json_format.as_string(),
+            "different result_format values must produce different cache keys"
         );
     }
 
@@ -1134,6 +1211,7 @@ mod tests {
                 0.1,
                 "https://default.example.com",
                 None,
+                None,
                 "cached response",
             )
             .unwrap();
@@ -1146,7 +1224,8 @@ mod tests {
                 None,
                 0.1,
                 "https://default.example.com",
-                None
+                None,
+                None,
             )
             .is_none());
     }
@@ -1173,6 +1252,7 @@ mod tests {
                 0.1,
                 "https://default.example.com",
                 None,
+                None,
                 "llm response",
             )
             .unwrap();
@@ -1184,6 +1264,7 @@ mod tests {
             None,
             0.1,
             "https://default.example.com",
+            None,
             None,
         );
         assert_eq!(result, Some("llm response".to_string()));
@@ -1210,7 +1291,8 @@ mod tests {
                 None,
                 0.1,
                 "https://default.example.com",
-                None
+                None,
+                None,
             )
             .is_none());
     }
@@ -1237,6 +1319,7 @@ mod tests {
                 0.1,
                 "https://default.example.com",
                 None,
+                None,
                 "will expire",
             )
             .unwrap();
@@ -1251,6 +1334,7 @@ mod tests {
             0.1,
             "https://default.example.com",
             None,
+            None,
         );
         assert!(result.is_none());
 
@@ -1263,6 +1347,7 @@ mod tests {
             None,
             0.1,
             "https://default.example.com",
+            None,
             None,
         )
         .as_string();
@@ -1307,6 +1392,7 @@ mod tests {
                 0.1,
                 "https://default.example.com",
                 None,
+                None,
                 "version 1",
             )
             .unwrap();
@@ -1319,6 +1405,7 @@ mod tests {
                 None,
                 0.1,
                 "https://default.example.com",
+                None,
                 None,
                 "version 2",
             )
@@ -1333,7 +1420,8 @@ mod tests {
                 None,
                 0.1,
                 "https://default.example.com",
-                None
+                None,
+                None,
             ),
             Some("version 2".to_string())
         );
@@ -1362,6 +1450,7 @@ mod tests {
                     None,
                     0.1,
                     "https://default.example.com",
+                    None,
                     None,
                     &format!("response {}", i),
                 )
@@ -1395,6 +1484,7 @@ mod tests {
                 0.1,
                 "https://default.example.com",
                 None,
+                None,
                 "value1",
             )
             .unwrap();
@@ -1407,6 +1497,7 @@ mod tests {
                 None,
                 0.1,
                 "https://default.example.com",
+                None,
                 None,
                 "value2",
             )
@@ -1443,6 +1534,7 @@ mod tests {
                 0.1,
                 "https://default.example.com",
                 None,
+                None,
                 "value1",
             )
             .unwrap();
@@ -1455,6 +1547,7 @@ mod tests {
                 None,
                 0.1,
                 "https://default.example.com",
+                None,
                 None,
                 "value2",
             )
@@ -1489,6 +1582,7 @@ mod tests {
                 0.1,
                 "https://default.example.com",
                 None,
+                None,
                 multiline,
             )
             .unwrap();
@@ -1502,7 +1596,8 @@ mod tests {
                 None,
                 0.1,
                 "https://default.example.com",
-                None
+                None,
+                None,
             ),
             Some(multiline.to_string())
         );
@@ -1531,6 +1626,7 @@ mod tests {
                 0.1,
                 "https://default.example.com",
                 None,
+                None,
                 "response",
             )
             .unwrap();
@@ -1544,6 +1640,7 @@ mod tests {
             None,
             0.1,
             "https://default.example.com",
+            None,
             None,
         )
         .as_string();
@@ -1560,7 +1657,8 @@ mod tests {
                 None,
                 0.1,
                 "https://default.example.com",
-                None
+                None,
+                None,
             )
             .is_none());
     }
@@ -1588,6 +1686,7 @@ mod tests {
                 0.1,
                 "https://default.example.com",
                 None,
+                None,
                 "response",
             )
             .unwrap();
@@ -1601,6 +1700,7 @@ mod tests {
             None,
             0.1,
             "https://default.example.com",
+            None,
             None,
         )
         .as_string();
@@ -1617,7 +1717,8 @@ mod tests {
                 None,
                 0.1,
                 "https://default.example.com",
-                None
+                None,
+                None,
             )
             .is_none());
     }
@@ -1645,6 +1746,7 @@ mod tests {
                 0.1,
                 "https://default.example.com",
                 None,
+                None,
                 "response",
             )
             .unwrap();
@@ -1658,6 +1760,7 @@ mod tests {
             None,
             0.1,
             "https://default.example.com",
+            None,
             None,
         )
         .as_string();
@@ -1674,7 +1777,8 @@ mod tests {
                 None,
                 0.1,
                 "https://default.example.com",
-                None
+                None,
+                None,
             )
             .is_none());
     }
@@ -1702,6 +1806,7 @@ mod tests {
                 0.1,
                 "https://default.example.com",
                 None,
+                None,
                 "response",
             )
             .unwrap();
@@ -1715,6 +1820,7 @@ mod tests {
             None,
             0.1,
             "https://default.example.com",
+            None,
             None,
         )
         .as_string();
@@ -1731,7 +1837,8 @@ mod tests {
                 None,
                 0.1,
                 "https://default.example.com",
-                None
+                None,
+                None,
             )
             .is_none());
     }
@@ -1784,6 +1891,7 @@ mod tests {
                 0.1,
                 "https://default.example.com",
                 None,
+                None,
                 "value",
             )
             .unwrap();
@@ -1795,6 +1903,7 @@ mod tests {
             None,
             0.1,
             "https://default.example.com",
+            None,
             None,
         );
         assert_eq!(result, Some("value".to_string()));
