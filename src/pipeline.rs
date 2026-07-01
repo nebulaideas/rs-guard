@@ -301,8 +301,8 @@ pub async fn run_pipeline(
         );
     }
 
-    let (verdict, state) =
-        parse_verdict(&llm_response).context("Failed to parse verdict from LLM response")?;
+    let (verdict, state) = parse_verdict(&llm_response, config.important_threshold)
+        .context("Failed to parse verdict from LLM response")?;
 
     if should_cache {
         log::info!("Caching LLM response for future runs");

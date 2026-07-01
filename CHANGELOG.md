@@ -5,6 +5,39 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0]
+
+### Added
+
+- **CLI scaffolding commands** — `rs-guard init`, `rs-guard generate-prompt`,
+  `rs-guard generate-workflow`, and `rs-guard validate-config` make it possible
+  to adopt rs-guard without hand-copying example files.
+  - `init` detects the project type and creates `.github/workflows/rs-guard-review.yml`,
+    `.github/review-prompt.md`, and `.reviewer.toml`.
+  - `generate-prompt` emits a prompt from a template with user focus items and
+    optional language guardrails.
+  - `generate-workflow` emits a GitHub Actions workflow pinned to the current
+    release version, with optional fork-safety guard.
+  - `validate-config` performs a preflight configuration check without calling
+    any external API.
+- **Configurable `important_issues_threshold`** — the number of `[Important]`
+  issues required to trigger `REQUEST_CHANGES` is now configurable via CLI
+  (`--important-threshold`), env (`RS_GUARD_IMPORTANT_THRESHOLD`), or TOML
+  (`important_issues_threshold`). The default remains `3`; `0` disables blocking
+  on important issues (they still surface as `COMMENT`).
+
+### Changed
+
+- `Cli` now uses optional subcommands while preserving the original bare-flag
+  invocation for running reviews (`rs-guard --prompt-file ...`).
+- `determine_review_state` and `parse_verdict` now accept an `important_threshold`
+  parameter instead of using a compile-time constant.
+
+### Improved
+
+- Integration test coverage for the new scaffolding commands and threshold
+  precedence (CLI > env > TOML > default).
+
 ## [1.3.0]
 
 ### Added

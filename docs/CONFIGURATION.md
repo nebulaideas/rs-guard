@@ -94,6 +94,7 @@ base_url = "https://open.bigmodel.cn/api/paas/v4"
 | `chunk_tail_lines`  | integer | `400`             | Lines preserved from the **end** of the diff when chunking. Combined default of 800 covers most PRs without truncation.           |
 | `cache_dir`         | string  | `.rs-guard/cache` | Custom cache directory path. Defaults to git-root (or CWD) relative `.rs-guard/cache`.                                           |
 | `auto_gitignore`    | boolean | `true`            | Whether to automatically add the cache directory to `.gitignore`.                                                                |
+| `important_issues_threshold` | integer | `3`      | Number of `[Important]` issues required to trigger `REQUEST_CHANGES`. `0` disables blocking on important issues (they still surface as `COMMENT`). |
 
 #### Provider Section Fields
 
@@ -194,16 +195,24 @@ LLM response:
 | Condition | GitHub event |
 | --------- | ------------ |
 | `NEGATIVE` verdict, or any `[Critical]` / `[Security]` finding | `REQUEST_CHANGES` |
-| `important_issues >= 3` (compile-time constant `IMPORTANT_ISSUES_THRESHOLD = 3` in `src/verdict.rs`; not configurable via TOML/env) | `REQUEST_CHANGES` |
-| `important_issues` is 1 or 2 | `COMMENT` |
+| `important_issues >= important_issues_threshold` (default `3`, configurable) | `REQUEST_CHANGES` |
+| `important_issues` is between `1` and `important_issues_threshold - 1` | `COMMENT` |
 | No issues | `APPROVE` |
 
-To use a different threshold, change `IMPORTANT_ISSUES_THRESHOLD` in `src/verdict.rs` and
-recompile from source.
+Configure the threshold via:
+
+- CLI: `--important-threshold 1`
+- Environment: `RS_GUARD_IMPORTANT_THRESHOLD=1`
+- TOML: `important_issues_threshold = 1`
+
+Setting `important_issues_threshold = 0` disables blocking on `[Important]` issues — they will
+still surface as `COMMENT`, but will never trigger `REQUEST_CHANGES`.
 
 ---
 
 ## CLI Flags
+
+These flags are available at the top level for the default review command:
 
 | Flag            | Short | Default                    | Description                          |
 | --------------- | ----- | -------------------------- | ------------------------------------ |
@@ -214,10 +223,25 @@ recompile from source.
 | `--variant`     |       | (none)                     | Provider-specific model variant (e.g. flash/pro). Has no effect if provider does not support it. |
 | `--config`      | `-c`  | `.reviewer.toml`           | Path to configuration TOML file.     |
 | `--max-tokens`  |       | `4096`                     | Maximum tokens for LLM completions.  |
+| `--llm-timeout` |       | `120`                      | Timeout in seconds for LLM API requests. |
+| `--important-threshold` | | `3`                    | `[Important]` issues required to `REQUEST_CHANGES`. |
 | `--no-cache`    |       | Off                        | Bypass response cache.               |
 | `--dry-run`     |       | Off                        | Run without submitting or blocking.  |
 | `--help`        | `-h`  |                            | Display help.                        |
 | `--version`     | `-V`  |                            | Display version.                     |
+
+### Subcommands
+
+rs-guard also provides setup-automation subcommands:
+
+```bash
+rs-guard init                              # Scaffold workflow, prompt, and config
+rs-guard generate-prompt --template rust   # Generate a review prompt
+rs-guard generate-workflow --provider kimi # Generate a GitHub Actions workflow
+rs-guard validate-config                   # Preflight configuration check
+```
+
+Run `rs-guard <subcommand> --help` for details on each subcommand.
 
 ---
 
@@ -241,6 +265,8 @@ recompile from source.
 | `RS_GUARD_VARIANT`      | Optional            | Provider-specific model variant (CLI --variant equivalent). |
 | `RS_GUARD_TEMPERATURE`  | Optional            | Override TOML/default temperature.       |
 | `RS_GUARD_MAX_TOKENS`   | Optional            | Override TOML/default max tokens.        |
+| `RS_GUARD_LLM_TIMEOUT`  | Optional            | Override TOML/default LLM timeout.       |
+| `RS_GUARD_IMPORTANT_THRESHOLD` | Optional     | Override TOML/default important-issues threshold. |
 | `GITHUB_API_URL`        | Optional            | Custom GitHub API base URL (Enterprise). |
 | `RS_GUARD_DIFF_FILE`    | Optional            | Path to a pre-existing diff file.        |
 | `RS_GUARD_METRICS_PATH` | Optional            | Path for the metrics JSON artifact.      |

@@ -33,4 +33,5 @@ pub mod output;
 pub mod pipeline;
 pub mod redact;
 pub mod retry;
+pub mod scaffold;
 pub mod verdict;

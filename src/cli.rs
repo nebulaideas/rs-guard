@@ -1,14 +1,49 @@
 //! CLI argument definitions using `clap` derive macros.
 
-use clap::Parser;
+use clap::{Parser, Subcommand, ValueEnum};
 use std::path::PathBuf;
 
-/// Command-line arguments for the rs-guard review tool.
+/// Top-level CLI entry point for rs-guard.
+///
+/// Supports subcommands for setup automation while preserving the original
+/// bare-flag invocation for running reviews.
 #[derive(Parser, Debug, Clone)]
 #[command(name = "rs-guard")]
 #[command(about = "AI-powered code review CLI for GitHub PRs")]
 #[command(version = env!("CARGO_PKG_VERSION"))]
-pub struct Args {
+pub struct Cli {
+    /// Subcommand to run. When omitted, rs-guard runs the review pipeline
+    /// using the top-level review flags.
+    #[command(subcommand)]
+    pub command: Option<Commands>,
+
+    /// Arguments for the default review command.
+    #[command(flatten)]
+    pub review: ReviewArgs,
+}
+
+/// Available rs-guard subcommands.
+#[derive(Subcommand, Debug, Clone)]
+pub enum Commands {
+    /// Scaffold rs-guard configuration and workflow in the current repository.
+    Init(InitArgs),
+
+    /// Generate a review prompt template.
+    GeneratePrompt(GeneratePromptArgs),
+
+    /// Generate a GitHub Actions workflow file.
+    GenerateWorkflow(GenerateWorkflowArgs),
+
+    /// Validate configuration without running a review.
+    ValidateConfig(ValidateConfigArgs),
+}
+
+/// Arguments for the default review command.
+///
+/// These flags remain available at the top level so existing invocations such
+/// as `rs-guard --prompt-file .github/review-prompt.md` continue to work.
+#[derive(Parser, Debug, Clone)]
+pub struct ReviewArgs {
     /// Path to system prompt markdown file.
     #[arg(
         short,
@@ -68,6 +103,14 @@ pub struct Args {
     #[arg(long, help = "Timeout in seconds for LLM API requests [default: 120]")]
     pub llm_timeout: Option<u64>,
 
+    /// Threshold of [Important] issues required to REQUEST_CHANGES.
+    #[arg(
+        long,
+        env = "RS_GUARD_IMPORTANT_THRESHOLD",
+        help = "Threshold of [Important] issues required to REQUEST_CHANGES [default: 3]"
+    )]
+    pub important_threshold: Option<u32>,
+
     /// Path to a pre-existing diff file to review instead of fetching from GitHub.
     ///
     /// When set, rs-guard reads the diff content from this file path
@@ -91,6 +134,112 @@ pub struct Args {
     /// the repository. Always exits with code 0.
     #[arg(long, help = "Dry-run mode: review without submitting or blocking")]
     pub dry_run: bool,
+}
+
+/// Project type used by `rs-guard init` to select appropriate templates.
+#[derive(ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProjectType {
+    /// Rust project.
+    Rust,
+    /// Backend / API service.
+    BackendApi,
+    /// Frontend single-page application.
+    FrontendSpa,
+    /// CLI tool or systems program.
+    CliTooling,
+    /// Language-agnostic general review.
+    General,
+}
+
+/// Arguments for the `init` subcommand.
+#[derive(Parser, Debug, Clone)]
+pub struct InitArgs {
+    /// Project type to scaffold for.
+    #[arg(long = "type", value_enum, help = "Project type to scaffold for")]
+    pub project_type: Option<ProjectType>,
+
+    /// LLM provider to configure.
+    #[arg(long, help = "LLM provider to configure [default: deepseek]")]
+    pub provider: Option<String>,
+
+    /// Overwrite existing scaffold files.
+    #[arg(long, help = "Overwrite existing scaffold files")]
+    pub force: bool,
+}
+
+/// Arguments for the `generate-prompt` subcommand.
+#[derive(Parser, Debug, Clone)]
+pub struct GeneratePromptArgs {
+    /// Prompt template to base the output on.
+    #[arg(
+        long,
+        value_enum,
+        default_value = "general",
+        help = "Prompt template to use"
+    )]
+    pub template: PromptTemplate,
+
+    /// Additional focus item to inject into the prompt.
+    #[arg(long, help = "Focus item to add (can be repeated)")]
+    pub focus: Vec<String>,
+
+    /// Programming language to add stack-specific guardrails for.
+    #[arg(long, help = "Programming language for stack-specific guardrails")]
+    pub language: Option<String>,
+
+    /// Output file path. When omitted, prints to stdout.
+    #[arg(short, long, help = "Output file path")]
+    pub output: Option<PathBuf>,
+}
+
+/// Prompt template used by `generate-prompt`.
+#[derive(ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PromptTemplate {
+    /// Canonical agnostic baseline.
+    General,
+    /// Backend services and APIs.
+    BackendApi,
+    /// Frontend single-page applications.
+    FrontendSpa,
+    /// CLI tools and systems programs.
+    CliTooling,
+}
+
+/// Arguments for the `generate-workflow` subcommand.
+#[derive(Parser, Debug, Clone)]
+pub struct GenerateWorkflowArgs {
+    /// LLM provider to use in the workflow.
+    #[arg(long, help = "LLM provider to use [default: deepseek]")]
+    pub provider: Option<String>,
+
+    /// LLM model identifier.
+    #[arg(short, long, help = "LLM model identifier")]
+    pub model: Option<String>,
+
+    /// Environment variable name holding the provider API key.
+    #[arg(long, help = "API key secret name [default: <PROVIDER>_API_KEY]")]
+    pub secret: Option<String>,
+
+    /// Emit a fork-safe workflow using `pull_request_target`.
+    #[arg(long, help = "Emit a fork-safe workflow")]
+    pub fork_safe: bool,
+
+    /// Output file path. When omitted, prints to stdout.
+    #[arg(short, long, help = "Output file path")]
+    pub output: Option<PathBuf>,
+}
+
+/// Arguments for the `validate-config` subcommand.
+#[derive(Parser, Debug, Clone)]
+pub struct ValidateConfigArgs {
+    /// Path to configuration TOML file.
+    #[arg(
+        short,
+        long,
+        default_value = ".reviewer.toml",
+        help = "Path to configuration TOML file"
+    )]
+    pub config: PathBuf,
 }
 
 /// Validates that a temperature value is within the OpenAI-compatible range (0.0 - 2.0).
@@ -134,13 +283,90 @@ mod tests {
 
     #[test]
     fn test_dry_run_flag_parsing() {
-        let args = Args::parse_from(["rs-guard", "--dry-run"]);
-        assert!(args.dry_run);
+        let cli = Cli::parse_from(["rs-guard", "--dry-run"]);
+        assert!(cli.review.dry_run);
+        assert!(cli.command.is_none());
     }
 
     #[test]
     fn test_dry_run_flag_default_false() {
-        let args = Args::parse_from(["rs-guard"]);
-        assert!(!args.dry_run);
+        let cli = Cli::parse_from(["rs-guard"]);
+        assert!(!cli.review.dry_run);
+        assert!(cli.command.is_none());
+    }
+
+    #[test]
+    fn test_init_subcommand_parsing() {
+        let cli = Cli::parse_from([
+            "rs-guard",
+            "init",
+            "--type",
+            "rust",
+            "--provider",
+            "kimi",
+            "--force",
+        ]);
+        match cli.command {
+            Some(Commands::Init(args)) => {
+                assert_eq!(args.project_type, Some(ProjectType::Rust));
+                assert_eq!(args.provider, Some("kimi".to_string()));
+                assert!(args.force);
+            }
+            _ => panic!("expected Init subcommand"),
+        }
+    }
+
+    #[test]
+    fn test_generate_prompt_subcommand_parsing() {
+        let cli = Cli::parse_from([
+            "rs-guard",
+            "generate-prompt",
+            "--template",
+            "backend-api",
+            "--focus",
+            "No N+1 queries",
+            "--language",
+            "rust",
+        ]);
+        match cli.command {
+            Some(Commands::GeneratePrompt(args)) => {
+                assert_eq!(args.template, PromptTemplate::BackendApi);
+                assert_eq!(args.focus, vec!["No N+1 queries".to_string()]);
+                assert_eq!(args.language, Some("rust".to_string()));
+            }
+            _ => panic!("expected GeneratePrompt subcommand"),
+        }
+    }
+
+    #[test]
+    fn test_generate_workflow_subcommand_parsing() {
+        let cli = Cli::parse_from([
+            "rs-guard",
+            "generate-workflow",
+            "--provider",
+            "openai",
+            "--secret",
+            "OPENAI_API_KEY",
+            "--fork-safe",
+        ]);
+        match cli.command {
+            Some(Commands::GenerateWorkflow(args)) => {
+                assert_eq!(args.provider, Some("openai".to_string()));
+                assert_eq!(args.secret, Some("OPENAI_API_KEY".to_string()));
+                assert!(args.fork_safe);
+            }
+            _ => panic!("expected GenerateWorkflow subcommand"),
+        }
+    }
+
+    #[test]
+    fn test_validate_config_subcommand_parsing() {
+        let cli = Cli::parse_from(["rs-guard", "validate-config", "--config", "custom.toml"]);
+        match cli.command {
+            Some(Commands::ValidateConfig(args)) => {
+                assert_eq!(args.config, PathBuf::from("custom.toml"));
+            }
+            _ => panic!("expected ValidateConfig subcommand"),
+        }
     }
 }

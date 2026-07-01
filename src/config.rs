@@ -5,7 +5,6 @@
 //!
 //! Configuration resolution order: CLI flags > Environment variables > TOML file > Defaults
 
-use crate::cli::Args;
 use crate::error::RsGuardError;
 use crate::http::{validate_github_base_url, validate_provider_base_url};
 use crate::llm::providers::{self, find_provider};
@@ -210,6 +209,8 @@ pub struct TomlConfig {
     pub pricing: Option<HashMap<String, PricingTomlConfig>>,
     /// Whether to automatically add the cache directory to `.gitignore`.
     pub auto_gitignore: Option<bool>,
+    /// Number of [Important] issues required to trigger REQUEST_CHANGES.
+    pub important_issues_threshold: Option<u32>,
 }
 
 /// Returns `None` when `result_format` is unset or blank so static provider
@@ -234,6 +235,7 @@ const KNOWN_TOP_LEVEL_KEYS: &[&str] = &[
     "circuit_breaker",
     "pricing",
     "auto_gitignore",
+    "important_issues_threshold",
 ];
 
 /// Returns the closest known top-level key to `unknown`, or `None` if no
@@ -582,6 +584,8 @@ pub struct Config {
     pub chunk_tail_lines: usize,
     /// Resolved LLM request timeout in seconds.
     pub llm_timeout_secs: u64,
+    /// Number of [Important] issues required to trigger REQUEST_CHANGES.
+    pub important_threshold: u32,
 }
 
 impl Config {
@@ -623,6 +627,7 @@ impl Config {
             chunk_head_lines: crate::diff::DEFAULT_CHUNK_HEAD_LINES,
             chunk_tail_lines: crate::diff::DEFAULT_CHUNK_TAIL_LINES,
             llm_timeout_secs: DEFAULT_LLM_TIMEOUT_SECS,
+            important_threshold: 3,
         }
     }
 
@@ -784,6 +789,13 @@ impl Config {
             .and_then(|t| t.chunk_tail_lines)
             .unwrap_or(crate::diff::DEFAULT_CHUNK_TAIL_LINES);
 
+        // Important-issues threshold: env > toml > default (3)
+        let important_threshold = std::env::var("RS_GUARD_IMPORTANT_THRESHOLD")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .or(toml.as_ref().and_then(|t| t.important_issues_threshold))
+            .unwrap_or(3);
+
         // Provider config from TOML — validate base_url against SSRF allowlist in CI
         // In local mode, warn about potentially dangerous URLs to prevent accidental token exfiltration
         let toml_provider = toml_providers.get(&provider);
@@ -861,6 +873,7 @@ impl Config {
             chunk_head_lines,
             chunk_tail_lines,
             llm_timeout_secs,
+            important_threshold,
         })
     }
 
@@ -877,7 +890,7 @@ impl Config {
     ///
     /// Returns [`RsGuardError::Config`] if the provider changes and the
     /// new provider's API key environment variable is not set.
-    pub fn apply_args(&mut self, args: &Args) -> Result<(), RsGuardError> {
+    pub fn apply_args(&mut self, args: &crate::cli::ReviewArgs) -> Result<(), RsGuardError> {
         if let Some(ref provider) = args.provider {
             if *provider != self.provider {
                 let new_env = resolve_api_key_env_var(provider, Some(&self.toml_providers))?;
@@ -965,6 +978,9 @@ impl Config {
         }
         if args.dry_run {
             self.dry_run = true;
+        }
+        if let Some(threshold) = args.important_threshold {
+            self.important_threshold = threshold;
         }
 
         Ok(())
@@ -1403,8 +1419,8 @@ mod tests {
         let mut config = Config::empty();
         assert!(!config.dry_run);
 
-        let args = crate::cli::Args::parse_from(["rs-guard", "--dry-run"]);
-        config.apply_args(&args).unwrap();
+        let cli = crate::cli::Cli::parse_from(["rs-guard", "--dry-run"]);
+        config.apply_args(&cli.review).unwrap();
         assert!(config.dry_run);
     }
 
@@ -1650,8 +1666,8 @@ mod tests {
             Some("json_object".to_string())
         );
 
-        let args = crate::cli::Args::parse_from(["rs-guard", "--provider", "kimi"]);
-        config.apply_args(&args).unwrap();
+        let cli = crate::cli::Cli::parse_from(["rs-guard", "--provider", "kimi"]);
+        config.apply_args(&cli.review).unwrap();
 
         assert_eq!(config.provider, "kimi");
         assert_eq!(config.api_key, "kimi-key");

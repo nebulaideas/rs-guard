@@ -44,7 +44,7 @@ fn bench_determine_review_state(c: &mut Criterion) {
     };
 
     c.bench_function("determine_review_state", |b| {
-        b.iter(|| determine_review_state(black_box(&verdict)))
+        b.iter(|| determine_review_state(black_box(&verdict), black_box(3)))
     });
 }
 

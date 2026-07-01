@@ -6,7 +6,7 @@ use rs_guard::verdict::{
 #[test]
 fn test_parse_valid_positive_clean() {
     let response = "Review text\n\n[RS_GUARD_VERDICT_METADATA]\nVerdict: POSITIVE\nCriticalIssues: 0\nSecurityIssues: 0\nImportantIssues: 0\nSuggestions: 0";
-    let (_verdict, state) = parse_verdict(response).unwrap();
+    let (_verdict, state) = parse_verdict(response, 3).unwrap();
     assert_eq!(state, ReviewState::Approve);
 }
 
@@ -14,7 +14,7 @@ fn test_parse_valid_positive_clean() {
 fn test_parse_negative_verdict() {
     let response =
         "[RS_GUARD_VERDICT_METADATA]\nVerdict: NEGATIVE\nCriticalIssues: 0\nSecurityIssues: 0\nImportantIssues: 0\nSuggestions: 0";
-    let (_verdict, state) = parse_verdict(response).unwrap();
+    let (_verdict, state) = parse_verdict(response, 3).unwrap();
     assert_eq!(state, ReviewState::RequestChanges);
 }
 
@@ -23,7 +23,7 @@ fn test_parse_critical_issues_gt_0_blocks() {
     // Any [Critical] issue blocks merge regardless of verdict
     let response =
         "[RS_GUARD_VERDICT_METADATA]\nVerdict: POSITIVE\nCriticalIssues: 5\nSecurityIssues: 0\nImportantIssues: 0\nSuggestions: 0";
-    let (_verdict, state) = parse_verdict(response).unwrap();
+    let (_verdict, state) = parse_verdict(response, 3).unwrap();
     assert_eq!(state, ReviewState::RequestChanges);
 }
 
@@ -31,7 +31,7 @@ fn test_parse_critical_issues_gt_0_blocks() {
 fn test_parse_security_issues_gt_0() {
     let response =
         "[RS_GUARD_VERDICT_METADATA]\nVerdict: POSITIVE\nCriticalIssues: 0\nSecurityIssues: 3\nImportantIssues: 0\nSuggestions: 0";
-    let (_verdict, state) = parse_verdict(response).unwrap();
+    let (_verdict, state) = parse_verdict(response, 3).unwrap();
     assert_eq!(state, ReviewState::RequestChanges);
 }
 
@@ -40,7 +40,7 @@ fn test_parse_positive_with_2_important_issues_yields_comment() {
     // [Important] 1-2 → COMMENT (human review recommended, not blocked)
     let response =
         "[RS_GUARD_VERDICT_METADATA]\nVerdict: POSITIVE\nCriticalIssues: 0\nSecurityIssues: 0\nImportantIssues: 2\nSuggestions: 0";
-    let (_verdict, state) = parse_verdict(response).unwrap();
+    let (_verdict, state) = parse_verdict(response, 3).unwrap();
     assert_eq!(state, ReviewState::Comment);
 }
 
@@ -49,14 +49,14 @@ fn test_parse_positive_with_1_critical_issue_yields_request_changes() {
     // [Critical] always blocks, even with positive verdict
     let response =
         "[RS_GUARD_VERDICT_METADATA]\nVerdict: POSITIVE\nCriticalIssues: 1\nSecurityIssues: 0\nImportantIssues: 0\nSuggestions: 0";
-    let (_verdict, state) = parse_verdict(response).unwrap();
+    let (_verdict, state) = parse_verdict(response, 3).unwrap();
     assert_eq!(state, ReviewState::RequestChanges);
 }
 
 #[test]
 fn test_missing_metadata_block_fallback_tags() {
     let response = "I found some issues.\n[Critical Bug] Null pointer dereference\n[Critical Bug] Race condition\n[Security] XSS vulnerability";
-    let (verdict, state) = parse_verdict(response).unwrap();
+    let (verdict, state) = parse_verdict(response, 3).unwrap();
     assert_eq!(verdict.critical_issues, 2);
     assert_eq!(verdict.security_issues, 1);
     assert_eq!(state, ReviewState::RequestChanges);
@@ -65,7 +65,7 @@ fn test_missing_metadata_block_fallback_tags() {
 #[test]
 fn test_clean_response_no_tags_yields_approve() {
     let response = "Everything looks good. No issues found in this PR.";
-    let (verdict, state) = parse_verdict(response).unwrap();
+    let (verdict, state) = parse_verdict(response, 3).unwrap();
     assert_eq!(verdict.critical_issues, 0);
     assert_eq!(verdict.security_issues, 0);
     assert_eq!(state, ReviewState::Approve);
@@ -75,7 +75,7 @@ fn test_clean_response_no_tags_yields_approve() {
 fn test_invalid_verdict_value() {
     let response =
         "[RS_GUARD_VERDICT_METADATA]\nVerdict: MAYBE\nCriticalIssues: 0\nSecurityIssues: 0\nImportantIssues: 0\nSuggestions: 0";
-    let result = parse_verdict(response);
+    let result = parse_verdict(response, 3);
     assert!(result.is_err());
     assert!(result
         .unwrap_err()
@@ -119,7 +119,7 @@ fn test_determine_review_state_negative_always_requests_changes() {
         suggestions: 0,
     };
     assert_eq!(
-        determine_review_state(&verdict),
+        determine_review_state(&verdict, 3),
         ReviewState::RequestChanges
     );
 }
@@ -133,7 +133,7 @@ fn test_determine_review_state_positive_with_zero_counts_approves() {
         important_issues: 0,
         suggestions: 0,
     };
-    assert_eq!(determine_review_state(&verdict), ReviewState::Approve);
+    assert_eq!(determine_review_state(&verdict, 3), ReviewState::Approve);
 }
 
 #[test]
@@ -147,7 +147,7 @@ fn test_determine_review_state_asymmetric_safety() {
         suggestions: 0,
     };
     assert_eq!(
-        determine_review_state(&verdict),
+        determine_review_state(&verdict, 3),
         ReviewState::RequestChanges
     );
 
@@ -160,7 +160,7 @@ fn test_determine_review_state_asymmetric_safety() {
         suggestions: 0,
     };
     assert_eq!(
-        determine_review_state(&verdict),
+        determine_review_state(&verdict, 3),
         ReviewState::RequestChanges
     );
 }
@@ -261,7 +261,7 @@ fn test_determine_review_state_important_issues_lt_3_yields_comment() {
         suggestions: 0,
     };
     // Act / Assert
-    assert_eq!(determine_review_state(&verdict), ReviewState::Comment);
+    assert_eq!(determine_review_state(&verdict, 3), ReviewState::Comment);
 }
 
 #[test]
@@ -276,7 +276,7 @@ fn test_determine_review_state_important_issues_eq_3_yields_request_changes() {
     };
     // Act / Assert
     assert_eq!(
-        determine_review_state(&verdict),
+        determine_review_state(&verdict, 3),
         ReviewState::RequestChanges
     );
 }
@@ -293,7 +293,7 @@ fn test_determine_review_state_important_issues_gt_3_yields_request_changes() {
     };
     // Act / Assert
     assert_eq!(
-        determine_review_state(&verdict),
+        determine_review_state(&verdict, 3),
         ReviewState::RequestChanges
     );
 }
@@ -309,7 +309,7 @@ fn test_determine_review_state_suggestions_alone_do_not_block() {
         suggestions: 99,
     };
     // Act / Assert
-    assert_eq!(determine_review_state(&verdict), ReviewState::Approve);
+    assert_eq!(determine_review_state(&verdict, 3), ReviewState::Approve);
 }
 
 #[test]
@@ -337,7 +337,7 @@ fn test_evaluate_by_tags_three_important_issues_drives_negative() {
     // determine_review_state applies the important threshold
     assert_eq!(verdict.important_issues, 3);
     assert_eq!(
-        determine_review_state(&verdict),
+        determine_review_state(&verdict, 3),
         ReviewState::RequestChanges
     );
 }
@@ -351,7 +351,7 @@ fn test_parse_verdict_full_four_field_block_round_trip() {
     // Arrange: canonical four-field block as emitted by the updated DEFAULT_PROMPT
     let response = "Good review.\n\n[RS_GUARD_VERDICT_METADATA]\nVerdict: POSITIVE\nCriticalIssues: 0\nSecurityIssues: 0\nImportantIssues: 0\nSuggestions: 2";
     // Act
-    let (verdict, state) = parse_verdict(response).unwrap();
+    let (verdict, state) = parse_verdict(response, 3).unwrap();
     // Assert: all fields parsed, suggestions alone never block
     assert_eq!(verdict.verdict, "POSITIVE");
     assert_eq!(verdict.critical_issues, 0);
@@ -377,7 +377,7 @@ fn test_parse_verdict_important_issues_threshold_table() {
             "[RS_GUARD_VERDICT_METADATA]\nVerdict: POSITIVE\nCriticalIssues: 0\nSecurityIssues: 0\nImportantIssues: {count}\nSuggestions: 0"
         );
         // Act
-        let (_verdict, state) = parse_verdict(&response).unwrap();
+        let (_verdict, state) = parse_verdict(&response, 3).unwrap();
         // Assert
         assert_eq!(
             state, *expected_state,
@@ -408,6 +408,66 @@ fn test_parse_metadata_block_whitespace_field_value_defaults_to_zero() {
     // Assert: whitespace-only value treated identically to empty — defaults to 0
     assert_eq!(verdict.important_issues, 0);
     assert_eq!(verdict.verdict, "POSITIVE");
+}
+
+#[test]
+fn test_parse_verdict_threshold_0_allows_important_issues() {
+    let response = "[RS_GUARD_VERDICT_METADATA]\nVerdict: POSITIVE\nCriticalIssues: 0\nSecurityIssues: 0\nImportantIssues: 5\nSuggestions: 0";
+    let (_verdict, state) = parse_verdict(response, 0).unwrap();
+    // Threshold 0 disables blocking on important issues, but they still surface as COMMENT.
+    assert_eq!(state, ReviewState::Comment);
+}
+
+#[test]
+fn test_parse_verdict_threshold_0_with_no_issues_approves() {
+    let response = "[RS_GUARD_VERDICT_METADATA]\nVerdict: POSITIVE\nCriticalIssues: 0\nSecurityIssues: 0\nImportantIssues: 0\nSuggestions: 0";
+    let (_verdict, state) = parse_verdict(response, 0).unwrap();
+    assert_eq!(state, ReviewState::Approve);
+}
+
+#[test]
+fn test_parse_verdict_threshold_1_blocks_on_single_important() {
+    let response = "[RS_GUARD_VERDICT_METADATA]\nVerdict: POSITIVE\nCriticalIssues: 0\nSecurityIssues: 0\nImportantIssues: 1\nSuggestions: 0";
+    let (_verdict, state) = parse_verdict(response, 1).unwrap();
+    assert_eq!(state, ReviewState::RequestChanges);
+}
+
+#[test]
+fn test_parse_verdict_threshold_5_requires_five_important() {
+    let response = "[RS_GUARD_VERDICT_METADATA]\nVerdict: POSITIVE\nCriticalIssues: 0\nSecurityIssues: 0\nImportantIssues: 4\nSuggestions: 0";
+    let (_verdict, state) = parse_verdict(response, 5).unwrap();
+    assert_eq!(state, ReviewState::Comment);
+
+    let response = "[RS_GUARD_VERDICT_METADATA]\nVerdict: POSITIVE\nCriticalIssues: 0\nSecurityIssues: 0\nImportantIssues: 5\nSuggestions: 0";
+    let (_verdict, state) = parse_verdict(response, 5).unwrap();
+    assert_eq!(state, ReviewState::RequestChanges);
+}
+
+#[test]
+fn test_determine_review_state_respects_threshold() {
+    let verdict = Verdict {
+        verdict: "POSITIVE".to_string(),
+        critical_issues: 0,
+        security_issues: 0,
+        important_issues: 2,
+        suggestions: 0,
+    };
+    assert_eq!(determine_review_state(&verdict, 3), ReviewState::Comment);
+    assert_eq!(
+        determine_review_state(&verdict, 2),
+        ReviewState::RequestChanges
+    );
+    // Threshold 0 disables blocking; important issues still surface as COMMENT.
+    assert_eq!(determine_review_state(&verdict, 0), ReviewState::Comment);
+
+    let clean = Verdict {
+        verdict: "POSITIVE".to_string(),
+        critical_issues: 0,
+        security_issues: 0,
+        important_issues: 0,
+        suggestions: 0,
+    };
+    assert_eq!(determine_review_state(&clean, 0), ReviewState::Approve);
 }
 
 #[test]
