@@ -125,10 +125,22 @@ pub fn run_init(args: &InitArgs) -> Result<(), Box<dyn std::error::Error>> {
     )?;
     write_file(".reviewer.toml", &config, args.force)?;
 
+    let detected_label = match project_type {
+        ProjectType::Rust => "Rust",
+        ProjectType::BackendApi => "Backend/API",
+        ProjectType::FrontendSpa => "Frontend SPA",
+        ProjectType::CliTooling => "CLI/tooling",
+        ProjectType::General => "general",
+    };
     println!(
-        "✅ rs-guard scaffolding complete for {:?} project.",
-        project_type
+        "✅ rs-guard scaffolding complete for {} project.",
+        detected_label
     );
+    if args.project_type.is_none() {
+        println!(
+            "   Project type auto-detected. Override with: rs-guard init --type <rust|backend-api|frontend-spa|cli-tooling|general>"
+        );
+    }
     println!();
     println!("Generated files:");
     println!("  - .github/workflows/rs-guard-review.yml");
@@ -215,12 +227,19 @@ pub fn run_validate_config(args: &ValidateConfigArgs) -> Result<(), Box<dyn std:
 }
 
 /// Detects the project type by inspecting files in the current directory.
+///
+/// Detection order:
+/// 1. `Cargo.toml` → Rust
+/// 2. `package.json` → Frontend SPA or Backend API (inspected for framework hints)
+/// 3. `go.mod` → CLI tooling / systems program
+/// 4. `pyproject.toml` / `requirements.txt` → Backend API
+/// 5. fallback → General
 fn detect_project_type() -> ProjectType {
     if Path::new("Cargo.toml").exists() {
         return ProjectType::Rust;
     }
     if Path::new("package.json").exists() {
-        return ProjectType::FrontendSpa;
+        return detect_node_project_type();
     }
     if Path::new("go.mod").exists() {
         return ProjectType::CliTooling;
@@ -231,12 +250,58 @@ fn detect_project_type() -> ProjectType {
     ProjectType::General
 }
 
+/// Inspects `package.json` to distinguish frontend SPAs from backend APIs.
+///
+/// Looks for common framework/runtime indicators in `dependencies` and
+/// `devDependencies`. When neither side is strongly indicated, defaults to
+/// `FrontendSpa` because `package.json` is most commonly used for web UIs.
+fn detect_node_project_type() -> ProjectType {
+    let content = fs::read_to_string("package.json").unwrap_or_default();
+    let deps: String = content.to_ascii_lowercase();
+
+    let frontend_indicators = [
+        "react", "vue", "angular", "svelte", "solid-js", "preact", "lit", "vite", "webpack",
+        "parcel", "rollup", "next", "nuxt", "astro", "remix", "gatsby", "expo",
+    ];
+    let backend_indicators = [
+        "express",
+        "fastify",
+        "koa",
+        "hapi",
+        "restify",
+        "nestjs",
+        "@nestjs",
+        "apollo-server",
+        "trpc",
+        "socket.io",
+        "bull",
+        "bullmq",
+    ];
+
+    let frontend_score = frontend_indicators
+        .iter()
+        .filter(|&&ind| deps.contains(&format!("\"{ind}\"")))
+        .count();
+    let backend_score = backend_indicators
+        .iter()
+        .filter(|&&ind| deps.contains(&format!("\"{ind}\"")))
+        .count();
+
+    if backend_score > frontend_score {
+        ProjectType::BackendApi
+    } else {
+        ProjectType::FrontendSpa
+    }
+}
+
 /// Maps a project type to a language string for generated guardrails.
 fn language_for_project_type(project_type: ProjectType) -> Option<String> {
     match project_type {
         ProjectType::Rust => Some("rust".to_string()),
         ProjectType::CliTooling => Some("go".to_string()),
-        _ => None,
+        ProjectType::BackendApi => Some("python".to_string()),
+        ProjectType::FrontendSpa => Some("typescript".to_string()),
+        ProjectType::General => None,
     }
 }
 
@@ -512,6 +577,89 @@ mod tests {
         std::env::set_current_dir(dir.path()).unwrap();
         assert_eq!(detect_project_type(), ProjectType::Rust);
         std::env::set_current_dir(original_dir).unwrap();
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn test_detect_project_type_node_frontend() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(
+            dir.path().join("package.json"),
+            r#"{"dependencies": {"react": "^18.0.0", "vite": "^4.0.0"}}"#,
+        )
+        .unwrap();
+        let original_dir = std::env::current_dir().unwrap();
+        std::env::set_current_dir(dir.path()).unwrap();
+        assert_eq!(detect_project_type(), ProjectType::FrontendSpa);
+        std::env::set_current_dir(original_dir).unwrap();
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn test_detect_project_type_node_backend() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(
+            dir.path().join("package.json"),
+            r#"{"dependencies": {"express": "^4.0.0", "bullmq": "^4.0.0"}}"#,
+        )
+        .unwrap();
+        let original_dir = std::env::current_dir().unwrap();
+        std::env::set_current_dir(dir.path()).unwrap();
+        assert_eq!(detect_project_type(), ProjectType::BackendApi);
+        std::env::set_current_dir(original_dir).unwrap();
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn test_detect_project_type_go() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("go.mod"), "module example\n").unwrap();
+        let original_dir = std::env::current_dir().unwrap();
+        std::env::set_current_dir(dir.path()).unwrap();
+        assert_eq!(detect_project_type(), ProjectType::CliTooling);
+        std::env::set_current_dir(original_dir).unwrap();
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn test_detect_project_type_python() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("pyproject.toml"), "[project]\n").unwrap();
+        let original_dir = std::env::current_dir().unwrap();
+        std::env::set_current_dir(dir.path()).unwrap();
+        assert_eq!(detect_project_type(), ProjectType::BackendApi);
+        std::env::set_current_dir(original_dir).unwrap();
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn test_detect_project_type_general_fallback() {
+        let dir = tempfile::tempdir().unwrap();
+        let original_dir = std::env::current_dir().unwrap();
+        std::env::set_current_dir(dir.path()).unwrap();
+        assert_eq!(detect_project_type(), ProjectType::General);
+        std::env::set_current_dir(original_dir).unwrap();
+    }
+
+    #[test]
+    fn test_language_for_project_type_returns_guardrail_languages() {
+        assert_eq!(
+            language_for_project_type(ProjectType::Rust),
+            Some("rust".to_string())
+        );
+        assert_eq!(
+            language_for_project_type(ProjectType::CliTooling),
+            Some("go".to_string())
+        );
+        assert_eq!(
+            language_for_project_type(ProjectType::BackendApi),
+            Some("python".to_string())
+        );
+        assert_eq!(
+            language_for_project_type(ProjectType::FrontendSpa),
+            Some("typescript".to_string())
+        );
+        assert_eq!(language_for_project_type(ProjectType::General), None);
     }
 
     #[test]

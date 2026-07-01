@@ -926,6 +926,100 @@ fn test_temperature_env_var_negative_returns_error() {
 }
 
 // ---------------------------------------------------------------------------
+// Strict numeric env-var parsing
+// ---------------------------------------------------------------------------
+
+#[test]
+#[serial]
+fn test_invalid_max_tokens_env_var_returns_error() {
+    with_env(
+        &[
+            ("DEEPSEEK_API_KEY", "test-deepseek-key"),
+            ("RS_GUARD_MAX_TOKENS", "not-a-number"),
+        ],
+        || {
+            let result = Config::from_env(None);
+            assert!(result.is_err(), "expected error for invalid max_tokens");
+            let err = result.unwrap_err().to_string();
+            assert!(
+                err.contains("RS_GUARD_MAX_TOKENS"),
+                "expected RS_GUARD_MAX_TOKENS error, got: {}",
+                err
+            );
+        },
+    );
+}
+
+#[test]
+#[serial]
+fn test_invalid_llm_timeout_env_var_returns_error() {
+    with_env(
+        &[
+            ("DEEPSEEK_API_KEY", "test-deepseek-key"),
+            ("RS_GUARD_LLM_TIMEOUT", "fast"),
+        ],
+        || {
+            let result = Config::from_env(None);
+            assert!(result.is_err(), "expected error for invalid llm_timeout");
+            let err = result.unwrap_err().to_string();
+            assert!(
+                err.contains("RS_GUARD_LLM_TIMEOUT"),
+                "expected RS_GUARD_LLM_TIMEOUT error, got: {}",
+                err
+            );
+        },
+    );
+}
+
+#[test]
+#[serial]
+fn test_invalid_important_threshold_env_var_returns_error() {
+    with_env(
+        &[
+            ("DEEPSEEK_API_KEY", "test-deepseek-key"),
+            ("RS_GUARD_IMPORTANT_THRESHOLD", "many"),
+        ],
+        || {
+            let result = Config::from_env(None);
+            assert!(
+                result.is_err(),
+                "expected error for invalid important_threshold"
+            );
+            let err = result.unwrap_err().to_string();
+            assert!(
+                err.contains("RS_GUARD_IMPORTANT_THRESHOLD"),
+                "expected RS_GUARD_IMPORTANT_THRESHOLD error, got: {}",
+                err
+            );
+        },
+    );
+}
+
+#[test]
+#[serial]
+fn test_invalid_pr_number_env_var_returns_error() {
+    with_env(
+        &[
+            ("DEEPSEEK_API_KEY", "test-deepseek-key"),
+            ("GITHUB_ACTIONS", "true"),
+            ("GITHUB_TOKEN", "test-token"),
+            ("REPO_FULL_NAME", "owner/repo"),
+            ("PR_NUMBER", "forty-two"),
+        ],
+        || {
+            let result = Config::from_env(None);
+            assert!(result.is_err(), "expected error for invalid PR_NUMBER");
+            let err = result.unwrap_err().to_string();
+            assert!(
+                err.contains("PR_NUMBER"),
+                "expected PR_NUMBER error, got: {}",
+                err
+            );
+        },
+    );
+}
+
+// ---------------------------------------------------------------------------
 // Issues #7 & #29 — Configurable chunking thresholds via TOML
 // ---------------------------------------------------------------------------
 

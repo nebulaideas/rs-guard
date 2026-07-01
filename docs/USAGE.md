@@ -75,6 +75,24 @@ rs-guard generate-workflow --provider openai --model gpt-4o-mini --fork-safe
 rs-guard validate-config
 ```
 
+### Project Type Detection
+
+`rs-guard init` tries to detect your project type from files in the working directory:
+
+| Detected files | Project type | Notes |
+| -------------- | ------------ | ----- |
+| `Cargo.toml` | `rust` | Detects Rust crates and workspaces. |
+| `package.json` | `frontend-spa` or `backend-api` | Inspects dependencies for React, Vue, Express, Fastify, NestJS, etc. Defaults to `frontend-spa` when ambiguous. |
+| `go.mod` | `cli-tooling` | Go module. |
+| `pyproject.toml` / `requirements.txt` | `backend-api` | Python project. |
+| none of the above | `general` | Language-agnostic review. |
+
+Override auto-detection with `--type`:
+
+```bash
+rs-guard init --type backend-api --provider openai
+```
+
 ### Mode Detection
 
 rs-guard detects the execution mode:

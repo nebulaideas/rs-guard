@@ -4,6 +4,7 @@
 //! backoff, jitter, and an optional circuit breaker.
 
 use crate::error::RsGuardError;
+use rand::Rng;
 use std::future::Future;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -204,7 +205,8 @@ impl CircuitBreaker {
 /// Computes an exponential backoff delay with jitter.
 ///
 /// Base delay: 1s, multiplied by `2^attempt` for each retry.
-/// Jitter: ±25% random variation of the computed delay.
+/// Jitter: ±25% random variation of the computed delay, drawn from the
+/// thread-local RNG to avoid deterministic retry storms across clients.
 ///
 /// # Arguments
 ///
@@ -212,15 +214,10 @@ impl CircuitBreaker {
 fn backoff_delay(attempt: u32) -> Duration {
     let base = BASE_DELAY_SECS * BACKOFF_MULTIPLIER.powi(attempt as i32);
 
-    // Simple deterministic jitter using timestamp bits
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
-    let jitter_frac = ((nanos % 997) as f64 / 997.0) * 2.0 - 1.0; // [-1, 1)
-    let jitter_amount = jitter_frac * JITTER_RANGE; // ±25%
+    let mut rng = rand::thread_rng();
+    let jitter_frac: f64 = rng.gen_range(-JITTER_RANGE..JITTER_RANGE);
 
-    let secs = (base * (1.0 + jitter_amount)).max(0.1);
+    let secs = (base * (1.0 + jitter_frac)).max(0.1);
     Duration::from_secs_f64(secs)
 }
 

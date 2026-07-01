@@ -103,11 +103,11 @@ pub struct ReviewArgs {
     #[arg(long, help = "Timeout in seconds for LLM API requests [default: 120]")]
     pub llm_timeout: Option<u64>,
 
-    /// Threshold of [Important] issues required to REQUEST_CHANGES.
+    /// Threshold of "Important" issues required to REQUEST_CHANGES.
     #[arg(
         long,
         env = "RS_GUARD_IMPORTANT_THRESHOLD",
-        help = "Threshold of [Important] issues required to REQUEST_CHANGES [default: 3]"
+        help = "Threshold of \"Important\" issues required to REQUEST_CHANGES [default: 3]"
     )]
     pub important_threshold: Option<u32>,
 

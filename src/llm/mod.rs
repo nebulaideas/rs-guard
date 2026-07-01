@@ -204,19 +204,26 @@ pub(crate) async fn send_chat_request<B: Serialize + Send>(
     let status = response.status();
 
     // Log sanitized response headers at debug level for observability.
-    // Only safe, non-sensitive headers are logged.
+    // Only explicitly-allowed, non-sensitive headers are logged.
+    const ALLOWED_HEADERS: &[&str] = &[
+        "content-type",
+        "content-length",
+        "cache-control",
+        "etag",
+        "date",
+        "server",
+        "x-request-id",
+        "x-ratelimit-limit",
+        "x-ratelimit-remaining",
+        "x-ratelimit-reset",
+    ];
     if log::log_enabled!(log::Level::Debug) {
         let headers = response.headers();
         let safe_headers: Vec<String> = headers
             .iter()
             .filter_map(|(name, value)| {
                 let name_str = name.as_str();
-                // Skip potentially sensitive headers
-                if name_str == "authorization"
-                    || name_str == "set-cookie"
-                    || name_str.contains("token")
-                    || name_str.contains("key")
-                {
+                if !ALLOWED_HEADERS.contains(&name_str) {
                     return None;
                 }
                 let val = value.to_str().unwrap_or("<binary>");

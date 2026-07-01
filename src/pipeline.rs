@@ -5,7 +5,9 @@
 
 use crate::cache::{CacheConfig, DiffCache};
 use crate::config::{CiConfig, Config};
-use crate::diff::{chunk_diff_with_params, fetch_file_diff, fetch_local_diff, fetch_pr_diff};
+use crate::diff::{
+    chunk_diff_with_params, fetch_file_diff, fetch_local_diff, fetch_pr_diff, DiffResult,
+};
 use crate::error::RsGuardError;
 use crate::github::{dismiss_previous_reviews, submit_review};
 use crate::llm::factory::create_provider;
@@ -111,21 +113,22 @@ async fn handle_diff_fetch_error(
     }
 }
 
-/// Runs the full review pipeline with the given configuration.
+/// Result of fetching a diff before any LLM work begins.
 ///
-/// This function is separated from `main` to enable integration testing
-/// without spawning a subprocess.
+/// `Diff` carries the fetched diff; `Complete` means the pipeline should
+/// return early with the given [`PipelineResult`] (e.g. empty diff).
+enum DiffFetchOutcome {
+    Diff(DiffResult),
+    Complete(PipelineResult),
+}
+
+/// Fetches the diff from the configured source.
 ///
-/// # Arguments
-///
-/// * `config` — Resolved application configuration.
-/// * `diff_file` — Optional path to a pre-existing diff file. When provided,
-///   the GitHub API diff fetch is skipped entirely.
-pub async fn run_pipeline(
-    config: Config,
-    diff_file: Option<&str>,
-) -> anyhow::Result<PipelineResult> {
-    let diff_result = if let Some(path) = diff_file {
+/// Reads from `diff_file` when provided, otherwise fetches from GitHub in CI
+/// mode or from the local git index in local mode. Empty or oversized diffs
+/// produce an early [`PipelineResult`] rather than an error.
+async fn fetch_diff(config: &Config, diff_file: Option<&str>) -> anyhow::Result<DiffFetchOutcome> {
+    if let Some(path) = diff_file {
         log::info!("Reading diff from file: {}", path);
         match fetch_file_diff(path) {
             Ok(diff) => {
@@ -135,9 +138,11 @@ pub async fn run_pipeline(
                     diff.size_bytes
                 );
                 log_redacted("Diff content", &diff.content);
-                diff
+                Ok(DiffFetchOutcome::Diff(diff))
             }
-            Err(e) => return handle_diff_fetch_error(e, DiffSource::File(path)).await,
+            Err(e) => handle_diff_fetch_error(e, DiffSource::File(path))
+                .await
+                .map(Into::into),
         }
     } else if config.is_ci {
         log::info!("CI mode detected. Fetching PR diff...");
@@ -161,11 +166,11 @@ pub async fn run_pipeline(
                     diff.size_bytes
                 );
                 log_redacted("Diff content", &diff.content);
-                diff
+                Ok(DiffFetchOutcome::Diff(diff))
             }
-            Err(e) => {
-                return handle_diff_fetch_error(e, DiffSource::Ci { config: ci_config }).await
-            }
+            Err(e) => handle_diff_fetch_error(e, DiffSource::Ci { config: ci_config })
+                .await
+                .map(Into::into),
         }
     } else {
         log::info!("Local mode detected. Fetching staged diff...");
@@ -177,28 +182,42 @@ pub async fn run_pipeline(
                     diff.size_bytes
                 );
                 log_redacted("Diff content", &diff.content);
-                diff
+                Ok(DiffFetchOutcome::Diff(diff))
             }
-            Err(e) => return handle_diff_fetch_error(e, DiffSource::Local).await,
+            Err(e) => handle_diff_fetch_error(e, DiffSource::Local)
+                .await
+                .map(Into::into),
         }
-    };
+    }
+}
 
-    // Chunk large diffs to fit within model context windows
-    let (chunked_content, was_chunked, removed_lines) = chunk_diff_with_params(
-        &diff_result.content,
-        config.chunk_head_lines,
-        config.chunk_tail_lines,
-    );
-    let diff_content = if was_chunked {
+impl From<PipelineResult> for DiffFetchOutcome {
+    fn from(result: PipelineResult) -> Self {
+        DiffFetchOutcome::Complete(result)
+    }
+}
+
+/// Chunks a diff when it exceeds the configured line thresholds.
+///
+/// Returns the (possibly truncated) content, whether truncation happened, and
+/// the number of omitted middle lines.
+fn chunk_diff(diff: &DiffResult, head_lines: usize, tail_lines: usize) -> (String, bool, usize) {
+    let (chunked_content, was_chunked, removed_lines) =
+        chunk_diff_with_params(&diff.content, head_lines, tail_lines);
+    let content = if was_chunked {
         log::warn!(
             "Diff chunked: omitted {} middle lines for model context window",
             removed_lines
         );
         chunked_content.into_owned()
     } else {
-        diff_result.content.clone()
+        diff.content.clone()
     };
+    (content, was_chunked, removed_lines)
+}
 
+/// Builds the response cache from configuration.
+fn build_cache(config: &Config) -> anyhow::Result<DiffCache> {
     let cache_config = CacheConfig {
         enabled: !config.no_cache,
         cache_dir: config
@@ -209,7 +228,352 @@ pub async fn run_pipeline(
         auto_gitignore: config.auto_gitignore,
         ..CacheConfig::default()
     };
-    let cache = DiffCache::new(cache_config).context("Failed to initialize response cache")?;
+    DiffCache::new(cache_config).context("Failed to initialize response cache")
+}
+
+/// Computes the effective cache key base URL for the configured provider.
+fn effective_base_url(config: &Config) -> &str {
+    config.provider_config.base_url.as_deref().unwrap_or("")
+}
+
+/// Obtains an LLM response, either from cache or by calling the provider.
+async fn obtain_llm_response(
+    config: &Config,
+    cache: &DiffCache,
+    diff_content: &str,
+) -> anyhow::Result<(String, bool)> {
+    let base_url = effective_base_url(config);
+    if let Some(cached) = cache.get(
+        diff_content,
+        &config.prompt,
+        &config.provider,
+        &config.model,
+        config.variant.as_deref(),
+        config.temperature,
+        base_url,
+        config.provider_config.max_tokens,
+        config.provider_config.result_format.as_deref(),
+    ) {
+        log::info!("Cache hit — using cached LLM response");
+        return Ok((cached, false));
+    }
+
+    if !config.is_ci {
+        println!("🤖 Calling {} ({})...", config.provider, config.model);
+    }
+    let provider = create_provider(&config.provider, &config.api_key, &config.provider_config)
+        .context("Failed to create LLM provider")?;
+
+    let response = with_retry(
+        || async {
+            provider
+                .chat_completion(&config.prompt, diff_content, config.temperature)
+                .await
+        },
+        config.circuit_breaker.as_ref(),
+    )
+    .await
+    .context("LLM API call failed")?;
+
+    if !config.is_ci {
+        println!("✅ Response received ({} chars)", response.len());
+    }
+
+    Ok((response, !config.no_cache))
+}
+
+/// Caches an LLM response when caching is enabled.
+fn cache_response(
+    cache: &DiffCache,
+    config: &Config,
+    diff_content: &str,
+    llm_response: &str,
+    should_cache: bool,
+) {
+    if !should_cache {
+        return;
+    }
+    log::info!("Caching LLM response for future runs");
+    if let Err(e) = cache.set(
+        diff_content,
+        &config.prompt,
+        &config.provider,
+        &config.model,
+        config.variant.as_deref(),
+        config.temperature,
+        effective_base_url(config),
+        config.provider_config.max_tokens,
+        config.provider_config.result_format.as_deref(),
+        llm_response,
+    ) {
+        log::warn!("Failed to cache LLM response: {}", e);
+    }
+}
+
+/// Logs response diagnostics and warns about suspicious or truncated output.
+fn log_response_diagnostics(llm_response: &str) {
+    log::info!("Received LLM response ({} chars)", llm_response.len());
+    log_redacted("LLM response", llm_response);
+
+    if llm_response.trim().len() < 10 {
+        log::warn!(
+            "LLM response is suspiciously short ({} chars), may indicate an API error",
+            llm_response.len()
+        );
+    }
+
+    if parse_metadata_block(llm_response).is_none() {
+        log::warn!(
+            "LLM response missing [RS_GUARD_VERDICT_METADATA] block — \
+             falling back to tag-counting. Response may have been truncated. \
+             Consider setting a higher max_tokens value."
+        );
+    }
+}
+
+/// Writes the review artifact and metrics to disk.
+#[allow(clippy::too_many_arguments)]
+fn write_review_outputs(
+    config: &Config,
+    diff: &DiffResult,
+    llm_response: &str,
+    verdict: &crate::verdict::Verdict,
+    state: &ReviewState,
+    review_config: &ReviewConfig,
+    estimated_tokens_in: usize,
+    estimated_tokens_out: usize,
+    latency: std::time::Duration,
+    estimated_cost_cents: Option<f64>,
+) -> anyhow::Result<()> {
+    let sanitized_response = redact_secrets(llm_response);
+
+    write_artifact(
+        &sanitized_response,
+        verdict,
+        state,
+        review_config,
+        ARTIFACT_FILENAME,
+    )
+    .context("Failed to write review artifact")?;
+
+    let metrics = ReviewMetrics {
+        provider: config.provider.clone(),
+        model: config.model.clone(),
+        variant: config.variant.clone(),
+        estimated_tokens_in,
+        estimated_tokens_out,
+        latency_secs: latency.as_secs_f64(),
+        estimated_cost_cents,
+        diff_lines: diff.line_count,
+        verdict: verdict.verdict.clone(),
+        state: state.to_string(),
+    };
+
+    let metrics_path =
+        std::env::var("RS_GUARD_METRICS_PATH").unwrap_or_else(|_| METRICS_FILENAME.to_string());
+    if let Err(e) = write_metrics(&metrics, &metrics_path) {
+        log::warn!("Failed to write metrics: {}", e);
+    }
+
+    Ok(())
+}
+
+/// Submits the review to GitHub in CI mode.
+async fn submit_ci_review(
+    config: &Config,
+    state: &ReviewState,
+    review_body: &str,
+) -> anyhow::Result<()> {
+    let ci_config = config
+        .validate_for_ci()
+        .context("CI configuration validation failed")?;
+
+    if config.dry_run {
+        println!("🔍 DRY RUN — would submit review: {}", state);
+        log::info!("Dry-run mode: skipping GitHub review submission");
+        return Ok(());
+    }
+
+    submit_review(
+        &ci_config.github_base_url,
+        &ci_config.repo_owner,
+        &ci_config.repo_name,
+        ci_config.pr_number,
+        state.clone(),
+        review_body,
+        &ci_config.github_token,
+    )
+    .await
+    .context("Failed to submit review")?;
+
+    log::info!("Review submitted: {}", state);
+
+    if *state != ReviewState::RequestChanges {
+        log::info!("Dismissing previous blocker reviews...");
+        if let Err(e) = dismiss_previous_reviews(
+            &ci_config.github_base_url,
+            &ci_config.repo_owner,
+            &ci_config.repo_name,
+            ci_config.pr_number,
+            &ci_config.github_token,
+        )
+        .await
+        {
+            log::warn!("Failed to dismiss previous reviews: {}", e);
+        }
+    }
+
+    Ok(())
+}
+
+/// Prints the CI-mode review summary to stdout.
+#[allow(clippy::too_many_arguments)]
+fn print_ci_summary(
+    config: &Config,
+    diff: &DiffResult,
+    verdict: &crate::verdict::Verdict,
+    state: &ReviewState,
+    estimated_tokens_in: usize,
+    estimated_tokens_out: usize,
+    latency: std::time::Duration,
+    estimated_cost_cents: Option<f64>,
+) {
+    println!("rs-guard Review Complete");
+    if config.dry_run {
+        println!("============================");
+        println!("🔍 DRY RUN — no changes submitted");
+    }
+    println!("============================");
+    println!("Provider:    {}", config.provider);
+    println!("Model:       {}", config.model);
+    if let Some(ref v) = config.variant {
+        println!("Variant:       {}", v);
+    }
+    println!("Est. Tokens In:  {}", estimated_tokens_in);
+    println!("Est. Tokens Out: {}", estimated_tokens_out);
+    println!("Latency:     {:.1}s", latency.as_secs_f64());
+    println!(
+        "Est. Cost:   {}",
+        match estimated_cost_cents {
+            Some(c) => format!("${:.4}", c / 100.0),
+            None => "unknown".to_string(),
+        }
+    );
+    println!("Diff Lines:  {}", diff.line_count);
+    println!("Verdict:     {}", verdict.verdict);
+    println!("State:       {}", state);
+}
+
+/// Handles CI-mode output: builds the review body, submits (or dry-runs), and
+/// prints the summary.
+#[allow(clippy::too_many_arguments)]
+async fn handle_ci_output(
+    config: &Config,
+    diff: &DiffResult,
+    llm_response: &str,
+    verdict: &crate::verdict::Verdict,
+    state: &ReviewState,
+    was_chunked: bool,
+    removed_lines: usize,
+    estimated_tokens_in: usize,
+    estimated_tokens_out: usize,
+    latency: std::time::Duration,
+    estimated_cost_cents: Option<f64>,
+) -> anyhow::Result<PipelineResult> {
+    let sanitized_response = redact_secrets(llm_response);
+    let review_body = if was_chunked {
+        format!(
+            "⚠️ **Diff was truncated**: {} middle lines were omitted to fit the model context window.\n\n---\n\n{}",
+            removed_lines,
+            sanitized_response
+        )
+    } else {
+        sanitized_response.clone()
+    };
+
+    submit_ci_review(config, state, &review_body).await?;
+    print_ci_summary(
+        config,
+        diff,
+        verdict,
+        state,
+        estimated_tokens_in,
+        estimated_tokens_out,
+        latency,
+        estimated_cost_cents,
+    );
+
+    Ok(PipelineResult::Success)
+}
+
+/// Handles local-mode output: prints the colored summary and decides whether
+/// the review should block the commit.
+fn handle_local_output(
+    config: &Config,
+    llm_response: &str,
+    verdict: &crate::verdict::Verdict,
+    state: &ReviewState,
+    review_config: &ReviewConfig,
+    was_chunked: bool,
+    removed_lines: usize,
+) -> anyhow::Result<PipelineResult> {
+    if was_chunked {
+        eprintln!(
+            "⚠️  Diff was truncated: {} middle lines were omitted to fit the model context window.",
+            removed_lines
+        );
+    }
+
+    let sanitized_response = redact_secrets(llm_response);
+    print_colored_summary(
+        &sanitized_response,
+        verdict,
+        state,
+        review_config,
+        &mut std::io::stdout(),
+    )
+    .context("Failed to print review summary")?;
+
+    if config.dry_run {
+        println!(
+            "\n🔍 DRY RUN — would exit with: {}",
+            if *state == ReviewState::RequestChanges {
+                "2 (ReviewBlocked)"
+            } else {
+                "0 (Success)"
+            }
+        );
+        Ok(PipelineResult::Success)
+    } else if *state == ReviewState::RequestChanges {
+        Ok(PipelineResult::ReviewBlocked)
+    } else {
+        Ok(PipelineResult::Success)
+    }
+}
+
+/// Runs the full review pipeline with the given configuration.
+///
+/// This function is separated from `main` to enable integration testing
+/// without spawning a subprocess.
+///
+/// # Arguments
+///
+/// * `config` — Resolved application configuration.
+/// * `diff_file` — Optional path to a pre-existing diff file. When provided,
+///   the GitHub API diff fetch is skipped entirely.
+pub async fn run_pipeline(
+    config: Config,
+    diff_file: Option<&str>,
+) -> anyhow::Result<PipelineResult> {
+    let diff = match fetch_diff(&config, diff_file).await? {
+        DiffFetchOutcome::Diff(d) => d,
+        DiffFetchOutcome::Complete(result) => return Ok(result),
+    };
+
+    let (diff_content, was_chunked, removed_lines) =
+        chunk_diff(&diff, config.chunk_head_lines, config.chunk_tail_lines);
+
+    let cache = build_cache(&config)?;
 
     // Only auto-add to .gitignore in local mode — CI environments are often read-only
     if !config.is_ci {
@@ -218,58 +582,16 @@ pub async fn run_pipeline(
         }
     }
 
-    // --- Metrics collection ---
     let start = std::time::Instant::now();
     let estimated_tokens_in = estimate_tokens(&config.prompt) + estimate_tokens(&diff_content);
 
-    // Warn if estimated tokens approach provider context window limits
     if let Some(context_window) =
         crate::llm::providers::get_provider_context_window(&config.provider)
     {
         check_token_warning(estimated_tokens_in, context_window, &config.provider);
     }
 
-    // Check cache before calling the LLM (keyed on actual content sent to LLM).
-    // base_url + max_tokens are part of the key to prevent cross-endpoint
-    // poisoning and truncation staleness.
-    let effective_base_url = config.provider_config.base_url.as_deref().unwrap_or("");
-    let (llm_response, should_cache) = if let Some(cached) = cache.get(
-        &diff_content,
-        &config.prompt,
-        &config.provider,
-        &config.model,
-        config.variant.as_deref(),
-        config.temperature,
-        effective_base_url,
-        config.provider_config.max_tokens,
-    ) {
-        log::info!("Cache hit — using cached LLM response");
-        (cached, false)
-    } else {
-        if !config.is_ci {
-            println!("🤖 Calling {} ({})...", config.provider, config.model);
-        }
-        let provider = create_provider(&config.provider, &config.api_key, &config.provider_config)
-            .context("Failed to create LLM provider")?;
-
-        let response = with_retry(
-            || async {
-                provider
-                    .chat_completion(&config.prompt, &diff_content, config.temperature)
-                    .await
-            },
-            config.circuit_breaker.as_ref(),
-        )
-        .await
-        .context("LLM API call failed")?;
-
-        if !config.is_ci {
-            println!("✅ Response received ({} chars)", response.len());
-        }
-
-        (response, !config.no_cache)
-    };
-
+    let (llm_response, should_cache) = obtain_llm_response(&config, &cache, &diff_content).await?;
     let latency = start.elapsed();
     let estimated_tokens_out = estimate_tokens(&llm_response);
     let estimated_cost_cents = estimate_cost_cents(
@@ -279,47 +601,12 @@ pub async fn run_pipeline(
         config.pricing.as_ref(),
     );
 
-    log::info!("Received LLM response ({} chars)", llm_response.len());
-    log_redacted("LLM response", &llm_response);
-
-    if llm_response.trim().len() < 10 {
-        log::warn!(
-            "LLM response is suspiciously short ({} chars), may indicate an API error",
-            llm_response.len()
-        );
-    }
-
-    // Warn when the structured metadata block is absent — the fallback tag-counting
-    // path activates, which may produce incorrect APPROVE verdicts on truncated
-    // responses.  A missing metadata block usually means the LLM output was cut
-    // short before it could write the verdict footer.
-    if parse_metadata_block(&llm_response).is_none() {
-        log::warn!(
-            "LLM response missing [RS_GUARD_VERDICT_METADATA] block — \
-             falling back to tag-counting. Response may have been truncated. \
-             Consider setting a higher max_tokens value."
-        );
-    }
+    log_response_diagnostics(&llm_response);
 
     let (verdict, state) = parse_verdict(&llm_response, config.important_threshold)
         .context("Failed to parse verdict from LLM response")?;
 
-    if should_cache {
-        log::info!("Caching LLM response for future runs");
-        if let Err(e) = cache.set(
-            &diff_content,
-            &config.prompt,
-            &config.provider,
-            &config.model,
-            config.variant.as_deref(),
-            config.temperature,
-            effective_base_url,
-            config.provider_config.max_tokens,
-            &llm_response,
-        ) {
-            log::warn!("Failed to cache LLM response: {}", e);
-        }
-    }
+    cache_response(&cache, &config, &diff_content, &llm_response, should_cache);
 
     log::info!(
         "Verdict: {} (CriticalIssues: {}, SecurityIssues: {}, ImportantIssues: {}, Suggestions: {}) -> State: {}",
@@ -337,148 +624,48 @@ pub async fn run_pipeline(
         variant: config.variant.clone(),
         temperature: config.temperature,
         pr_number: config.pr_number,
-        diff_size_bytes: diff_result.size_bytes,
-        diff_line_count: diff_result.line_count,
+        diff_size_bytes: diff.size_bytes,
+        diff_line_count: diff.line_count,
     };
 
-    let sanitized_response = redact_secrets(&llm_response);
-
-    write_artifact(
-        &sanitized_response,
+    write_review_outputs(
+        &config,
+        &diff,
+        &llm_response,
         &verdict,
         &state,
         &review_config,
-        ARTIFACT_FILENAME,
-    )
-    .context("Failed to write review artifact")?;
-
-    let metrics = ReviewMetrics {
-        provider: config.provider.clone(),
-        model: config.model.clone(),
-        variant: config.variant.clone(),
         estimated_tokens_in,
         estimated_tokens_out,
-        latency_secs: latency.as_secs_f64(),
+        latency,
         estimated_cost_cents,
-        diff_lines: diff_result.line_count,
-        verdict: verdict.verdict.clone(),
-        state: state.to_string(),
-    };
-
-    let metrics_path =
-        std::env::var("RS_GUARD_METRICS_PATH").unwrap_or_else(|_| METRICS_FILENAME.to_string());
-    if let Err(e) = write_metrics(&metrics, &metrics_path) {
-        log::warn!("Failed to write metrics: {}", e);
-    }
+    )?;
 
     if config.is_ci {
-        let ci_config = config
-            .validate_for_ci()
-            .context("CI configuration validation failed")?;
-
-        let review_body = if was_chunked {
-            format!(
-                "⚠️ **Diff was truncated**: {} middle lines were omitted to fit the model context window.\n\n---\n\n{}",
-                removed_lines,
-                sanitized_response
-            )
-        } else {
-            sanitized_response.clone()
-        };
-
-        if config.dry_run {
-            println!("🔍 DRY RUN — would submit review: {}", state);
-            log::info!("Dry-run mode: skipping GitHub review submission");
-        } else {
-            submit_review(
-                &ci_config.github_base_url,
-                &ci_config.repo_owner,
-                &ci_config.repo_name,
-                ci_config.pr_number,
-                state.clone(),
-                &review_body,
-                &ci_config.github_token,
-            )
-            .await
-            .context("Failed to submit review")?;
-
-            log::info!("Review submitted: {}", state);
-
-            if state != ReviewState::RequestChanges {
-                log::info!("Dismissing previous blocker reviews...");
-                if let Err(e) = dismiss_previous_reviews(
-                    &ci_config.github_base_url,
-                    &ci_config.repo_owner,
-                    &ci_config.repo_name,
-                    ci_config.pr_number,
-                    &ci_config.github_token,
-                )
-                .await
-                {
-                    log::warn!("Failed to dismiss previous reviews: {}", e);
-                }
-            }
-        }
-
-        println!("rs-guard Review Complete");
-        if config.dry_run {
-            println!("============================");
-            println!("🔍 DRY RUN — no changes submitted");
-        }
-        println!("============================");
-        println!("Provider:    {}", config.provider);
-        println!("Model:       {}", config.model);
-        if let Some(ref v) = config.variant {
-            println!("Variant:       {}", v);
-        }
-        println!("Est. Tokens In:  {}", estimated_tokens_in);
-        println!("Est. Tokens Out: {}", estimated_tokens_out);
-        println!("Latency:     {:.1}s", latency.as_secs_f64());
-        println!(
-            "Est. Cost:   {}",
-            match estimated_cost_cents {
-                Some(c) => format!("${:.4}", c / 100.0),
-                None => "unknown".to_string(),
-            }
-        );
-        println!("Diff Lines:  {}", diff_result.line_count);
-        println!("Verdict:     {}", verdict.verdict);
-        println!("State:       {}", state);
-
-        Ok(PipelineResult::Success)
+        handle_ci_output(
+            &config,
+            &diff,
+            &llm_response,
+            &verdict,
+            &state,
+            was_chunked,
+            removed_lines,
+            estimated_tokens_in,
+            estimated_tokens_out,
+            latency,
+            estimated_cost_cents,
+        )
+        .await
     } else {
-        // Print chunking warning in local mode too
-        if was_chunked {
-            eprintln!(
-                "⚠️  Diff was truncated: {} middle lines were omitted to fit the model context window.",
-                removed_lines
-            );
-        }
-
-        print_colored_summary(
-            &sanitized_response,
+        handle_local_output(
+            &config,
+            &llm_response,
             &verdict,
             &state,
             &review_config,
-            &mut std::io::stdout(),
+            was_chunked,
+            removed_lines,
         )
-        .context("Failed to print review summary")?;
-
-        if config.dry_run {
-            println!(
-                "\n🔍 DRY RUN — would exit with: {}",
-                if state == ReviewState::RequestChanges {
-                    "2 (ReviewBlocked)"
-                } else {
-                    "0 (Success)"
-                }
-            );
-            Ok(PipelineResult::Success)
-        } else if state == ReviewState::RequestChanges {
-            Ok(PipelineResult::ReviewBlocked)
-        } else {
-            Ok(PipelineResult::Success)
-        }
     }
 }
 

@@ -135,11 +135,11 @@ rs-guard/
 | Print functions          | Accept `impl Write` for testability                                                        |
 | `Config::empty()`        | Test-only constructor for integration tests                                                |
 | `#![deny(missing_docs)]` | Enforced at crate level                                                                    |
-| Cache keying             | SHA-256 over (diff \| prompt \| provider \| model \| temperature) — all parameters matter  |
+| Cache keying             | SHA-256 over (diff \| prompt \| provider \| model \| variant \| temperature \| base_url \| max_tokens \| result_format) — all parameters matter |
 | Cache timestamps         | Stored in file content (line 1), not mtime — reliable across clock changes and file copies |
 | Cache size limit         | 100 MB default with LRU cleanup — prevents unbounded disk usage                            |
 | Circuit breaker          | Simple Closed/Open only (no half-open), opt-in, default disabled                           |
-| Cost calculation         | Integer cents, not floating point — avoids precision issues                                |
+| Cost calculation         | `f64` cents to avoid integer truncation for small diffs; `None` when pricing is unknown |
 | Diff chunking            | `Cow<str>` return — zero allocation when no truncation needed                              |
 
 ---
