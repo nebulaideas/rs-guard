@@ -22,11 +22,11 @@ jobs:
       # Pinned from actions/checkout@v5 (93cb6efe) to avoid Node.js 20 deprecation.
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
 
-      # Download rs-guard v1.0.2 and verify its SHA-256.
+      # Download rs-guard v1.4.0 and verify its SHA-256.
       - name: Download rs-guard
         run: |
           set -euo pipefail
-          VERSION="v1.0.2"
+          VERSION="v1.4.0"
           BINARY="rs-guard-x86_64-unknown-linux-gnu"
           curl -L --fail -o "${BINARY}" \
             "https://github.com/nebulaideas/rs-guard/releases/download/${VERSION}/${BINARY}"
