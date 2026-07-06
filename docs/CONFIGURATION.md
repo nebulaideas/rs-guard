@@ -95,8 +95,8 @@ base_url = "https://open.bigmodel.cn/api/paas/v4"
 | `cache_dir`         | string  | `.rs-guard/cache` | Custom cache directory path. Defaults to git-root (or CWD) relative `.rs-guard/cache`.                                           |
 | `auto_gitignore`    | boolean | `true`            | Whether to automatically add the cache directory to `.gitignore`.                                                                |
 | `important_issues_threshold` | integer | `3`      | Number of `[Important]` issues required to trigger `REQUEST_CHANGES`. `0` disables blocking on important issues (they still surface as `COMMENT`). |
-| `project_rules_enabled` | boolean | `true` | Whether to scan for and load project rules files. Set to `false` to disable auto-detection. |
-| `rules_file` | string | (none) | Path to an explicit project rules file. Overrides auto-detection. Mutually exclusive with `RS_GUARD_NO_PROJECT_RULES` / `--no-project-rules`. |
+| `project_rules_enabled` | boolean | `true` | Whether to scan for and load project rules files. Set to `false` to disable auto-detection. Can also be disabled via `--no-project-rules` CLI flag or `RS_GUARD_NO_PROJECT_RULES` env var (any non-empty value disables). |
+| `rules_file` | string | (none) | Path to an explicit project rules file. Overrides auto-detection. Mutually exclusive with `--no-project-rules` / `RS_GUARD_NO_PROJECT_RULES`. Can also be set via `--rules-file` CLI flag or `RS_GUARD_RULES_FILE` env var. |
 
 #### Provider Section Fields
 
@@ -272,6 +272,8 @@ Run `rs-guard <subcommand> --help` for details on each subcommand.
 | `GITHUB_API_URL`        | Optional            | Custom GitHub API base URL (Enterprise). |
 | `RS_GUARD_DIFF_FILE`    | Optional            | Path to a pre-existing diff file.        |
 | `RS_GUARD_METRICS_PATH` | Optional            | Path for the metrics JSON artifact.      |
+| `RS_GUARD_NO_PROJECT_RULES` | Optional        | Disables project rules auto-detection when set to **any non-empty value** (including `"false"` or `"0"`). To keep rules enabled, leave this variable unset. This matches the pattern used by `RS_GUARD_NO_CACHE`. |
+| `RS_GUARD_RULES_FILE`   | Optional            | Path to an explicit project rules file. Overrides auto-detection. Mutually exclusive with `RS_GUARD_NO_PROJECT_RULES` / `--no-project-rules`. |
 
 ---
 
