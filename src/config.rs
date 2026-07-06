@@ -211,6 +211,12 @@ pub struct TomlConfig {
     pub auto_gitignore: Option<bool>,
     /// Number of "Important" issues required to trigger REQUEST_CHANGES.
     pub important_issues_threshold: Option<u32>,
+    /// Whether project rules auto-detection is enabled (default: `true`).
+    ///
+    /// When `false`, rs-guard will not scan for `AGENTS.md`, `CLAUDE.md`, or
+    /// other AI-agent instruction files. Can be overridden by the
+    /// `--no-project-rules` CLI flag or `RS_GUARD_NO_PROJECT_RULES` env var.
+    pub project_rules_enabled: Option<bool>,
 }
 
 /// Returns `None` when `result_format` is unset or blank so static provider
@@ -236,6 +242,7 @@ const KNOWN_TOP_LEVEL_KEYS: &[&str] = &[
     "pricing",
     "auto_gitignore",
     "important_issues_threshold",
+    "project_rules_enabled",
 ];
 
 /// Returns the closest known top-level key to `unknown`, or `None` if no
@@ -854,6 +861,14 @@ pub struct Config {
     pub llm_timeout_secs: u64,
     /// Number of "Important" issues required to trigger REQUEST_CHANGES.
     pub important_threshold: u32,
+    /// Project-specific coding conventions loaded from AI-agent instruction
+    /// files (`AGENTS.md`, `CLAUDE.md`, etc.).
+    ///
+    /// `None` when no rules file was found, auto-detection is disabled
+    /// (`--no-project-rules`), or the file could not be read. The pipeline
+    /// layers this content on top of the review prompt as a
+    /// "Project Conventions" section.
+    pub project_rules: Option<String>,
 }
 
 impl Config {
@@ -896,6 +911,7 @@ impl Config {
             chunk_tail_lines: crate::diff::DEFAULT_CHUNK_TAIL_LINES,
             llm_timeout_secs: DEFAULT_LLM_TIMEOUT_SECS,
             important_threshold: 3,
+            project_rules: None,
         }
     }
 
@@ -982,6 +998,7 @@ impl Config {
             chunk_tail_lines,
             llm_timeout_secs,
             important_threshold,
+            project_rules: None,
         })
     }
 
@@ -1108,6 +1125,100 @@ impl Config {
             self.prompt = content;
         }
         Ok(())
+    }
+
+    /// Loads project rules from auto-detected AI-agent instruction files.
+    ///
+    /// When `enabled` is `false` (from `--no-project-rules`), sets
+    /// `project_rules` to `None` and returns immediately — no file system
+    /// access occurs.
+    ///
+    /// When `enabled` is `true`, calls [`crate::rules::detect_project_rules`]
+    /// to scan for `AGENTS.md`, `CLAUDE.md`, `.github/copilot-instructions.md`,
+    /// `.gemini/styleguide.md`, `.cursor/rules/*.md`, or `.windsurfrules` in
+    /// priority order. The first match's content is stored in `project_rules`.
+    /// If no file is found, `project_rules` is set to `None`.
+    ///
+    /// # Arguments
+    ///
+    /// * `repo_root` — Directory to scan for rules files (usually the git root or CWD).
+    /// * `enabled` — Whether auto-detection is enabled (from
+    ///   [`Config::resolve_project_rules_enabled`]).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RsGuardError::Config`] if a rules file exists but cannot be read.
+    pub fn load_project_rules(
+        &mut self,
+        repo_root: &Path,
+        enabled: bool,
+    ) -> Result<(), RsGuardError> {
+        if !enabled {
+            self.project_rules = None;
+            return Ok(());
+        }
+
+        match crate::rules::detect_project_rules(repo_root)? {
+            Some(detected) => {
+                log::info!(
+                    "Project rules loaded from {} ({} bytes{}).",
+                    detected.path().display(),
+                    detected.original_size(),
+                    if detected.is_truncated() {
+                        ", truncated"
+                    } else {
+                        ""
+                    }
+                );
+                self.project_rules = Some(detected.content().to_string());
+            }
+            None => {
+                self.project_rules = None;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Resolves whether project rules auto-detection is enabled.
+    ///
+    /// Precedence: CLI flag (`--no-project-rules`) > env var
+    /// (`RS_GUARD_NO_PROJECT_RULES`) > TOML (`project_rules_enabled`) > default (`true`).
+    ///
+    /// # Arguments
+    ///
+    /// * `cli_no_project_rules` — `true` if `--no-project-rules` was passed on the CLI.
+    /// * `toml_enabled` — Value from the `project_rules_enabled` TOML key (if set).
+    /// * `_env` — Unused parameter reserved for future use; env is read directly.
+    ///
+    /// # Returns
+    ///
+    /// `true` if project rules auto-detection is enabled, `false` otherwise.
+    #[must_use]
+    pub fn resolve_project_rules_enabled(
+        cli_no_project_rules: bool,
+        toml_enabled: Option<bool>,
+        _env: Option<()>,
+    ) -> bool {
+        // CLI flag takes highest precedence
+        if cli_no_project_rules {
+            return false;
+        }
+
+        // Env var: any non-empty value disables
+        if let Ok(value) = std::env::var("RS_GUARD_NO_PROJECT_RULES") {
+            if !value.is_empty() {
+                return false;
+            }
+        }
+
+        // TOML key
+        if let Some(enabled) = toml_enabled {
+            return enabled;
+        }
+
+        // Default: enabled
+        true
     }
 
     /// Validates that all required fields are present for CI mode.

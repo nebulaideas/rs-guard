@@ -43,6 +43,9 @@ async fn main() {
         "Failed to load TOML configuration",
     );
 
+    // Extract project_rules_enabled before toml_config is moved into from_env
+    let toml_project_rules_enabled = toml_config.as_ref().and_then(|t| t.project_rules_enabled);
+
     let mut config = exit_on_error(
         Config::from_env(toml_config),
         "Failed to load configuration",
@@ -53,6 +56,18 @@ async fn main() {
     exit_on_error(
         config.load_prompt_file(&args.prompt_file),
         "Failed to load prompt file",
+    );
+
+    // Resolve and load project rules (AGENTS.md, CLAUDE.md, etc.)
+    let project_rules_enabled = Config::resolve_project_rules_enabled(
+        args.no_project_rules,
+        toml_project_rules_enabled,
+        None,
+    );
+    let repo_root = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    exit_on_error(
+        config.load_project_rules(&repo_root, project_rules_enabled),
+        "Failed to load project rules",
     );
 
     if config.is_ci {
