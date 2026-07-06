@@ -11,6 +11,7 @@ use crate::cli::{
 };
 use crate::config::{load_toml_config, Config};
 use crate::llm::providers::{find_provider, known_provider_names};
+use crate::rules::{detect_project_rules, load_rules_file};
 use std::fmt::Write as _;
 use std::fs;
 use std::io::{self, Write};
@@ -146,6 +147,19 @@ pub fn run_init(args: &InitArgs) -> Result<(), Box<dyn std::error::Error>> {
     println!("  - .github/workflows/rs-guard-review.yml");
     println!("  - .github/review-prompt.md");
     println!("  - .reviewer.toml");
+
+    let rules = detect_project_rules(Path::new("."));
+    println!();
+    match rules {
+        Ok(rules) => println!("{}", format_project_rules_init_notice(rules.as_ref())),
+        Err(e) => {
+            println!(
+                "⚠️  Could not scan for project rules files: {}. Continuing with initialization.",
+                e
+            );
+        }
+    }
+
     println!();
     println!("Next steps:");
     println!(
@@ -204,7 +218,15 @@ pub fn run_generate_workflow(
 /// missing.
 pub fn run_validate_config(args: &ValidateConfigArgs) -> Result<(), Box<dyn std::error::Error>> {
     let toml = load_toml_config(&args.config)?;
-    let config = Config::from_env(toml)?;
+    let config = Config::from_env(toml.clone())?;
+
+    // `resolve_project_rules_enabled` checks the CLI flag (none here), the
+    // RS_GUARD_NO_PROJECT_RULES env var, and the TOML key in the correct
+    // precedence order.
+    let rules_enabled = Config::resolve_project_rules_enabled(
+        false,
+        toml.as_ref().and_then(|t| t.project_rules_enabled),
+    );
 
     println!("✅ Configuration is valid.");
     println!("  Provider: {}", config.provider);
@@ -223,7 +245,96 @@ pub fn run_validate_config(args: &ValidateConfigArgs) -> Result<(), Box<dyn std:
     );
     println!("  Important threshold: {}", config.important_threshold);
 
+    let detected_rules = if let Some(path) = &config.rules_file {
+        match load_rules_file(path) {
+            Ok(rules) => Some(rules),
+            Err(e) => {
+                println!("  Warning: could not load explicit rules file: {}", e);
+                None
+            }
+        }
+    } else if rules_enabled {
+        match detect_project_rules(Path::new(".")) {
+            Ok(rules) => rules,
+            Err(e) => {
+                println!("  Warning: could not auto-detect project rules: {}", e);
+                None
+            }
+        }
+    } else {
+        None
+    };
+
+    for line in format_project_rules_validate_lines(
+        rules_enabled,
+        config.rules_file.as_deref(),
+        detected_rules.as_ref(),
+    ) {
+        println!("{line}");
+    }
+
     Ok(())
+}
+
+/// Formats the project rules status lines shown by `rs-guard validate-config`.
+///
+/// Each line includes the two-space indent used by the rest of the validation
+/// output so callers can print them directly.
+fn format_project_rules_validate_lines(
+    enabled: bool,
+    rules_file: Option<&Path>,
+    rules: Option<&crate::rules::DetectedRules>,
+) -> Vec<String> {
+    let mut lines = Vec::new();
+    if enabled {
+        lines.push("  Project rules: ENABLED".to_string());
+    } else {
+        lines.push("  Project rules: DISABLED (project_rules_enabled=false)".to_string());
+    }
+    if let Some(path) = rules_file {
+        lines.push(format!(
+            "  Explicit rules file: {} (overrides auto-detection)",
+            path.display()
+        ));
+        if let Some(r) = rules {
+            lines.push(format_rules_size_line(r));
+        }
+    } else if enabled {
+        match rules {
+            Some(r) => {
+                lines.push(format!("  Detected rules file: {}", r.path().display()));
+                lines.push(format_rules_size_line(r));
+            }
+            None => {
+                lines.push("  No rules file detected (using review-prompt.md fallback)".to_string())
+            }
+        }
+    }
+    lines
+}
+
+/// Formats the size and optional truncation status of a loaded rules file.
+fn format_rules_size_line(rules: &crate::rules::DetectedRules) -> String {
+    if rules.is_truncated() {
+        format!(
+            "  Rules file size: {} bytes (TRUNCATED to {} bytes)",
+            rules.original_size(),
+            rules.content().len()
+        )
+    } else {
+        format!("  Rules file size: {} bytes", rules.original_size())
+    }
+}
+
+/// Formats the project rules notice shown by `rs-guard init`.
+fn format_project_rules_init_notice(rules: Option<&crate::rules::DetectedRules>) -> String {
+    match rules {
+        Some(r) => format!(
+            "Detected project rules file: {} — rs-guard will use this for reviews. To disable project rules when reviewing, use `--no-project-rules`.",
+            r.path().display()
+        ),
+        None => "No project rules file detected. rs-guard will use .github/review-prompt.md only. Consider adding an AGENTS.md for project-specific conventions.".to_string(),
+    }
 }
 
 /// Detects the project type by inspecting files in the current directory.
@@ -409,6 +520,12 @@ provider = "{provider}"
 # model = "{default_model}"
 temperature = 0.1
 # important_issues_threshold = 3
+
+# Project rules injection (v1.5.0)
+# Auto-detects AGENTS.md, CLAUDE.md, .github/copilot-instructions.md,
+# .gemini/styleguide.md, .cursor/rules/*.md, and .windsurfrules.
+project_rules_enabled = true
+# rules_file = "docs/my-project-rules.md"
 
 [providers.{provider}]
 api_key_env = "{api_key_env}"
@@ -665,5 +782,105 @@ mod tests {
     #[test]
     fn test_language_guardrails_unknown_language() {
         assert!(language_guardrails("elixir").is_none());
+    }
+
+    #[test]
+    fn test_generate_config_includes_project_rules_keys() {
+        let config = generate_config("deepseek");
+        assert!(config.contains("project_rules_enabled = true"));
+        assert!(config.contains("# rules_file = \"docs/my-project-rules.md\""));
+        assert!(config.contains("AGENTS.md"));
+        assert!(config.contains("CLAUDE.md"));
+    }
+
+    #[test]
+    fn test_format_project_rules_init_notice_with_rules() {
+        let rules = crate::rules::DetectedRules::new(
+            crate::rules::RulesFilePath::new(Path::new("AGENTS.md").to_path_buf()),
+            crate::rules::RulesContent::new("# rules".to_string()),
+            crate::rules::RulesFileSize::new(42),
+            false,
+        );
+        let notice = format_project_rules_init_notice(Some(&rules));
+        assert!(notice.contains("Detected project rules file: AGENTS.md"));
+        assert!(
+            notice.contains("To disable project rules when reviewing, use `--no-project-rules`")
+        );
+    }
+
+    #[test]
+    fn test_format_project_rules_init_notice_without_rules() {
+        let notice = format_project_rules_init_notice(None);
+        assert!(notice.contains("No project rules file detected"));
+        assert!(notice.contains(".github/review-prompt.md"));
+        assert!(notice.contains("AGENTS.md"));
+    }
+
+    #[test]
+    fn test_format_project_rules_validate_lines_enabled_with_detected() {
+        let rules = crate::rules::DetectedRules::new(
+            crate::rules::RulesFilePath::new(Path::new("CLAUDE.md").to_path_buf()),
+            crate::rules::RulesContent::new("# rules".to_string()),
+            crate::rules::RulesFileSize::new(100),
+            false,
+        );
+        let lines = format_project_rules_validate_lines(true, None, Some(&rules));
+        assert_eq!(lines[0], "  Project rules: ENABLED");
+        assert!(lines[1].contains("Detected rules file: CLAUDE.md"));
+        assert!(lines[2].contains("Rules file size: 100 bytes"));
+    }
+
+    #[test]
+    fn test_format_project_rules_validate_lines_disabled() {
+        let lines = format_project_rules_validate_lines(false, None, None);
+        assert_eq!(lines.len(), 1);
+        assert_eq!(
+            lines[0],
+            "  Project rules: DISABLED (project_rules_enabled=false)"
+        );
+    }
+
+    #[test]
+    fn test_format_project_rules_validate_lines_explicit_file() {
+        let rules = crate::rules::DetectedRules::new(
+            crate::rules::RulesFilePath::new(Path::new("custom.md").to_path_buf()),
+            crate::rules::RulesContent::new("# rules".to_string()),
+            crate::rules::RulesFileSize::new(50),
+            false,
+        );
+        let lines =
+            format_project_rules_validate_lines(true, Some(Path::new("custom.md")), Some(&rules));
+        assert_eq!(lines[0], "  Project rules: ENABLED");
+        assert!(lines[1].contains("Explicit rules file: custom.md"));
+        assert!(lines[2].contains("Rules file size: 50 bytes"));
+    }
+
+    #[test]
+    fn test_format_project_rules_validate_lines_truncated() {
+        let rules = crate::rules::DetectedRules::new(
+            crate::rules::RulesFilePath::new(Path::new("AGENTS.md").to_path_buf()),
+            crate::rules::RulesContent::new("x".repeat(100)),
+            crate::rules::RulesFileSize::new(1000),
+            true,
+        );
+        let lines = format_project_rules_validate_lines(true, None, Some(&rules));
+        assert!(lines[2].contains("TRUNCATED"));
+        assert!(lines[2].contains("1000 bytes"));
+        assert!(lines[2].contains("100 bytes"));
+    }
+
+    #[test]
+    fn test_format_project_rules_validate_lines_no_rules() {
+        let lines = format_project_rules_validate_lines(true, None, None);
+        assert_eq!(lines[0], "  Project rules: ENABLED");
+        assert!(lines[1].contains("No rules file detected"));
+    }
+
+    #[test]
+    fn test_format_project_rules_validate_lines_explicit_missing() {
+        let lines = format_project_rules_validate_lines(true, Some(Path::new("missing.md")), None);
+        assert_eq!(lines[0], "  Project rules: ENABLED");
+        assert!(lines[1].contains("Explicit rules file: missing.md"));
+        assert_eq!(lines.len(), 2);
     }
 }
