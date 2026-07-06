@@ -126,3 +126,32 @@ fn test_compose_prompt_with_custom_prompt_file_and_no_rules_is_backwards_compati
         "should not add Project Conventions section for repos without project rules"
     );
 }
+
+#[test]
+fn test_compose_prompt_layers_rules_on_top_of_custom_prompt() {
+    // New behavior: when project rules are detected, they are appended to a
+    // custom prompt file (v1.4.0 style) without replacing it.
+    let custom_prompt = "You are a Rust specialist reviewer focused on unsafe code.";
+    let project_rules: Option<&str> = Some("# Project Rules\nUse Rust patterns.");
+    let rules_file_path: Option<&str> = Some("AGENTS.md");
+
+    let composed =
+        rs_guard::pipeline::compose_prompt(custom_prompt, project_rules, rules_file_path);
+
+    assert!(
+        composed.starts_with(custom_prompt),
+        "custom prompt should be preserved at the start of the composed prompt"
+    );
+    assert!(
+        composed.contains("Project Conventions"),
+        "should add Project Conventions section when rules are present"
+    );
+    assert!(
+        composed.contains("# Project Rules\nUse Rust patterns."),
+        "should include the project rules content"
+    );
+    assert!(
+        composed.contains("project rules take precedence"),
+        "should include the precedence statement"
+    );
+}
