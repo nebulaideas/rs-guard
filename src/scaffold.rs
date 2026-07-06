@@ -148,9 +148,17 @@ pub fn run_init(args: &InitArgs) -> Result<(), Box<dyn std::error::Error>> {
     println!("  - .github/review-prompt.md");
     println!("  - .reviewer.toml");
 
-    let rules = detect_project_rules(Path::new("."))?;
+    let rules = detect_project_rules(Path::new("."));
     println!();
-    println!("{}", format_project_rules_init_notice(rules.as_ref()));
+    match rules {
+        Ok(rules) => println!("{}", format_project_rules_init_notice(rules.as_ref())),
+        Err(e) => {
+            println!(
+                "⚠️  Could not scan for project rules files: {}. Continuing with initialization.",
+                e
+            );
+        }
+    }
 
     println!();
     println!("Next steps:");
@@ -272,6 +280,11 @@ fn format_project_rules_validate_lines(
         ));
         if let Some(r) = rules {
             lines.push(format_rules_size_line(r));
+        } else {
+            lines.push(format!(
+                "Warning: explicit rules file not found or empty: {}",
+                path.display()
+            ));
         }
     } else if enabled {
         match rules {
@@ -846,5 +859,13 @@ mod tests {
         let lines = format_project_rules_validate_lines(true, None, None);
         assert_eq!(lines[0], "Project rules: ENABLED");
         assert!(lines[1].contains("No rules file detected"));
+    }
+
+    #[test]
+    fn test_format_project_rules_validate_lines_explicit_missing() {
+        let lines = format_project_rules_validate_lines(true, Some(Path::new("missing.md")), None);
+        assert_eq!(lines[0], "Project rules: ENABLED");
+        assert!(lines[1].contains("Explicit rules file: missing.md"));
+        assert!(lines[2].contains("Warning: explicit rules file not found or empty"));
     }
 }
