@@ -347,6 +347,50 @@ fn detect_all_files_empty_when_none_exist() {
     assert!(all_files.is_empty(), "should find no rules files");
 }
 
+#[test]
+fn detect_all_files_includes_all_cursor_rules_md_files() {
+    let dir = TempDir::new().expect("failed to create temp dir");
+    let cursor_dir = dir.path().join(".cursor/rules");
+    fs::create_dir_all(&cursor_dir).expect("create .cursor/rules");
+    // Create multiple .md files — ALL should appear in detect_all_files
+    fs::write(cursor_dir.join("alpha.md"), "# Alpha\n").expect("write alpha");
+    fs::write(cursor_dir.join("beta.md"), "# Beta\n").expect("write beta");
+    fs::write(cursor_dir.join("gamma.md"), "# Gamma\n").expect("write gamma");
+
+    let detector = RulesDetector::builder()
+        .repo_root(dir.path().to_path_buf())
+        .build()
+        .expect("builder should succeed");
+
+    let all_files = detector.detect_all_files();
+    assert_eq!(
+        all_files.len(),
+        3,
+        "detect_all_files should return ALL .cursor/rules/*.md files, not just the first"
+    );
+    // Sorted alphabetically
+    assert_eq!(all_files[0], RulesFilePath::from(".cursor/rules/alpha.md"));
+    assert_eq!(all_files[1], RulesFilePath::from(".cursor/rules/beta.md"));
+    assert_eq!(all_files[2], RulesFilePath::from(".cursor/rules/gamma.md"));
+}
+
+#[test]
+fn detect_picks_only_first_cursor_file_alphabetically() {
+    let dir = TempDir::new().expect("failed to create temp dir");
+    let cursor_dir = dir.path().join(".cursor/rules");
+    fs::create_dir_all(&cursor_dir).expect("create .cursor/rules");
+    fs::write(cursor_dir.join("zebra.md"), "# Zebra\n").expect("write zebra");
+    fs::write(cursor_dir.join("alpha.md"), "# Alpha\n").expect("write alpha");
+
+    let result = detect_project_rules(dir.path()).expect("detection should succeed");
+    let detected = result.expect("a cursor rules file should be detected");
+    assert_eq!(
+        detected.path(),
+        Path::new(".cursor/rules/alpha.md"),
+        "detect() should pick only the first .cursor/rules/*.md file alphabetically"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Newtype conversions
 // ---------------------------------------------------------------------------

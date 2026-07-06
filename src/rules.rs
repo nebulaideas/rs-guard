@@ -371,9 +371,11 @@ impl RulesDetector {
 
     /// Builds the full priority-ordered list of candidate relative paths.
     ///
-    /// Handles the `.cursor/rules/*.md` glob specially by expanding it to
-    /// the first `.md` file alphabetically (for single-match detection) or
-    /// all `.md` files (for `detect_all_files`).
+    /// The `.cursor/rules/*.md` glob is expanded to **all** matching `.md`
+    /// files (sorted alphabetically). For single-match detection
+    /// ([`RulesDetector::detect`]), the first file in the sorted list wins.
+    /// For [`RulesDetector::detect_all_files`], all cursor `.md` files are
+    /// included so the Phase 2 interactive picker can present every option.
     fn scan_priority_order(&self) -> Vec<PathBuf> {
         let mut candidates: Vec<PathBuf> = RULES_FILE_PRIORITY.iter().map(PathBuf::from).collect();
 
@@ -611,6 +613,33 @@ mod tests {
         assert!(banner.contains("CLAUDE.md"));
         assert!(banner.contains("50000"));
         assert!(banner.contains("32768"));
+    }
+
+    #[test]
+    fn test_truncation_banner_full_structure() {
+        let banner = truncation_banner(Path::new("AGENTS.md"), 40960, 32768);
+        // Verify the banner has clear delimiters for the LLM
+        assert!(
+            banner.contains("--- BEGIN TRUNCATION WARNING ---"),
+            "banner should start with a clear delimiter"
+        );
+        assert!(
+            banner.contains("--- END TRUNCATION WARNING ---"),
+            "banner should end with a clear delimiter"
+        );
+        // Verify it names the file, original size, and cap
+        assert!(banner.contains("AGENTS.md"));
+        assert!(banner.contains("40960"));
+        assert!(banner.contains("32768"));
+        // Verify it instructs the LLM that rules are incomplete
+        assert!(
+            banner.contains("incomplete"),
+            "banner should tell the LLM the rules are incomplete"
+        );
+        assert!(
+            banner.contains("full file"),
+            "banner should point the LLM to the full file"
+        );
     }
 
     #[test]
