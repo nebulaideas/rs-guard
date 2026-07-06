@@ -11,7 +11,7 @@ use rs_guard::error::RsGuardError;
 use rs_guard::output;
 use rs_guard::pipeline::{run_pipeline, PipelineResult};
 use rs_guard::repo::resolve_repo_root;
-use rs_guard::rules::{detect_all_rules_files, select_rules_file};
+use rs_guard::rules::{detect_all_rules_files, select_rules_file, should_show_picker};
 use rs_guard::scaffold;
 use std::io::IsTerminal;
 use std::process;
@@ -94,12 +94,18 @@ async fn main() {
         if let Ok(files) = detected_files {
             if files.len() >= 2 {
                 let is_tty = std::io::stdin().is_terminal();
-                if is_tty {
+                if should_show_picker(
+                    config.is_ci,
+                    files.len(),
+                    rules_file.as_deref(),
+                    args.no_project_rules,
+                    is_tty,
+                ) {
                     eprintln!("{} Multiple project rules files detected:", "info:".cyan());
                     for (i, path) in files.iter().enumerate() {
                         eprintln!("  [{}] {}", i + 1, path.display());
                     }
-                } else {
+                } else if !is_tty {
                     eprintln!(
                         "{} Multiple project rules files detected, but stdin is not a TTY. Using first match.",
                         "warning:".yellow()
