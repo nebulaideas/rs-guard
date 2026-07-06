@@ -7,6 +7,7 @@ use crate::verdict::{ReviewState, Verdict};
 use colored::Colorize;
 use serde::Serialize;
 use std::io::Write;
+use std::path::Path;
 
 /// Default filename for the review result artifact.
 pub const ARTIFACT_FILENAME: &str = "review-result.txt";
@@ -253,7 +254,7 @@ pub fn print_colored_summary(
 /// Returns [`std::io::Error`] if writing to the output fails.
 pub fn print_project_rules_notice(
     writer: &mut impl Write,
-    path: &str,
+    path: impl AsRef<Path>,
     rules_len: usize,
     is_explicit: bool,
 ) -> std::io::Result<()> {
@@ -262,7 +263,7 @@ pub fn print_project_rules_notice(
         writer,
         "{} Project rules loaded from: {}{} ({} bytes)",
         "info:".cyan(),
-        path,
+        path.as_ref().display(),
         source,
         rules_len
     )

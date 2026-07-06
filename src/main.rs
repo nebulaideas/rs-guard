@@ -111,13 +111,14 @@ async fn main() {
         if let (Some(ref rules), Some(ref path)) =
             (&config.project_rules, &config.project_rules_file)
         {
-            output::print_project_rules_notice(
+            if let Err(e) = output::print_project_rules_notice(
                 &mut std::io::stderr(),
                 path,
                 rules.len(),
                 config.rules_file.is_some(),
-            )
-            .ok();
+            ) {
+                log::warn!("Failed to print project rules notice: {}", e);
+            }
         }
     }
 
