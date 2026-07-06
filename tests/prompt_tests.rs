@@ -67,6 +67,24 @@ fn test_compose_prompt_with_empty_file_path_omits_header() {
 }
 
 #[test]
+fn test_compose_prompt_with_empty_rules_content_returns_base_prompt() {
+    let base_prompt = "You are a code reviewer.";
+    let project_rules: Option<&str> = Some("");
+    let rules_file_path: Option<&str> = Some("AGENTS.md");
+
+    let composed = rs_guard::pipeline::compose_prompt(base_prompt, project_rules, rules_file_path);
+
+    assert_eq!(
+        composed, base_prompt,
+        "empty rules content should return base prompt unchanged"
+    );
+    assert!(
+        !composed.contains("Project Conventions"),
+        "should not add Project Conventions section for empty rules"
+    );
+}
+
+#[test]
 fn test_compose_prompt_with_none_file_path_omits_header() {
     let base_prompt = "You are a code reviewer.";
     let project_rules: Option<&str> = Some("# Project Rules\nUse Rust patterns.");

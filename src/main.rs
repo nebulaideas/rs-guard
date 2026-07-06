@@ -71,11 +71,11 @@ async fn main() {
     // Print notice when project rules are loaded (silent opt-out with --no-project-rules)
     if !args.no_project_rules {
         if let (Some(ref rules), Some(ref path)) =
-            (&config.project_rules, &config.project_rules_path)
+            (&config.project_rules, &config.project_rules_file)
         {
             eprintln!(
                 "{} Project rules loaded from: {} ({} bytes)",
-                "ℹ".cyan(),
+                "info:".cyan(),
                 path,
                 rules.len()
             );

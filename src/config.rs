@@ -869,12 +869,12 @@ pub struct Config {
     /// layers this content on top of the review prompt as a
     /// "Project Conventions" section.
     pub project_rules: Option<String>,
-    /// Path of the project rules file that was loaded (e.g., `"AGENTS.md"`).
+    /// Name of the project rules file that was loaded (e.g., `"AGENTS.md"`).
     ///
-    /// Used for display in the "Project Conventions" section header and
-    /// in the terminal notice. `None` when no rules file was found or
-    /// auto-detection is disabled.
-    pub project_rules_path: Option<String>,
+    /// Only the base file name is stored, not the full path. Used for display
+    /// in the "Project Conventions" section header and in the terminal notice.
+    /// `None` when no rules file was found or auto-detection is disabled.
+    pub project_rules_file: Option<String>,
 }
 
 impl Config {
@@ -918,7 +918,7 @@ impl Config {
             llm_timeout_secs: DEFAULT_LLM_TIMEOUT_SECS,
             important_threshold: 3,
             project_rules: None,
-            project_rules_path: None,
+            project_rules_file: None,
         }
     }
 
@@ -1006,7 +1006,7 @@ impl Config {
             llm_timeout_secs,
             important_threshold,
             project_rules: None,
-            project_rules_path: None,
+            project_rules_file: None,
         })
     }
 
@@ -1163,7 +1163,7 @@ impl Config {
     ) -> Result<(), RsGuardError> {
         if !enabled {
             self.project_rules = None;
-            self.project_rules_path = None;
+            self.project_rules_file = None;
             return Ok(());
         }
 
@@ -1180,7 +1180,7 @@ impl Config {
                     }
                 );
                 self.project_rules = Some(detected.content().to_string());
-                self.project_rules_path = Some(
+                self.project_rules_file = Some(
                     detected
                         .path()
                         .file_name()
@@ -1191,7 +1191,7 @@ impl Config {
             }
             None => {
                 self.project_rules = None;
-                self.project_rules_path = None;
+                self.project_rules_file = None;
             }
         }
 

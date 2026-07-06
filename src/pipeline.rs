@@ -372,7 +372,7 @@ fn write_review_outputs(
         diff_lines: diff.line_count,
         verdict: verdict.verdict.clone(),
         state: state.to_string(),
-        project_rules_file: config.project_rules_path.clone(),
+        project_rules_file: config.project_rules_file.clone(),
     };
 
     let metrics_path =
@@ -589,7 +589,7 @@ pub async fn run_pipeline(
     }
 
     // Compose the final prompt with project rules layering (before token estimation)
-    let rules_path = config.project_rules_path.as_deref();
+    let rules_path = config.project_rules_file.as_deref();
     let composed_prompt =
         compose_prompt(&config.prompt, config.project_rules.as_deref(), rules_path);
 
@@ -812,6 +812,10 @@ pub fn compose_prompt(
     let Some(rules) = project_rules else {
         return base_prompt.to_string();
     };
+
+    if rules.is_empty() {
+        return base_prompt.to_string();
+    }
 
     let header = match rules_file_path {
         Some(path) if !path.is_empty() => format!(" (from {})", path),
