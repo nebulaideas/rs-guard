@@ -105,3 +105,24 @@ fn test_compose_prompt_with_none_file_path_omits_header() {
         "should include the rules content"
     );
 }
+
+#[test]
+fn test_compose_prompt_with_custom_prompt_file_and_no_rules_is_backwards_compatible() {
+    // Regression: repos that only use `.github/review-prompt.md` (v1.4.0 style)
+    // should see exactly that prompt, with no "Project Conventions" section added.
+    let custom_prompt = "You are a Rust specialist reviewer focused on unsafe code.";
+    let project_rules: Option<&str> = None;
+    let rules_file_path: Option<&str> = None;
+
+    let composed =
+        rs_guard::pipeline::compose_prompt(custom_prompt, project_rules, rules_file_path);
+
+    assert_eq!(
+        composed, custom_prompt,
+        "custom prompt should be returned unchanged when no project rules are detected"
+    );
+    assert!(
+        !composed.contains("Project Conventions"),
+        "should not add Project Conventions section for repos without project rules"
+    );
+}
