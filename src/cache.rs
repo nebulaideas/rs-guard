@@ -103,6 +103,8 @@ struct CacheKey {
     diff_hash: String,
     /// SHA-256 hash of the prompt.
     prompt_hash: String,
+    /// SHA-256 hash of the project rules content (if any).
+    project_rules_hash: Option<String>,
     /// Provider name.
     provider: String,
     /// Model identifier.
@@ -130,6 +132,7 @@ impl CacheKey {
     fn new(
         diff_content: &str,
         prompt: &str,
+        project_rules: Option<&str>,
         provider: &str,
         model: &str,
         variant: Option<&str>,
@@ -140,9 +143,11 @@ impl CacheKey {
     ) -> Self {
         let diff_hash = hash_content(diff_content);
         let prompt_hash = hash_content(prompt);
+        let project_rules_hash = project_rules.map(hash_content);
         Self {
             diff_hash,
             prompt_hash,
+            project_rules_hash,
             provider: provider.to_string(),
             model: model.to_string(),
             variant: variant.map(|v| v.to_lowercase()),
@@ -151,6 +156,34 @@ impl CacheKey {
             max_tokens,
             result_format: result_format.map(|s| s.to_lowercase()),
         }
+    }
+
+    /// Creates a cache key without project rules (for test compatibility).
+    #[allow(dead_code)]
+    #[allow(clippy::too_many_arguments)]
+    fn new_without_project_rules(
+        diff_content: &str,
+        prompt: &str,
+        provider: &str,
+        model: &str,
+        variant: Option<&str>,
+        temperature: f32,
+        base_url: &str,
+        max_tokens: Option<u32>,
+        result_format: Option<&str>,
+    ) -> Self {
+        Self::new(
+            diff_content,
+            prompt,
+            None,
+            provider,
+            model,
+            variant,
+            temperature,
+            base_url,
+            max_tokens,
+            result_format,
+        )
     }
 
     /// Returns the cache key as a hex string.
@@ -165,6 +198,15 @@ impl CacheKey {
         hasher.update(self.diff_hash.as_bytes());
         hasher.update([0]);
         hasher.update(self.prompt_hash.as_bytes());
+        hasher.update([0]);
+        // project_rules_hash (presence-tagged)
+        match &self.project_rules_hash {
+            Some(hash) => {
+                hasher.update([1]);
+                hasher.update(hash.as_bytes());
+            }
+            None => hasher.update([0]),
+        }
         hasher.update([0]);
         hasher.update(self.provider.as_bytes());
         hasher.update([0]);
@@ -316,11 +358,41 @@ impl DiffCache {
     /// * `max_tokens` — Optional maximum tokens cap (prevents truncation staleness).
     /// * `result_format` — Optional `result_format` override (prevents cache poisoning
     ///   across providers that change request body shape).
+    /// * `project_rules` — Optional project rules content (for cache invalidation).
     #[allow(clippy::too_many_arguments)]
     pub fn get(
         &self,
         diff_content: &str,
         prompt: &str,
+        provider: &str,
+        model: &str,
+        variant: Option<&str>,
+        temperature: f32,
+        base_url: &str,
+        max_tokens: Option<u32>,
+        result_format: Option<&str>,
+    ) -> Option<String> {
+        self.get_with_project_rules(
+            diff_content,
+            prompt,
+            None,
+            provider,
+            model,
+            variant,
+            temperature,
+            base_url,
+            max_tokens,
+            result_format,
+        )
+    }
+
+    /// Get with project rules for cache invalidation.
+    #[allow(clippy::too_many_arguments)]
+    pub fn get_with_project_rules(
+        &self,
+        diff_content: &str,
+        prompt: &str,
+        project_rules: Option<&str>,
         provider: &str,
         model: &str,
         variant: Option<&str>,
@@ -336,6 +408,7 @@ impl DiffCache {
         let key = CacheKey::new(
             diff_content,
             prompt,
+            project_rules,
             provider,
             model,
             variant,
@@ -382,6 +455,7 @@ impl DiffCache {
     /// * `base_url` — Effective API base URL.
     /// * `max_tokens` — Optional maximum tokens cap.
     /// * `result_format` — Optional `result_format` override.
+    /// * `project_rules` — Optional project rules content (for cache invalidation).
     /// * `response` — The LLM response text to cache.
     ///
     /// # Errors
@@ -401,6 +475,37 @@ impl DiffCache {
         result_format: Option<&str>,
         response: &str,
     ) -> Result<(), RsGuardError> {
+        self.set_with_project_rules(
+            diff_content,
+            prompt,
+            None,
+            provider,
+            model,
+            variant,
+            temperature,
+            base_url,
+            max_tokens,
+            result_format,
+            response,
+        )
+    }
+
+    /// Set with project rules for cache invalidation.
+    #[allow(clippy::too_many_arguments)]
+    pub fn set_with_project_rules(
+        &self,
+        diff_content: &str,
+        prompt: &str,
+        project_rules: Option<&str>,
+        provider: &str,
+        model: &str,
+        variant: Option<&str>,
+        temperature: f32,
+        base_url: &str,
+        max_tokens: Option<u32>,
+        result_format: Option<&str>,
+        response: &str,
+    ) -> Result<(), RsGuardError> {
         if !self.config.enabled {
             return Ok(());
         }
@@ -408,6 +513,7 @@ impl DiffCache {
         let key = CacheKey::new(
             diff_content,
             prompt,
+            project_rules,
             provider,
             model,
             variant,
@@ -763,7 +869,7 @@ mod tests {
 
     #[test]
     fn test_cache_key_includes_all_parameters() {
-        let key1 = CacheKey::new(
+        let key1 = CacheKey::new_without_project_rules(
             "diff",
             "prompt",
             "deepseek",
@@ -774,7 +880,7 @@ mod tests {
             None,
             None,
         );
-        let key2 = CacheKey::new(
+        let key2 = CacheKey::new_without_project_rules(
             "diff",
             "prompt",
             "deepseek",
@@ -785,7 +891,7 @@ mod tests {
             None,
             None,
         );
-        let key3 = CacheKey::new(
+        let key3 = CacheKey::new_without_project_rules(
             "diff",
             "prompt",
             "deepseek",
@@ -796,7 +902,7 @@ mod tests {
             None,
             None,
         );
-        let key4 = CacheKey::new(
+        let key4 = CacheKey::new_without_project_rules(
             "diff",
             "prompt",
             "openai",
@@ -807,7 +913,7 @@ mod tests {
             None,
             None,
         );
-        let key5 = CacheKey::new(
+        let key5 = CacheKey::new_without_project_rules(
             "diff",
             "prompt",
             "deepseek",
@@ -831,7 +937,7 @@ mod tests {
         // but DIFFERENT base_url must NOT share a cache entry. Prevents a
         // custom endpoint (e.g. a local mock) from poisoning the entry for
         // the real provider endpoint.
-        let base = CacheKey::new(
+        let base = CacheKey::new_without_project_rules(
             "diff",
             "prompt",
             "deepseek",
@@ -842,7 +948,7 @@ mod tests {
             None,
             None,
         );
-        let overridden = CacheKey::new(
+        let overridden = CacheKey::new_without_project_rules(
             "diff",
             "prompt",
             "deepseek",
@@ -864,7 +970,7 @@ mod tests {
     fn test_cache_key_isolates_max_tokens() {
         // Regression (F5): a run with max_tokens=Some(100) caches a truncated
         // response; a run with max_tokens=None must NOT hit that entry.
-        let capped = CacheKey::new(
+        let capped = CacheKey::new_without_project_rules(
             "diff",
             "prompt",
             "deepseek",
@@ -875,7 +981,7 @@ mod tests {
             Some(100),
             None,
         );
-        let uncapped = CacheKey::new(
+        let uncapped = CacheKey::new_without_project_rules(
             "diff",
             "prompt",
             "deepseek",
@@ -898,8 +1004,12 @@ mod tests {
         // Regression (F6): provider="a", model="bc" must NOT collide with
         // provider="ab", model="c". The 0x00 separator between variable-length
         // fields guarantees this.
-        let k1 = CacheKey::new("diff", "prompt", "a", "bc", None, 0.1, "url", None, None);
-        let k2 = CacheKey::new("diff", "prompt", "ab", "c", None, 0.1, "url", None, None);
+        let k1 = CacheKey::new_without_project_rules(
+            "diff", "prompt", "a", "bc", None, 0.1, "url", None, None,
+        );
+        let k2 = CacheKey::new_without_project_rules(
+            "diff", "prompt", "ab", "c", None, 0.1, "url", None, None,
+        );
         assert_ne!(
             k1.as_string(),
             k2.as_string(),
@@ -911,7 +1021,7 @@ mod tests {
     fn test_cache_key_isolates_result_format() {
         // Regression: different result_format values must produce different
         // cache keys because they change the request body sent to the provider.
-        let default_format = CacheKey::new(
+        let default_format = CacheKey::new_without_project_rules(
             "diff",
             "prompt",
             "qwen",
@@ -922,7 +1032,7 @@ mod tests {
             None,
             None,
         );
-        let message_format = CacheKey::new(
+        let message_format = CacheKey::new_without_project_rules(
             "diff",
             "prompt",
             "qwen",
@@ -933,7 +1043,7 @@ mod tests {
             None,
             Some("message"),
         );
-        let json_format = CacheKey::new(
+        let json_format = CacheKey::new_without_project_rules(
             "diff",
             "prompt",
             "qwen",
@@ -1339,7 +1449,7 @@ mod tests {
         assert!(result.is_none());
 
         // File should have been deleted
-        let key = CacheKey::new(
+        let key = CacheKey::new_without_project_rules(
             "expiring content",
             "prompt",
             "deepseek",
@@ -1632,7 +1742,7 @@ mod tests {
             .unwrap();
 
         // Corrupt the cache file by overwriting with garbage
-        let key = CacheKey::new(
+        let key = CacheKey::new_without_project_rules(
             "key",
             "prompt",
             "deepseek",
@@ -1692,7 +1802,7 @@ mod tests {
             .unwrap();
 
         // Corrupt the timestamp
-        let key = CacheKey::new(
+        let key = CacheKey::new_without_project_rules(
             "key2",
             "prompt",
             "deepseek",
@@ -1752,7 +1862,7 @@ mod tests {
             .unwrap();
 
         // Empty the cache file
-        let key = CacheKey::new(
+        let key = CacheKey::new_without_project_rules(
             "key3",
             "prompt",
             "deepseek",
@@ -1812,7 +1922,7 @@ mod tests {
             .unwrap();
 
         // Write binary data
-        let key = CacheKey::new(
+        let key = CacheKey::new_without_project_rules(
             "key4",
             "prompt",
             "deepseek",

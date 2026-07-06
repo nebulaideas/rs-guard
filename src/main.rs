@@ -4,6 +4,7 @@
 //! review pipeline, and maps [`PipelineResult`] to process exit codes.
 
 use clap::Parser;
+use colored::Colorize;
 use rs_guard::cli::{Cli, Commands};
 use rs_guard::config::{load_toml_config, Config};
 use rs_guard::pipeline::{run_pipeline, PipelineResult};
@@ -66,6 +67,20 @@ async fn main() {
         config.load_project_rules(&repo_root, project_rules_enabled),
         "Failed to load project rules",
     );
+
+    // Print notice when project rules are loaded (silent opt-out with --no-project-rules)
+    if !args.no_project_rules {
+        if let (Some(ref rules), Some(ref path)) =
+            (&config.project_rules, &config.project_rules_path)
+        {
+            println!(
+                "{} Project rules loaded from: {} ({} bytes)",
+                "ℹ".cyan(),
+                path,
+                rules.len()
+            );
+        }
+    }
 
     if config.is_ci {
         config.validate_for_ci().unwrap_or_else(|e| {
