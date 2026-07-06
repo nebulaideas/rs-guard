@@ -20,6 +20,7 @@
 - 📊 **Metrics export** — Per-run JSON artifact with token counts, latency, and cost estimate
 - ⚙️ **CI + local mode** — GitHub Actions submits reviews; git pre-commit hook blocks bad commits
 - 📄 **Configurable prompts** — Per-repository `.github/review-prompt.md` or `.reviewer.toml`
+- 📋 **Project rules injection** — Auto-detects `AGENTS.md`, `CLAUDE.md`, and other AI-agent instruction files, layers them into the review prompt, and supports `--rules-file` and an interactive local picker
 - 🔒 **SSRF protection** — URL allowlist per provider; `Authorization` headers never sent to unknown hosts
 - 🧩 **Model variants** — `ModelAlias` (e.g. DeepSeek flash/pro) and `ExtraBody` injection (e.g. Kimi thinking mode) via `--variant`, config, or `ProviderConfig`
 - 📦 **Single binary** — No runtime dependencies; ~3s typical execution

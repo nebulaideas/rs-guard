@@ -70,4 +70,10 @@ The prompt is used by rs-guard when:
 
 If the referenced file does not exist, rs-guard falls back to its built-in default prompt.
 
+## Project Rules Files
+
+rs-guard also detects and layers project rules files on top of the review prompt. If you have an `AGENTS.md`, `CLAUDE.md`, `.github/copilot-instructions.md`, `.gemini/styleguide.md`, `.cursor/rules/*.md`, or `.windsurfrules` file in your repository root, its content is appended as a **Project Conventions** section that takes precedence over the base prompt guidance. Use these files for project-wide conventions (e.g., "all public functions must have doc comments") and reserve `review-prompt.md` for review mechanics and per-run focus.
+
+For details on priority order, opt-out flags, and the interactive picker, see [`docs/USAGE.md`](../../docs/USAGE.md).
+
 For pre-commit hook setup with Husky or Lefthook, see [`../local-review/husky-setup.md`](../local-review/husky-setup.md).

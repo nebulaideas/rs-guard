@@ -8,7 +8,9 @@
 
 **rs-guard** is a Rust-based AI code review CLI tool. It fetches Pull Request diffs from GitHub, sends them to an LLM provider for review, parses a structured verdict from the response, and submits the review state (`APPROVE`, `REQUEST_CHANGES`, or `COMMENT`) back to GitHub — all in a single execution.
 
-**Current Status:** Phases 1–7 are complete; v1.4.0 is in progress on branch `feature/84-cli-scaffolding`. The crate is published on crates.io and registered on crates.ai.
+**Current Status:** Phases 1–7 are complete; v1.5.0 is in progress on `main`. The crate is published on crates.io and registered on crates.ai.
+
+**Project Rules Injection (v1.5.0):** rs-guard auto-detects AI-agent instruction files (`AGENTS.md`, `CLAUDE.md`, `.github/copilot-instructions.md`, `.gemini/styleguide.md`, `.cursor/rules/*.md`, `.windsurfrules`) and layers them into the review prompt as a "Project Conventions" section. Users can opt out with `--no-project-rules`, override with `--rules-file`, or select interactively in local mode when multiple files exist.
 
 **Scaffolding Commands (v1.4.0):** `rs-guard init`, `rs-guard generate-prompt`, `rs-guard generate-workflow`, and `rs-guard validate-config` make adoption self-service. `init` detects project type and scaffolds workflow, prompt, and config files. `generate-prompt` and `generate-workflow` emit files from built-in templates. `important_issues_threshold` is now configurable via CLI/env/TOML.
 
@@ -138,6 +140,7 @@ rs-guard/
 | Cache keying             | SHA-256 over (diff \| prompt \| provider \| model \| variant \| temperature \| base_url \| max_tokens \| result_format) — all parameters matter |
 | Cache timestamps         | Stored in file content (line 1), not mtime — reliable across clock changes and file copies |
 | Cache size limit         | 100 MB default with LRU cleanup — prevents unbounded disk usage                            |
+| Project rules injection  | Auto-detected AI-agent instruction files layered into the review prompt; 32 KB soft cap; explicit `--rules-file` override; interactive picker in local mode |
 | Circuit breaker          | Simple Closed/Open only (no half-open), opt-in, default disabled                           |
 | Cost calculation         | `f64` cents to avoid integer truncation for small diffs; `None` when pricing is unknown |
 | Diff chunking            | `Cow<str>` return — zero allocation when no truncation needed                              |

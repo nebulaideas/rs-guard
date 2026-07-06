@@ -27,6 +27,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   invalidate cached LLM responses. Closes #83.
 - **`ReviewMetrics.project_rules_file` field** to record which rules file was
   active for a review run. Closes #83.
+- **`--rules-file` explicit override** for project rules — specify a custom path
+  via CLI (`--rules-file`), environment (`RS_GUARD_RULES_FILE`), or TOML
+  (`rules_file`). Takes precedence over auto-detection and supports any relative
+  or absolute path. Closes #85.
+- **Interactive rules file picker** in local (non-CI) mode when two or more rules
+  files are detected. Falls back to first-match priority in CI mode or when stdin
+  is not a TTY. Closes #86.
+- **`should_show_picker` and `print_project_rules_notice` helpers** extracted for
+  testability, with unit tests covering every branch. Closes #87.
 
 ### Improved
 
