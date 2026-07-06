@@ -7,9 +7,12 @@ use clap::Parser;
 use colored::Colorize;
 use rs_guard::cli::{Cli, Commands};
 use rs_guard::config::{load_toml_config, Config};
+use rs_guard::error::RsGuardError;
 use rs_guard::pipeline::{run_pipeline, PipelineResult};
 use rs_guard::repo::resolve_repo_root;
+use rs_guard::rules::{detect_all_rules_files, select_rules_file};
 use rs_guard::scaffold;
+use std::io::IsTerminal;
 use std::process;
 
 fn exit_on_error<T>(result: Result<T, impl std::fmt::Display>, context: &str) -> T {
@@ -65,7 +68,38 @@ async fn main() {
         Config::resolve_project_rules_enabled(args.no_project_rules, toml_project_rules_enabled);
 
     let repo_root = resolve_repo_root();
-    let rules_file = config.rules_file.clone();
+    let mut rules_file = config.rules_file.clone();
+
+    // In local mode with multiple detected rules files, prompt the user to pick
+    // one. CI mode and explicit overrides skip the picker.
+    if rules_file.is_none() && project_rules_enabled && !config.is_ci && !args.no_project_rules {
+        if let Ok(files) = detect_all_rules_files(&repo_root) {
+            if files.len() >= 2 {
+                let is_tty = std::io::stdin().is_terminal();
+                if is_tty {
+                    eprintln!("{} Multiple project rules files detected:", "info:".cyan());
+                    for (i, path) in files.iter().enumerate() {
+                        eprintln!("  [{}] {}", i + 1, path.display());
+                    }
+                } else {
+                    eprintln!(
+                        "{} Multiple project rules files detected, but stdin is not a TTY. Using first match.",
+                        "warning:".yellow()
+                    );
+                }
+                let selected = select_rules_file(&files, is_tty, |items| {
+                    dialoguer::Select::with_theme(&dialoguer::theme::ColorfulTheme::default())
+                        .with_prompt("Multiple project rules files detected. Select one:")
+                        .items(items)
+                        .default(0)
+                        .interact()
+                        .map_err(|e| RsGuardError::Config(e.to_string()))
+                });
+                rules_file = selected.map(|p| p.to_path_buf());
+            }
+        }
+    }
+
     exit_on_error(
         config.load_project_rules(&repo_root, project_rules_enabled, rules_file.as_deref()),
         "Failed to load project rules",

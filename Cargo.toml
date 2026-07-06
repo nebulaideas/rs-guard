@@ -17,6 +17,7 @@ rust-version = "1.82"
 anyhow = "1.0"
 clap = { version = "4.5", features = ["derive", "env"] }
 colored = "2.1"
+dialoguer = "0.11"
 env_logger = "0.11"
 log = "0.4"
 regex = "1.11"
