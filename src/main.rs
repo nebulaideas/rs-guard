@@ -23,6 +23,19 @@ fn exit_on_error<T>(result: Result<T, impl std::fmt::Display>, context: &str) ->
     })
 }
 
+/// Returns a selector closure for `dialoguer::Select` used when multiple
+/// project rules files are detected in an interactive TTY session.
+fn interactive_rules_selector() -> impl FnOnce(&[String]) -> Result<usize, RsGuardError> {
+    |items| {
+        dialoguer::Select::with_theme(&dialoguer::theme::ColorfulTheme::default())
+            .with_prompt("Multiple project rules files detected. Select one:")
+            .items(items)
+            .default(0)
+            .interact()
+            .map_err(|e| RsGuardError::Config(e.to_string()))
+    }
+}
+
 #[tokio::main]
 async fn main() {
     env_logger::init();
@@ -74,7 +87,11 @@ async fn main() {
     // In local mode with multiple detected rules files, prompt the user to pick
     // one. CI mode and explicit overrides skip the picker.
     if rules_file.is_none() && project_rules_enabled && !config.is_ci && !args.no_project_rules {
-        if let Ok(files) = detect_all_rules_files(&repo_root) {
+        let detected_files = detect_all_rules_files(&repo_root);
+        if let Err(ref e) = detected_files {
+            log::warn!("Failed to scan for project rules files: {}", e);
+        }
+        if let Ok(files) = detected_files {
             if files.len() >= 2 {
                 let is_tty = std::io::stdin().is_terminal();
                 if is_tty {
@@ -88,14 +105,7 @@ async fn main() {
                         "warning:".yellow()
                     );
                 }
-                let selected = select_rules_file(&files, is_tty, |items| {
-                    dialoguer::Select::with_theme(&dialoguer::theme::ColorfulTheme::default())
-                        .with_prompt("Multiple project rules files detected. Select one:")
-                        .items(items)
-                        .default(0)
-                        .interact()
-                        .map_err(|e| RsGuardError::Config(e.to_string()))
-                });
+                let selected = select_rules_file(&files, is_tty, interactive_rules_selector());
                 rules_file = selected.map(|p| p.to_path_buf());
             }
         }
