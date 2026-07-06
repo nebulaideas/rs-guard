@@ -1858,6 +1858,45 @@ fn test_apply_args_rules_file_and_no_project_rules_are_mutually_exclusive() {
 
 #[test]
 #[serial]
+fn test_apply_args_rules_file_cli_override_then_loads_correct_file() {
+    clean_env();
+    let dir = tempfile::TempDir::new().expect("temp dir");
+    let toml_path = dir.path().join("toml-rules.md");
+    let cli_path = dir.path().join("cli-rules.md");
+    std::fs::write(&toml_path, "# TOML rules\n").expect("write toml rules");
+    std::fs::write(&cli_path, "# CLI rules\n").expect("write cli rules");
+
+    let file = write_toml(format!(r#"rules_file = "{}""#, toml_path.to_string_lossy()).as_bytes());
+    with_env(&[("DEEPSEEK_API_KEY", "test-deepseek-key")], || {
+        let toml = load_toml_config(file.path()).unwrap();
+        let mut config = Config::from_env(toml).unwrap();
+        let cli = rs_guard::cli::Cli::parse_from([
+            "rs-guard",
+            "--rules-file",
+            &cli_path.to_string_lossy(),
+        ]);
+        config.apply_args(&cli.review).unwrap();
+
+        let rules_file = config.rules_file.clone();
+        config
+            .load_project_rules(dir.path(), true, rules_file.as_deref())
+            .expect("load_project_rules should use the CLI-overridden rules_file");
+
+        assert_eq!(
+            config.project_rules,
+            Some("# CLI rules\n".to_string()),
+            "CLI --rules-file should win over TOML rules_file and be loaded"
+        );
+        assert_eq!(
+            config.project_rules_file,
+            Some(cli_path.to_string_lossy().into_owned()),
+            "project_rules_file should reflect the CLI-overridden file"
+        );
+    });
+}
+
+#[test]
+#[serial]
 fn test_load_project_rules_explicit_file() {
     clean_env();
     let dir = tempfile::TempDir::new().expect("temp dir");
