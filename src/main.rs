@@ -59,11 +59,8 @@ async fn main() {
     );
 
     // Resolve and load project rules (AGENTS.md, CLAUDE.md, etc.)
-    let project_rules_enabled = Config::resolve_project_rules_enabled(
-        args.no_project_rules,
-        toml_project_rules_enabled,
-        None,
-    );
+    let project_rules_enabled =
+        Config::resolve_project_rules_enabled(args.no_project_rules, toml_project_rules_enabled);
     let repo_root = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
     exit_on_error(
         config.load_project_rules(&repo_root, project_rules_enabled),

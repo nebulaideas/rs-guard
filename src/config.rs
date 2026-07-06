@@ -1189,7 +1189,6 @@ impl Config {
     ///
     /// * `cli_no_project_rules` — `true` if `--no-project-rules` was passed on the CLI.
     /// * `toml_enabled` — Value from the `project_rules_enabled` TOML key (if set).
-    /// * `_env` — Unused parameter reserved for future use; env is read directly.
     ///
     /// # Returns
     ///
@@ -1198,7 +1197,6 @@ impl Config {
     pub fn resolve_project_rules_enabled(
         cli_no_project_rules: bool,
         toml_enabled: Option<bool>,
-        _env: Option<()>,
     ) -> bool {
         // CLI flag takes highest precedence
         if cli_no_project_rules {

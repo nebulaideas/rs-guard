@@ -1639,7 +1639,7 @@ fn test_toml_project_rules_enabled_is_known_key() {
 fn test_resolve_project_rules_enabled_default_true() {
     clean_env();
     // No CLI, no env, no TOML → enabled
-    let enabled = Config::resolve_project_rules_enabled(false, None, None);
+    let enabled = Config::resolve_project_rules_enabled(false, None);
     assert!(
         enabled,
         "default should be enabled when no flags/env/toml set"
@@ -1651,7 +1651,7 @@ fn test_resolve_project_rules_enabled_default_true() {
 fn test_resolve_project_rules_enabled_cli_false_overrides() {
     clean_env();
     // CLI --no-project-rules overrides everything
-    let enabled = Config::resolve_project_rules_enabled(true, None, None);
+    let enabled = Config::resolve_project_rules_enabled(true, None);
     assert!(
         !enabled,
         "CLI --no-project-rules should override to disabled"
@@ -1664,7 +1664,7 @@ fn test_resolve_project_rules_enabled_env_overrides_toml() {
     clean_env();
     with_env(&[("RS_GUARD_NO_PROJECT_RULES", "1")], || {
         // Env says disable, TOML says enable → env wins
-        let enabled = Config::resolve_project_rules_enabled(false, Some(true), None);
+        let enabled = Config::resolve_project_rules_enabled(false, Some(true));
         assert!(
             !enabled,
             "RS_GUARD_NO_PROJECT_RULES env should override TOML enabled=true"
@@ -1677,7 +1677,7 @@ fn test_resolve_project_rules_enabled_env_overrides_toml() {
 fn test_resolve_project_rules_enabled_toml_false_when_no_cli_no_env() {
     clean_env();
     // TOML says disable, no CLI, no env → TOML wins
-    let enabled = Config::resolve_project_rules_enabled(false, Some(false), None);
+    let enabled = Config::resolve_project_rules_enabled(false, Some(false));
     assert!(
         !enabled,
         "TOML project_rules_enabled=false should disable when no CLI/env override"
@@ -1689,7 +1689,7 @@ fn test_resolve_project_rules_enabled_toml_false_when_no_cli_no_env() {
 fn test_resolve_project_rules_enabled_cli_false_overrides_env_enable() {
     clean_env();
     // CLI says disable, env not set, TOML says enable → CLI wins
-    let enabled = Config::resolve_project_rules_enabled(true, Some(true), None);
+    let enabled = Config::resolve_project_rules_enabled(true, Some(true));
     assert!(
         !enabled,
         "CLI --no-project-rules should override TOML enabled=true"
@@ -1701,7 +1701,7 @@ fn test_resolve_project_rules_enabled_cli_false_overrides_env_enable() {
 fn test_resolve_project_rules_enabled_env_non_empty_disables() {
     clean_env();
     with_env(&[("RS_GUARD_NO_PROJECT_RULES", "yes")], || {
-        let enabled = Config::resolve_project_rules_enabled(false, None, None);
+        let enabled = Config::resolve_project_rules_enabled(false, None);
         assert!(
             !enabled,
             "any non-empty RS_GUARD_NO_PROJECT_RULES value should disable"
@@ -1714,7 +1714,7 @@ fn test_resolve_project_rules_enabled_env_non_empty_disables() {
 fn test_resolve_project_rules_enabled_env_empty_does_not_disable() {
     clean_env();
     with_env(&[("RS_GUARD_NO_PROJECT_RULES", "")], || {
-        let enabled = Config::resolve_project_rules_enabled(false, None, None);
+        let enabled = Config::resolve_project_rules_enabled(false, None);
         assert!(
             enabled,
             "empty RS_GUARD_NO_PROJECT_RULES should NOT disable"
