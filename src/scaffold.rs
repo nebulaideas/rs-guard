@@ -220,6 +220,9 @@ pub fn run_validate_config(args: &ValidateConfigArgs) -> Result<(), Box<dyn std:
     let toml = load_toml_config(&args.config)?;
     let config = Config::from_env(toml.clone())?;
 
+    // `resolve_project_rules_enabled` checks the CLI flag (none here), the
+    // RS_GUARD_NO_PROJECT_RULES env var, and the TOML key in the correct
+    // precedence order.
     let rules_enabled = Config::resolve_project_rules_enabled(
         false,
         toml.as_ref().and_then(|t| t.project_rules_enabled),
@@ -251,7 +254,13 @@ pub fn run_validate_config(args: &ValidateConfigArgs) -> Result<(), Box<dyn std:
             }
         }
     } else if rules_enabled {
-        detect_project_rules(Path::new("."))?
+        match detect_project_rules(Path::new(".")) {
+            Ok(rules) => rules,
+            Err(e) => {
+                println!("  Warning: could not auto-detect project rules: {}", e);
+                None
+            }
+        }
     } else {
         None
     };
