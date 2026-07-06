@@ -73,7 +73,7 @@ async fn main() {
         if let (Some(ref rules), Some(ref path)) =
             (&config.project_rules, &config.project_rules_path)
         {
-            println!(
+            eprintln!(
                 "{} Project rules loaded from: {} ({} bytes)",
                 "ℹ".cyan(),
                 path,

@@ -242,7 +242,7 @@ async fn obtain_llm_response_with_composed_prompt(
     cache: &DiffCache,
     diff_content: &str,
     composed_prompt: &str,
-) -> anyhow::Result<(String, String, bool)> {
+) -> anyhow::Result<(String, bool)> {
     let base_url = effective_base_url(config);
 
     if let Some(cached) = cache.get_with_project_rules(
@@ -258,7 +258,7 @@ async fn obtain_llm_response_with_composed_prompt(
         config.provider_config.result_format.as_deref(),
     ) {
         log::info!("Cache hit — using cached LLM response");
-        return Ok((cached, composed_prompt.to_string(), false));
+        return Ok((cached, false));
     }
 
     if !config.is_ci {
@@ -282,7 +282,7 @@ async fn obtain_llm_response_with_composed_prompt(
         println!("✅ Response received ({} chars)", response.len());
     }
 
-    Ok((response, composed_prompt.to_string(), !config.no_cache))
+    Ok((response, !config.no_cache))
 }
 
 /// Caches an LLM response when caching is enabled.
@@ -602,7 +602,7 @@ pub async fn run_pipeline(
         check_token_warning(estimated_tokens_in, context_window, &config.provider);
     }
 
-    let (llm_response, _, should_cache) =
+    let (llm_response, should_cache) =
         obtain_llm_response_with_composed_prompt(&config, &cache, &diff_content, &composed_prompt)
             .await?;
     let latency = start.elapsed();
