@@ -1193,14 +1193,7 @@ impl Config {
             }
         );
         self.project_rules = Some(detected.content().to_string());
-        self.project_rules_file = Some(
-            detected
-                .path()
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("unknown")
-                .to_string(),
-        );
+        self.project_rules_file = Some(detected.path().to_string_lossy().into_owned());
         Ok(())
     }
 
@@ -1264,14 +1257,7 @@ impl Config {
                     }
                 );
                 self.project_rules = Some(detected.content().to_string());
-                self.project_rules_file = Some(
-                    detected
-                        .path()
-                        .file_name()
-                        .and_then(|n| n.to_str())
-                        .unwrap_or("unknown")
-                        .to_string(),
-                );
+                self.project_rules_file = Some(detected.path().to_string_lossy().into_owned());
             }
             None => {
                 self.project_rules = None;

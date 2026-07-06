@@ -1876,8 +1876,8 @@ fn test_load_project_rules_explicit_file() {
     );
     assert_eq!(
         config.project_rules_file,
-        Some("custom-rules.md".to_string()),
-        "project_rules_file should store the file name"
+        Some(rules_path.to_string_lossy().into_owned()),
+        "project_rules_file should store the path as given"
     );
 }
 
@@ -1925,7 +1925,7 @@ fn test_load_project_rules_explicit_file_skips_auto_detection() {
     );
     assert_eq!(
         config.project_rules_file,
-        Some("explicit-rules.md".to_string()),
+        Some(explicit_path.to_string_lossy().into_owned()),
         "project_rules_file should reflect the explicit file"
     );
 }
@@ -1950,7 +1950,7 @@ fn test_load_project_rules_explicit_file_overrides_enabled_false() {
     );
     assert_eq!(
         config.project_rules_file,
-        Some("explicit-rules.md".to_string()),
+        Some(explicit_path.to_string_lossy().into_owned()),
         "project_rules_file should reflect the explicit file"
     );
 }
