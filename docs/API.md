@@ -19,7 +19,7 @@ Library module API documentation, key types reference, and custom provider imple
 
 ```text
 src/
-├── lib.rs           # Library root (13 public modules)
+├── lib.rs           # Library root (14 public modules)
 ├── main.rs          # CLI entry point
 ├── cli.rs           # Clap argument parsing
 ├── config.rs        # Resolved configuration
@@ -38,6 +38,7 @@ src/
 ├── pipeline.rs      # Pipeline orchestration
 ├── redact.rs        # Secret redaction
 ├── retry.rs         # Retry logic + circuit breaker
+├── rules.rs         # Project rules detection and loading
 └── verdict.rs       # Verdict parsing + review state
 ```
 
@@ -269,6 +270,22 @@ pub struct ProviderConfig {
 | ------------------------------- | ------------------------------------ |
 | `redact_secrets(content)`       | Removes secret patterns from content |
 | `log_redacted(prefix, content)` | Logs content with secrets redacted   |
+
+### `rules`
+
+Project rules detection and loading. Detects AI-agent instruction files in the repository root, loads the selected file, and applies a 32 KB soft cap with a truncation warning banner.
+
+| Item | Description |
+| ---- | ----------- |
+| `detect_project_rules(repo_root)` | Detects and loads the highest-priority rules file. Returns `None` if no file is found. |
+| `detect_all_rules_files(repo_root)` | Returns all matching rules file paths in priority order. |
+| `load_rules_file(path)` | Loads a specific rules file with the default soft cap. |
+| `select_rules_file(files, is_tty, select_fn)` | Selects a rules file from a list. Uses `select_fn` in TTY mode, falls back to the first file otherwise. |
+| `should_show_picker(is_ci, file_count, rules_file, no_project_rules, is_tty)` | Pure predicate for whether to show the interactive picker. |
+| `RulesDetector` | Builder-driven detector with configurable repo root and soft cap. |
+| `RulesDetectorBuilder` | Builder for `RulesDetector`. |
+| `DetectedRules` | Loaded rules content plus metadata (path, size, truncation flag). |
+| `DEFAULT_RULES_CAP_BYTES` | 32 KB soft cap. |
 
 ---
 

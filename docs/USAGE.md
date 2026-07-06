@@ -14,6 +14,7 @@ Complete reference for running rs-guard in all modes.
 - [Local Pre-commit Setup](#local-pre-commit-setup)
 - [Configuration File](#configuration-file)
 - [Customizing the Review Prompt](#customizing-the-review-prompt)
+- [Project Rules Injection](#project-rules-injection)
 - [Troubleshooting](#troubleshooting)
 
 ---
@@ -38,6 +39,8 @@ rs-guard [OPTIONS]
 | `--llm-timeout` |       | `120`                      | Total timeout in seconds for LLM API requests. Raise for thinking models.          |
 | `--important-threshold` | | `3`                    | Number of `[Important]` issues required to `REQUEST_CHANGES`.                      |
 | `--diff-file`   | —     | _(none)_                   | Review a pre-existing diff file instead of fetching from GitHub API.               |
+| `--no-project-rules` | — | Off                    | Disable project rules auto-detection.                                            |
+| `--rules-file`  | —     | _(none)_                   | Path to an explicit project rules file. Overrides auto-detection.                  |
 | `--no-cache`    | —     | Off                        | Bypass the response cache and force a fresh LLM API call.                          |
 | `--dry-run`     | —     | Off                        | Run the full pipeline without submitting reviews or blocking commits.              |
 | `--help`        | `-h`  |                            | Display usage information and exit.                                                |
@@ -149,6 +152,8 @@ rs-guard --dry-run
 | `RS_GUARD_IMPORTANT_THRESHOLD` | Optional | `[Important]` issues threshold (default 3)                                       |
 | `RS_GUARD_DIFF_FILE`     | Optional      | Alias for `--diff-file`                                                                 |
 | `RS_GUARD_METRICS_PATH` | Optional      | Custom path for `rs-guard-metrics.json` artifact                                        |
+| `RS_GUARD_NO_PROJECT_RULES` | Optional | Set to `true` to disable project rules auto-detection. Alias for `--no-project-rules`. |
+| `RS_GUARD_RULES_FILE` | Optional      | Path to an explicit project rules file. Alias for `--rules-file`.                       |
 | `GITHUB_API_URL`        | Optional      | Custom GitHub API base URL (e.g. GitHub Enterprise); default: `https://api.github.com`  |
 
 ---
@@ -452,6 +457,79 @@ Suggestions: <count>
 4. **Tell the model what NOT to flag.** Explicitly exclude style preferences, naming conventions, and formatting — the linter covers those. This keeps the review focused.
 5. **Include anti-patterns from your tech debt log.** If your team bans `Arc<Mutex<T>>` in hot paths or `after_save` callbacks across bounded contexts, encode that in the prompt.
 6. **Keep it under 1,000 words.** The prompt and diff share the model's context window. Every word in the prompt is a word the diff can't use.
+
+---
+
+## Project Rules Injection
+
+rs-guard can automatically layer your project's conventions into the review prompt. When a rules file is found, its content is appended as a **Project Conventions** section that takes precedence over the base review guidance. This is useful for encoding conventions that are too specific for a generic prompt — for example, "All public functions must have doc comments" or "Never call `unwrap` in application code".
+
+### Auto-Detection Priority Order
+
+If no explicit rules file is configured, rs-guard scans the repository root in the following order and uses the first match:
+
+1. `AGENTS.md`
+2. `CLAUDE.md`
+3. `.github/copilot-instructions.md`
+4. `.gemini/styleguide.md`
+5. `.cursor/rules/*.md` (first file alphabetically)
+6. `.windsurfrules`
+
+Only one rules file is loaded per review run. If multiple files exist, the highest-priority file wins.
+
+### Opting Out
+
+Project rules detection is on by default. Disable it with any of the following, listed by precedence (CLI > env > TOML):
+
+- CLI: `--no-project-rules`
+- Environment: `RS_GUARD_NO_PROJECT_RULES=true`
+- TOML: `project_rules_enabled = false`
+
+### Explicit Override
+
+Point rs-guard at a specific rules file with any of the following, listed by precedence (CLI > env > TOML):
+
+- CLI: `--rules-file docs/my-rules.md`
+- Environment: `RS_GUARD_RULES_FILE=docs/my-rules.md`
+- TOML: `rules_file = "docs/my-rules.md"`
+
+The path may be relative to the current working directory or absolute. An explicit file overrides auto-detection entirely. It is mutually exclusive with `--no-project-rules`.
+
+### Interactive Picker (Local Mode)
+
+When running locally with two or more rules files detected, rs-guard prompts you to select one:
+
+```text
+info: Multiple project rules files detected:
+  [1] AGENTS.md
+  [2] CLAUDE.md
+Multiple project rules files detected. Select one:
+> AGENTS.md
+  CLAUDE.md
+```
+
+The picker is skipped in CI mode (`is_ci = true`), when `--rules-file` is set, when `--no-project-rules` is set, or when stdin is not a TTY. In those cases, rs-guard falls back to first-match priority silently.
+
+### Soft Cap and Truncation
+
+Rules files are read with a 32 KB soft cap. If a file exceeds the cap, only the first 32 KB are kept and a truncation warning banner is appended so the LLM knows the rules are incomplete. The full file remains on disk; only the prompt content is truncated.
+
+### Relationship to `review-prompt.md`
+
+Project rules are **primary** conventions — they override the base review guidance. The `.github/review-prompt.md` file (or `--prompt-file`) provides the review structure and default focus areas. Use the rules file for project-wide conventions and the prompt file for review mechanics and per-run focus.
+
+### Example
+
+A repo with an `AGENTS.md` containing:
+
+```markdown
+# Project Conventions
+
+- All public functions must have doc comments.
+- Do not use `unwrap` in application code; use `?` or `expect` with a message.
+```
+
+will cause rs-guard to flag missing doc comments or bare `unwrap` calls in the diff, even if the custom prompt does not mention them.
 
 ---
 

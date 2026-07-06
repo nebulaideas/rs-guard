@@ -95,6 +95,8 @@ base_url = "https://open.bigmodel.cn/api/paas/v4"
 | `cache_dir`         | string  | `.rs-guard/cache` | Custom cache directory path. Defaults to git-root (or CWD) relative `.rs-guard/cache`.                                           |
 | `auto_gitignore`    | boolean | `true`            | Whether to automatically add the cache directory to `.gitignore`.                                                                |
 | `important_issues_threshold` | integer | `3`      | Number of `[Important]` issues required to trigger `REQUEST_CHANGES`. `0` disables blocking on important issues (they still surface as `COMMENT`). |
+| `project_rules_enabled` | boolean | `true` | Whether to scan for and load project rules files. Set to `false` to disable auto-detection. |
+| `rules_file` | string | (none) | Path to an explicit project rules file. Overrides auto-detection. Mutually exclusive with `RS_GUARD_NO_PROJECT_RULES` / `--no-project-rules`. |
 
 #### Provider Section Fields
 
