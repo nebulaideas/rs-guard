@@ -33,6 +33,7 @@ pub mod llm;
 pub mod output;
 pub mod pipeline;
 pub mod redact;
+pub mod repo;
 pub mod retry;
 pub mod rules;
 pub mod scaffold;
