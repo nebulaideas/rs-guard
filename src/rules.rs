@@ -353,7 +353,7 @@ impl RulesDetector {
     ///
     /// Returns [`RsGuardError::Config`] if the file cannot be opened, read, or
     /// its metadata cannot be obtained.
-    fn read_with_cap(
+    pub fn read_with_cap(
         &self,
         full_path: &Path,
         relative_path: &Path,
@@ -559,6 +559,38 @@ pub fn detect_project_rules(repo_root: &Path) -> Result<Option<DetectedRules>, R
         .repo_root(repo_root.to_path_buf())
         .build()?
         .detect()
+}
+
+/// Loads a specific project rules file with the default soft cap.
+///
+/// The file path may be relative to the current working directory or absolute.
+/// If the file exceeds [`DEFAULT_RULES_CAP_BYTES`], its content is truncated
+/// and a warning banner is appended.
+///
+/// # Errors
+///
+/// Returns [`RsGuardError::Config`] if the file does not exist or cannot be read.
+pub fn load_rules_file(path: &Path) -> Result<DetectedRules, RsGuardError> {
+    if !path.exists() {
+        return Err(RsGuardError::Config(format!(
+            "Rules file not found: {}",
+            path.display()
+        )));
+    }
+
+    let detector = RulesDetector::builder()
+        .repo_root(PathBuf::from("."))
+        .build()?;
+    detector
+        .read_with_cap(path, path)
+        .map(|(content, original_size, truncated)| {
+            DetectedRules::new(
+                RulesFilePath::new(path.to_path_buf()),
+                RulesContent::new(content),
+                RulesFileSize::new(original_size),
+                truncated,
+            )
+        })
 }
 
 // ---------------------------------------------------------------------------

@@ -142,6 +142,19 @@ pub struct ReviewArgs {
     /// env var and `project_rules_enabled` TOML key.
     #[arg(long, help = "Disable project rules auto-detection and injection")]
     pub no_project_rules: bool,
+
+    /// Path to an explicit project rules file.
+    ///
+    /// When set, rs-guard loads this file instead of auto-detecting
+    /// `AGENTS.md`, `CLAUDE.md`, etc. The path may be relative to the current
+    /// working directory or absolute. Overrides `RS_GUARD_RULES_FILE` env var
+    /// and `rules_file` TOML key. Mutually exclusive with `--no-project-rules`.
+    #[arg(
+        long,
+        env = "RS_GUARD_RULES_FILE",
+        help = "Path to explicit project rules file (overrides auto-detection)"
+    )]
+    pub rules_file: Option<PathBuf>,
 }
 
 /// Project type used by `rs-guard init` to select appropriate templates.
@@ -320,6 +333,25 @@ mod tests {
             "--no-project-rules should set no_project_rules to true"
         );
         assert!(cli.command.is_none());
+    }
+
+    #[test]
+    fn test_rules_file_flag_parsing() {
+        let cli = Cli::parse_from(["rs-guard", "--rules-file", "custom-rules.md"]);
+        assert_eq!(
+            cli.review.rules_file,
+            Some(PathBuf::from("custom-rules.md")),
+            "--rules-file should set rules_file"
+        );
+    }
+
+    #[test]
+    fn test_rules_file_flag_default_none() {
+        let cli = Cli::parse_from(["rs-guard"]);
+        assert!(
+            cli.review.rules_file.is_none(),
+            "rules_file should default to None"
+        );
     }
 
     #[test]

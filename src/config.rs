@@ -11,7 +11,7 @@ use crate::llm::providers::{self, find_provider};
 use crate::llm::ProviderConfig;
 use serde::Deserialize;
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// Default maximum tokens for LLM responses.
 ///
@@ -217,6 +217,12 @@ pub struct TomlConfig {
     /// other AI-agent instruction files. Can be overridden by the
     /// `--no-project-rules` CLI flag or `RS_GUARD_NO_PROJECT_RULES` env var.
     pub project_rules_enabled: Option<bool>,
+    /// Path to an explicit project rules file.
+    ///
+    /// When set, rs-guard loads this file instead of auto-detecting
+    /// `AGENTS.md`, `CLAUDE.md`, etc. Can be overridden by the `--rules-file`
+    /// CLI flag or `RS_GUARD_RULES_FILE` env var.
+    pub rules_file: Option<String>,
 }
 
 /// Returns `None` when `result_format` is unset or blank so static provider
@@ -243,6 +249,7 @@ const KNOWN_TOP_LEVEL_KEYS: &[&str] = &[
     "auto_gitignore",
     "important_issues_threshold",
     "project_rules_enabled",
+    "rules_file",
 ];
 
 /// Returns the closest known top-level key to `unknown`, or `None` if no
@@ -717,6 +724,18 @@ fn resolve_important_threshold(toml: Option<&TomlConfig>) -> Result<u32, RsGuard
         .unwrap_or(3))
 }
 
+/// Resolves the explicit rules file path from env > toml.
+///
+/// Returns `None` when neither `RS_GUARD_RULES_FILE` nor the `rules_file`
+/// TOML key is set. Empty environment values are treated as unset.
+fn resolve_rules_file_from_env_and_toml(toml: Option<&TomlConfig>) -> Option<PathBuf> {
+    std::env::var("RS_GUARD_RULES_FILE")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| toml.and_then(|t| t.rules_file.clone()).map(PathBuf::from))
+}
+
 /// Resolves and validates the provider base URL from TOML.
 fn resolve_base_url(
     toml_provider: Option<&ProviderTomlConfig>,
@@ -875,6 +894,12 @@ pub struct Config {
     /// in the "Project Conventions" section header and in the terminal notice.
     /// `None` when no rules file was found or auto-detection is disabled.
     pub project_rules_file: Option<String>,
+    /// Path to an explicit project rules file requested by the user.
+    ///
+    /// Set from `--rules-file`, `RS_GUARD_RULES_FILE`, or `rules_file` in
+    /// `.reviewer.toml`. When set, auto-detection is skipped and this file is
+    /// loaded directly. `None` when no explicit file is requested.
+    pub rules_file: Option<PathBuf>,
 }
 
 impl Config {
@@ -919,6 +944,7 @@ impl Config {
             important_threshold: 3,
             project_rules: None,
             project_rules_file: None,
+            rules_file: None,
         }
     }
 
@@ -977,6 +1003,7 @@ impl Config {
         let circuit_breaker = resolve_circuit_breaker(toml.as_ref());
         let pricing = toml.as_ref().and_then(|t| t.pricing.clone());
         let auto_gitignore = toml.as_ref().and_then(|t| t.auto_gitignore).unwrap_or(true);
+        let rules_file = resolve_rules_file_from_env_and_toml(toml.as_ref());
 
         Ok(Config {
             provider,
@@ -1007,6 +1034,7 @@ impl Config {
             important_threshold,
             project_rules: None,
             project_rules_file: None,
+            rules_file,
         })
     }
 
@@ -1115,6 +1143,15 @@ impl Config {
         if let Some(threshold) = args.important_threshold {
             self.important_threshold = threshold;
         }
+        if let Some(ref rules_file) = args.rules_file {
+            self.rules_file = Some(rules_file.clone());
+        }
+
+        if args.no_project_rules && self.rules_file.is_some() {
+            return Err(RsGuardError::Config(
+                "--rules-file and --no-project-rules are mutually exclusive".to_string(),
+            ));
+        }
 
         Ok(())
     }
@@ -1135,23 +1172,59 @@ impl Config {
         Ok(())
     }
 
+    /// Loads an explicit project rules file specified by the user.
+    ///
+    /// Called by [`Config::load_project_rules`] when `rules_file` is set. The
+    /// file is loaded with the default 32 KB soft cap and truncation banner.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RsGuardError::Config`] if the file does not exist or cannot be read.
+    fn load_explicit_rules_file(&mut self, path: &Path) -> Result<(), RsGuardError> {
+        let detected = crate::rules::load_rules_file(path)?;
+        log::info!(
+            "Project rules loaded from {} ({} bytes{}).",
+            detected.path().display(),
+            detected.original_size(),
+            if detected.is_truncated() {
+                ", truncated"
+            } else {
+                ""
+            }
+        );
+        self.project_rules = Some(detected.content().to_string());
+        self.project_rules_file = Some(
+            detected
+                .path()
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("unknown")
+                .to_string(),
+        );
+        Ok(())
+    }
+
     /// Loads project rules from auto-detected AI-agent instruction files.
     ///
     /// When `enabled` is `false` (from `--no-project-rules`), sets
     /// `project_rules` to `None` and returns immediately — no file system
     /// access occurs.
     ///
-    /// When `enabled` is `true`, calls [`crate::rules::detect_project_rules`]
-    /// to scan for `AGENTS.md`, `CLAUDE.md`, `.github/copilot-instructions.md`,
-    /// `.gemini/styleguide.md`, `.cursor/rules/*.md`, or `.windsurfrules` in
-    /// priority order. The first match's content is stored in `project_rules`.
-    /// If no file is found, `project_rules` is set to `None`.
+    /// When `enabled` is `true` and `rules_file` is `None`, calls
+    /// [`crate::rules::detect_project_rules`] to scan for `AGENTS.md`,
+    /// `CLAUDE.md`, `.github/copilot-instructions.md`, `.gemini/styleguide.md`,
+    /// `.cursor/rules/*.md`, or `.windsurfrules` in priority order. The first
+    /// match's content is stored in `project_rules`.
+    ///
+    /// When `enabled` is `true` and `rules_file` is `Some`, the specified file
+    /// is loaded directly and auto-detection is skipped.
     ///
     /// # Arguments
     ///
     /// * `repo_root` — Directory to scan for rules files (usually the git root or CWD).
-    /// * `enabled` — Whether auto-detection is enabled (from
+    /// * `enabled` — Whether project rules loading is enabled (from
     ///   [`Config::resolve_project_rules_enabled`]).
+    /// * `rules_file` — Optional explicit rules file path from CLI/env/TOML.
     ///
     /// # Errors
     ///
@@ -1160,11 +1233,16 @@ impl Config {
         &mut self,
         repo_root: &Path,
         enabled: bool,
+        rules_file: Option<&Path>,
     ) -> Result<(), RsGuardError> {
         if !enabled {
             self.project_rules = None;
             self.project_rules_file = None;
             return Ok(());
+        }
+
+        if let Some(path) = rules_file {
+            return self.load_explicit_rules_file(path);
         }
 
         match crate::rules::detect_project_rules(repo_root)? {
