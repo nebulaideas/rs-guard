@@ -8,6 +8,7 @@ use colored::Colorize;
 use rs_guard::cli::{Cli, Commands};
 use rs_guard::config::{load_toml_config, Config};
 use rs_guard::error::RsGuardError;
+use rs_guard::output;
 use rs_guard::pipeline::{run_pipeline, PipelineResult};
 use rs_guard::repo::resolve_repo_root;
 use rs_guard::rules::{detect_all_rules_files, select_rules_file};
@@ -110,18 +111,13 @@ async fn main() {
         if let (Some(ref rules), Some(ref path)) =
             (&config.project_rules, &config.project_rules_file)
         {
-            let source = if config.rules_file.is_some() {
-                " (--rules-file)"
-            } else {
-                ""
-            };
-            eprintln!(
-                "{} Project rules loaded from: {}{} ({} bytes)",
-                "info:".cyan(),
+            output::print_project_rules_notice(
+                &mut std::io::stderr(),
                 path,
-                source,
-                rules.len()
-            );
+                rules.len(),
+                config.rules_file.is_some(),
+            )
+            .ok();
         }
     }
 

@@ -234,6 +234,40 @@ pub fn print_colored_summary(
     Ok(())
 }
 
+/// Prints a notice that project rules were loaded.
+///
+/// When `is_explicit` is `true`, the suffix `(--rules-file)` is appended so
+/// users can distinguish an explicitly supplied rules file from an
+/// auto-detected one.
+///
+/// # Arguments
+///
+/// * `writer` — Output destination (e.g. `std::io::stderr()`, `Vec<u8>`).
+/// * `path` — Path to the loaded rules file.
+/// * `rules_len` — Length of the loaded rules content in bytes.
+/// * `is_explicit` — `true` when the file came from `--rules-file`, env var,
+///   or TOML `rules_file`.
+///
+/// # Errors
+///
+/// Returns [`std::io::Error`] if writing to the output fails.
+pub fn print_project_rules_notice(
+    writer: &mut impl Write,
+    path: &str,
+    rules_len: usize,
+    is_explicit: bool,
+) -> std::io::Result<()> {
+    let source = if is_explicit { " (--rules-file)" } else { "" };
+    writeln!(
+        writer,
+        "{} Project rules loaded from: {}{} ({} bytes)",
+        "info:".cyan(),
+        path,
+        source,
+        rules_len
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -532,5 +566,31 @@ mod tests {
             .unwrap();
         let output = String::from_utf8(buf).unwrap();
         assert!(output.contains("Variant:       thinking-on"));
+    }
+
+    #[test]
+    fn test_print_project_rules_notice_auto_detected() {
+        let mut buf = Vec::new();
+        print_project_rules_notice(&mut buf, "AGENTS.md", 1234, false).unwrap();
+        let output = String::from_utf8(buf).unwrap();
+        assert!(output.contains("Project rules loaded from: AGENTS.md (1234 bytes)"));
+        assert!(
+            !output.contains("(--rules-file)"),
+            "auto-detected rules should not have the --rules-file suffix"
+        );
+    }
+
+    #[test]
+    fn test_print_project_rules_notice_explicit_rules_file() {
+        let mut buf = Vec::new();
+        print_project_rules_notice(&mut buf, "docs/custom.md", 42, true).unwrap();
+        let output = String::from_utf8(buf).unwrap();
+        assert!(
+            output.contains("Project rules loaded from: docs/custom.md (--rules-file) (42 bytes)")
+        );
+        assert!(
+            output.contains("info:"),
+            "notice should include info prefix"
+        );
     }
 }
