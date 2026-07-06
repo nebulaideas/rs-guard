@@ -19,6 +19,7 @@
 //! - [`pipeline`] — Orchestration of the full review workflow
 //! - [`redact`] — Secret redaction and content filtering
 //! - [`retry`] — Transient failure retry logic and circuit breaker
+//! - [`rules`] — Project rules file detection and loading
 //! - [`verdict`] — Verdict parsing and review state determination
 
 pub mod cache;
@@ -33,5 +34,6 @@ pub mod output;
 pub mod pipeline;
 pub mod redact;
 pub mod retry;
+pub mod rules;
 pub mod scaffold;
 pub mod verdict;
