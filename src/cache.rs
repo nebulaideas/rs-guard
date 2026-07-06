@@ -20,6 +20,7 @@
 //! is exceeded, the oldest entries are automatically removed.
 
 use crate::error::RsGuardError;
+use crate::repo::find_git_root;
 use sha2::{Digest, Sha256};
 use std::fs;
 use std::io::Write;
@@ -40,23 +41,6 @@ const DEFAULT_MAX_SIZE_BYTES: u64 = 100 * 1024 * 1024;
 const CACHE_FILE_EXT: &str = "cache";
 
 static CACHE_WRITE_COUNTER: AtomicU64 = AtomicU64::new(0);
-
-/// Attempts to find the git repository root by running `git rev-parse --show-toplevel`.
-///
-/// Returns `None` if git is not available or we're not inside a git repository.
-fn find_git_root() -> Option<PathBuf> {
-    let output = std::process::Command::new("git")
-        .args(["rev-parse", "--show-toplevel"])
-        .output()
-        .ok()?;
-
-    if output.status.success() {
-        let path = String::from_utf8_lossy(&output.stdout);
-        Some(PathBuf::from(path.trim()))
-    } else {
-        None
-    }
-}
 
 /// Returns the default cache directory.
 ///

@@ -8,6 +8,7 @@ use colored::Colorize;
 use rs_guard::cli::{Cli, Commands};
 use rs_guard::config::{load_toml_config, Config};
 use rs_guard::pipeline::{run_pipeline, PipelineResult};
+use rs_guard::repo::resolve_repo_root;
 use rs_guard::scaffold;
 use std::process;
 
@@ -62,7 +63,7 @@ async fn main() {
     // Resolve and load project rules (AGENTS.md, CLAUDE.md, etc.)
     let project_rules_enabled =
         Config::resolve_project_rules_enabled(args.no_project_rules, toml_project_rules_enabled);
-    let repo_root = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let repo_root = resolve_repo_root();
     exit_on_error(
         config.load_project_rules(&repo_root, project_rules_enabled),
         "Failed to load project rules",
