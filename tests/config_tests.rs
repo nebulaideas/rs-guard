@@ -32,6 +32,7 @@ const ALL_TEST_ENV_VARS: &[&str] = &[
     "REPO_FULL_NAME",
     "RS_GUARD_DIFF_FILE",
     "RS_GUARD_NO_PROJECT_RULES",
+    "RS_GUARD_RULES_FILE",
 ];
 
 /// Removes all known env vars to guarantee a clean slate.
@@ -1485,7 +1486,7 @@ fn test_load_project_rules_disabled_sets_none() {
     clean_env();
     let mut config = Config::empty();
     config
-        .load_project_rules(std::path::Path::new("."), false)
+        .load_project_rules(std::path::Path::new("."), false, None)
         .expect("load_project_rules should not error when disabled");
     assert!(
         config.project_rules.is_none(),
@@ -1501,7 +1502,7 @@ fn test_load_project_rules_enabled_no_files_sets_none() {
     let dir = tempfile::TempDir::new().expect("temp dir");
     let mut config = Config::empty();
     config
-        .load_project_rules(dir.path(), true)
+        .load_project_rules(dir.path(), true, None)
         .expect("load_project_rules should not error when no files found");
     assert!(
         config.project_rules.is_none(),
@@ -1518,7 +1519,7 @@ fn test_load_project_rules_enabled_finds_agents_md() {
 
     let mut config = Config::empty();
     config
-        .load_project_rules(dir.path(), true)
+        .load_project_rules(dir.path(), true, None)
         .expect("load_project_rules should succeed");
 
     assert_eq!(
@@ -1537,7 +1538,7 @@ fn test_load_project_rules_enabled_finds_claude_md() {
 
     let mut config = Config::empty();
     config
-        .load_project_rules(dir.path(), true)
+        .load_project_rules(dir.path(), true, None)
         .expect("load_project_rules should succeed");
 
     assert_eq!(
@@ -1559,7 +1560,7 @@ fn test_load_project_rules_does_not_overwrite_existing_when_disabled() {
 
     // When disabled, should set to None even if a file exists
     config
-        .load_project_rules(dir.path(), false)
+        .load_project_rules(dir.path(), false, None)
         .expect("should not error");
 
     assert!(
@@ -1720,4 +1721,300 @@ fn test_resolve_project_rules_enabled_env_empty_does_not_disable() {
             "empty RS_GUARD_NO_PROJECT_RULES should NOT disable"
         );
     });
+}
+
+// ---------------------------------------------------------------------------
+// Project Rules — explicit rules_file flag / env / TOML
+// ---------------------------------------------------------------------------
+
+#[test]
+#[serial]
+fn test_toml_rules_file_parses() {
+    clean_env();
+    let file = write_toml(br#"rules_file = "custom-rules.md""#);
+    let toml = load_toml_config(file.path())
+        .expect("should parse")
+        .unwrap();
+    assert_eq!(
+        toml.rules_file,
+        Some("custom-rules.md".to_string()),
+        "rules_file should be parsed from TOML"
+    );
+}
+
+#[test]
+#[serial]
+fn test_toml_rules_file_is_known_key() {
+    clean_env();
+    let file = write_toml(br#"rules_file = "custom-rules.md""#);
+    let result = load_toml_config(file.path());
+    assert!(result.is_ok(), "rules_file should be a recognized key");
+}
+
+#[test]
+#[serial]
+fn test_from_env_rules_file_from_env() {
+    clean_env();
+    with_env(
+        &[
+            ("DEEPSEEK_API_KEY", "test-deepseek-key"),
+            ("RS_GUARD_RULES_FILE", "env-rules.md"),
+        ],
+        || {
+            let config = Config::from_env(None).unwrap();
+            assert_eq!(
+                config.rules_file,
+                Some(std::path::PathBuf::from("env-rules.md")),
+                "RS_GUARD_RULES_FILE env should set rules_file"
+            );
+        },
+    );
+}
+
+#[test]
+#[serial]
+fn test_from_env_rules_file_from_toml() {
+    clean_env();
+    let file = write_toml(br#"rules_file = "toml-rules.md""#);
+    with_env(&[("DEEPSEEK_API_KEY", "test-deepseek-key")], || {
+        let toml = load_toml_config(file.path()).unwrap();
+        let config = Config::from_env(toml).unwrap();
+        assert_eq!(
+            config.rules_file,
+            Some(std::path::PathBuf::from("toml-rules.md")),
+            "rules_file TOML key should set rules_file"
+        );
+    });
+}
+
+#[test]
+#[serial]
+fn test_from_env_rules_file_env_overrides_toml() {
+    clean_env();
+    let file = write_toml(br#"rules_file = "toml-rules.md""#);
+    with_env(
+        &[
+            ("DEEPSEEK_API_KEY", "test-deepseek-key"),
+            ("RS_GUARD_RULES_FILE", "env-rules.md"),
+        ],
+        || {
+            let toml = load_toml_config(file.path()).unwrap();
+            let config = Config::from_env(toml).unwrap();
+            assert_eq!(
+                config.rules_file,
+                Some(std::path::PathBuf::from("env-rules.md")),
+                "RS_GUARD_RULES_FILE env should override rules_file TOML key"
+            );
+        },
+    );
+}
+
+#[test]
+#[serial]
+fn test_apply_args_rules_file_cli_override() {
+    clean_env();
+    let file = write_toml(br#"rules_file = "toml-rules.md""#);
+    with_env(
+        &[
+            ("DEEPSEEK_API_KEY", "test-deepseek-key"),
+            ("RS_GUARD_RULES_FILE", "env-rules.md"),
+        ],
+        || {
+            let toml = load_toml_config(file.path()).unwrap();
+            let mut config = Config::from_env(toml).unwrap();
+            let cli = rs_guard::cli::Cli::parse_from(["rs-guard", "--rules-file", "cli-rules.md"]);
+            config.apply_args(&cli.review).unwrap();
+            assert_eq!(
+                config.rules_file,
+                Some(std::path::PathBuf::from("cli-rules.md")),
+                "--rules-file CLI flag should override env and TOML"
+            );
+        },
+    );
+}
+
+#[test]
+#[serial]
+fn test_apply_args_rules_file_and_no_project_rules_are_mutually_exclusive() {
+    clean_env();
+    let file = write_toml(br#"rules_file = "toml-rules.md""#);
+    with_env(&[("DEEPSEEK_API_KEY", "test-deepseek-key")], || {
+        let toml = load_toml_config(file.path()).unwrap();
+        let mut config = Config::from_env(toml).unwrap();
+        let cli = rs_guard::cli::Cli::parse_from(["rs-guard", "--no-project-rules"]);
+        let result = config.apply_args(&cli.review);
+        assert!(
+            result.is_err(),
+            "--no-project-rules with rules_file set should error"
+        );
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("mutually exclusive"),
+            "error should mention mutual exclusivity: {}",
+            err
+        );
+    });
+}
+
+#[test]
+#[serial]
+fn test_apply_args_rules_file_cli_override_then_loads_correct_file() {
+    clean_env();
+    let dir = tempfile::TempDir::new().expect("temp dir");
+    let toml_path = dir.path().join("toml-rules.md");
+    let cli_path = dir.path().join("cli-rules.md");
+    std::fs::write(&toml_path, "# TOML rules\n").expect("write toml rules");
+    std::fs::write(&cli_path, "# CLI rules\n").expect("write cli rules");
+
+    let file = write_toml(format!(r#"rules_file = "{}""#, toml_path.to_string_lossy()).as_bytes());
+    with_env(&[("DEEPSEEK_API_KEY", "test-deepseek-key")], || {
+        let toml = load_toml_config(file.path()).unwrap();
+        let mut config = Config::from_env(toml).unwrap();
+        let cli = rs_guard::cli::Cli::parse_from([
+            "rs-guard",
+            "--rules-file",
+            &cli_path.to_string_lossy(),
+        ]);
+        config.apply_args(&cli.review).unwrap();
+
+        let rules_file = config.rules_file.clone();
+        config
+            .load_project_rules(dir.path(), true, rules_file.as_deref())
+            .expect("load_project_rules should use the CLI-overridden rules_file");
+
+        assert_eq!(
+            config.project_rules,
+            Some("# CLI rules\n".to_string()),
+            "CLI --rules-file should win over TOML rules_file and be loaded"
+        );
+        assert_eq!(
+            config.project_rules_file,
+            Some(cli_path.to_string_lossy().into_owned()),
+            "project_rules_file should reflect the CLI-overridden file"
+        );
+    });
+}
+
+#[test]
+#[serial]
+fn test_load_project_rules_explicit_file() {
+    clean_env();
+    let dir = tempfile::TempDir::new().expect("temp dir");
+    let rules_path = dir.path().join("custom-rules.md");
+    std::fs::write(&rules_path, "# Custom rules\n").expect("write rules file");
+
+    let mut config = Config::empty();
+    config
+        .load_project_rules(dir.path(), true, Some(&rules_path))
+        .expect("load_project_rules should load explicit file");
+
+    assert_eq!(
+        config.project_rules,
+        Some("# Custom rules\n".to_string()),
+        "explicit rules file content should be loaded"
+    );
+    assert_eq!(
+        config.project_rules_file,
+        Some(rules_path.to_string_lossy().into_owned()),
+        "project_rules_file should store the path as given"
+    );
+}
+
+#[test]
+#[serial]
+fn test_load_project_rules_explicit_file_missing() {
+    clean_env();
+    let dir = tempfile::TempDir::new().expect("temp dir");
+    let missing_path = dir.path().join("missing-rules.md");
+
+    let mut config = Config::empty();
+    let result = config.load_project_rules(dir.path(), true, Some(&missing_path));
+
+    assert!(
+        result.is_err(),
+        "missing explicit rules file should return an error"
+    );
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("Rules file not found"),
+        "error should clearly state the rules file is missing: {}",
+        err
+    );
+}
+
+#[test]
+#[serial]
+fn test_load_project_rules_explicit_file_skips_auto_detection() {
+    clean_env();
+    let dir = tempfile::TempDir::new().expect("temp dir");
+    // Create both an auto-detected file and an explicit file
+    std::fs::write(dir.path().join("AGENTS.md"), "# AGENTS rules\n").expect("write AGENTS.md");
+    let explicit_path = dir.path().join("explicit-rules.md");
+    std::fs::write(&explicit_path, "# Explicit rules\n").expect("write explicit rules");
+
+    let mut config = Config::empty();
+    config
+        .load_project_rules(dir.path(), true, Some(&explicit_path))
+        .expect("load_project_rules should succeed");
+
+    assert_eq!(
+        config.project_rules,
+        Some("# Explicit rules\n".to_string()),
+        "explicit file should take precedence over auto-detected AGENTS.md"
+    );
+    assert_eq!(
+        config.project_rules_file,
+        Some(explicit_path.to_string_lossy().into_owned()),
+        "project_rules_file should reflect the explicit file"
+    );
+}
+
+#[test]
+#[serial]
+fn test_load_project_rules_explicit_file_overrides_enabled_false() {
+    clean_env();
+    let dir = tempfile::TempDir::new().expect("temp dir");
+    let explicit_path = dir.path().join("explicit-rules.md");
+    std::fs::write(&explicit_path, "# Explicit rules\n").expect("write explicit rules");
+
+    let mut config = Config::empty();
+    config
+        .load_project_rules(dir.path(), false, Some(&explicit_path))
+        .expect("load_project_rules should load explicit file even when enabled=false");
+
+    assert_eq!(
+        config.project_rules,
+        Some("# Explicit rules\n".to_string()),
+        "explicit rules_file should override project_rules_enabled=false"
+    );
+    assert_eq!(
+        config.project_rules_file,
+        Some(explicit_path.to_string_lossy().into_owned()),
+        "project_rules_file should reflect the explicit file"
+    );
+}
+
+#[test]
+#[serial]
+fn test_load_project_rules_explicit_file_soft_cap() {
+    clean_env();
+    let dir = tempfile::TempDir::new().expect("temp dir");
+    let rules_path = dir.path().join("large-rules.md");
+    let content = "x".repeat(rs_guard::rules::DEFAULT_RULES_CAP_BYTES + 1000);
+    std::fs::write(&rules_path, &content).expect("write large rules file");
+
+    let mut config = Config::empty();
+    config
+        .load_project_rules(dir.path(), true, Some(&rules_path))
+        .expect("load_project_rules should succeed");
+
+    let loaded = config.project_rules.expect("rules should be loaded");
+    assert!(
+        loaded.contains("TRUNCATION WARNING"),
+        "explicit rules file over cap should be truncated with warning banner"
+    );
+    assert!(
+        loaded.len() <= rs_guard::rules::DEFAULT_RULES_CAP_BYTES,
+        "truncated content should fit within the cap"
+    );
 }

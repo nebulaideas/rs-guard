@@ -63,9 +63,11 @@ async fn main() {
     // Resolve and load project rules (AGENTS.md, CLAUDE.md, etc.)
     let project_rules_enabled =
         Config::resolve_project_rules_enabled(args.no_project_rules, toml_project_rules_enabled);
+
     let repo_root = resolve_repo_root();
+    let rules_file = config.rules_file.clone();
     exit_on_error(
-        config.load_project_rules(&repo_root, project_rules_enabled),
+        config.load_project_rules(&repo_root, project_rules_enabled, rules_file.as_deref()),
         "Failed to load project rules",
     );
 
@@ -74,10 +76,16 @@ async fn main() {
         if let (Some(ref rules), Some(ref path)) =
             (&config.project_rules, &config.project_rules_file)
         {
+            let source = if config.rules_file.is_some() {
+                " (--rules-file)"
+            } else {
+                ""
+            };
             eprintln!(
-                "{} Project rules loaded from: {} ({} bytes)",
+                "{} Project rules loaded from: {}{} ({} bytes)",
                 "info:".cyan(),
                 path,
+                source,
                 rules.len()
             );
         }
