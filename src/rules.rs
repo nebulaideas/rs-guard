@@ -578,6 +578,22 @@ where
     }
 }
 
+/// Decides whether the interactive rules file picker should be shown.
+///
+/// The picker is shown only in local mode, when two or more rules files are
+/// detected, no explicit `--rules-file` is set, `--no-project-rules` is not
+/// set, and stdin is a TTY.
+#[must_use]
+pub fn should_show_picker(
+    is_ci: bool,
+    file_count: usize,
+    rules_file: Option<&Path>,
+    no_project_rules: bool,
+    is_tty: bool,
+) -> bool {
+    !is_ci && file_count >= 2 && rules_file.is_none() && !no_project_rules && is_tty
+}
+
 // ---------------------------------------------------------------------------
 // Soft cap truncation logic
 // ---------------------------------------------------------------------------
@@ -1002,6 +1018,62 @@ mod tests {
             result,
             Some(Path::new("AGENTS.md")),
             "selector error should fall back to first match"
+        );
+    }
+
+    #[test]
+    fn test_should_show_picker_all_conditions_met() {
+        assert!(
+            should_show_picker(false, 2, None, false, true),
+            "local mode + 2 files + no override + tty should show picker"
+        );
+    }
+
+    #[test]
+    fn test_should_show_picker_ci_mode_skips() {
+        assert!(
+            !should_show_picker(true, 2, None, false, true),
+            "CI mode should skip picker"
+        );
+    }
+
+    #[test]
+    fn test_should_show_picker_single_file_skips() {
+        assert!(
+            !should_show_picker(false, 1, None, false, true),
+            "single file should not show picker"
+        );
+    }
+
+    #[test]
+    fn test_should_show_picker_explicit_rules_file_skips() {
+        assert!(
+            !should_show_picker(false, 2, Some(Path::new("custom.md")), false, true),
+            "explicit rules_file should skip picker"
+        );
+    }
+
+    #[test]
+    fn test_should_show_picker_no_project_rules_skips() {
+        assert!(
+            !should_show_picker(false, 2, None, true, true),
+            "--no-project-rules should skip picker"
+        );
+    }
+
+    #[test]
+    fn test_should_show_picker_non_tty_skips() {
+        assert!(
+            !should_show_picker(false, 2, None, false, false),
+            "non-TTY should skip picker"
+        );
+    }
+
+    #[test]
+    fn test_should_show_picker_empty_files_skips() {
+        assert!(
+            !should_show_picker(false, 0, None, false, true),
+            "no files should skip picker"
         );
     }
 }

@@ -890,9 +890,11 @@ pub struct Config {
     pub project_rules: Option<String>,
     /// Name of the project rules file that was loaded (e.g., `"AGENTS.md"`).
     ///
-    /// Only the base file name is stored, not the full path. Used for display
-    /// in the "Project Conventions" section header and in the terminal notice.
-    /// `None` when no rules file was found or auto-detection is disabled.
+    /// The path to the loaded project rules file, as given or as detected.
+    /// For auto-detected files this is the repo-relative path; for explicit
+    /// files it is the path provided by the user. Used for display in the
+    /// terminal notice. `None` when no rules file was found or auto-detection
+    /// is disabled.
     pub project_rules_file: Option<String>,
     /// Path to an explicit project rules file requested by the user.
     ///
