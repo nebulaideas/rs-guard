@@ -503,6 +503,26 @@ pub fn detect_project_rules(repo_root: &Path) -> Result<Option<DetectedRules>, R
         .detect()
 }
 
+/// Returns all detected project rules files in priority order.
+///
+/// Unlike [`detect_project_rules`], this does not load file content and returns
+/// every matching file, not just the first. The returned paths are relative to
+/// `repo_root` and ordered by the standard priority list.
+///
+/// # Errors
+///
+/// Returns [`RsGuardError::Config`] if scanning the directory fails.
+pub fn detect_all_rules_files(repo_root: &Path) -> Result<Vec<PathBuf>, RsGuardError> {
+    let detector = RulesDetector::builder()
+        .repo_root(repo_root.to_path_buf())
+        .build()?;
+    Ok(detector
+        .detect_all_files()
+        .into_iter()
+        .map(|p| repo_root.join(p.as_path()))
+        .collect())
+}
+
 /// Loads a specific project rules file with the default soft cap.
 ///
 /// The file path may be relative to the current working directory or absolute.
@@ -528,6 +548,34 @@ pub fn load_rules_file(path: &Path) -> Result<DetectedRules, RsGuardError> {
         RulesFileSize::new(original_size),
         truncated,
     ))
+}
+
+/// Selects a rules file from a list of detected files.
+///
+/// If fewer than two files are detected, or if stdin is not a TTY, the first
+/// file (highest priority) is returned. Otherwise, `select_fn` is invoked with
+/// the display labels and its returned index selects the file. If `select_fn`
+/// errors or returns an invalid index, the first file is used as a safe
+/// fallback.
+///
+/// This function is designed to be testable: production code passes a
+/// `dialoguer::Select`-based closure, while tests pass a mock selector.
+pub fn select_rules_file<F>(files: &[PathBuf], is_tty: bool, select_fn: F) -> Option<&Path>
+where
+    F: FnOnce(&[String]) -> Result<usize, RsGuardError>,
+{
+    if files.is_empty() {
+        return None;
+    }
+    if files.len() < 2 || !is_tty {
+        return files.first().map(PathBuf::as_path);
+    }
+
+    let labels: Vec<String> = files.iter().map(|p| p.display().to_string()).collect();
+    match select_fn(&labels) {
+        Ok(index) => files.get(index).map(PathBuf::as_path),
+        Err(_) => files.first().map(PathBuf::as_path),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -847,5 +895,113 @@ mod tests {
         assert_eq!(candidates[3], PathBuf::from(".gemini/styleguide.md"));
         // Last should be windsurfrules
         assert_eq!(candidates.last().unwrap(), &PathBuf::from(".windsurfrules"));
+    }
+
+    #[test]
+    fn test_detect_all_rules_files_empty() {
+        let dir = TempDir::new().expect("temp dir");
+        let found = detect_all_rules_files(dir.path()).expect("detect should not error");
+        assert!(found.is_empty(), "no rules files should be found");
+    }
+
+    #[test]
+    fn test_detect_all_rules_files_priority_order() {
+        let dir = TempDir::new().expect("temp dir");
+        // Create two files. AGENTS.md has higher priority than CLAUDE.md.
+        fs::write(dir.path().join("CLAUDE.md"), "# Claude\n").expect("write CLAUDE.md");
+        fs::write(dir.path().join("AGENTS.md"), "# Agents\n").expect("write AGENTS.md");
+
+        let found = detect_all_rules_files(dir.path()).expect("detect should not error");
+        assert_eq!(found.len(), 2, "both files should be detected");
+        assert_eq!(
+            found[0],
+            dir.path().join("AGENTS.md"),
+            "AGENTS.md should be first"
+        );
+        assert_eq!(
+            found[1],
+            dir.path().join("CLAUDE.md"),
+            "CLAUDE.md should be second"
+        );
+    }
+
+    #[test]
+    fn test_detect_all_rules_files_single_file() {
+        let dir = TempDir::new().expect("temp dir");
+        fs::write(dir.path().join("CLAUDE.md"), "# Claude\n").expect("write CLAUDE.md");
+
+        let found = detect_all_rules_files(dir.path()).expect("detect should not error");
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0], dir.path().join("CLAUDE.md"));
+    }
+
+    #[test]
+    fn test_detect_all_rules_files_includes_cursor_glob() {
+        let dir = TempDir::new().expect("temp dir");
+        let cursor_dir = dir.path().join(".cursor/rules");
+        fs::create_dir_all(&cursor_dir).expect("create cursor dir");
+        fs::write(cursor_dir.join("a.md"), "# A\n").expect("write a.md");
+        fs::write(cursor_dir.join("b.md"), "# B\n").expect("write b.md");
+
+        let found = detect_all_rules_files(dir.path()).expect("detect should not error");
+        let cursor_a = dir.path().join(".cursor/rules/a.md");
+        let cursor_b = dir.path().join(".cursor/rules/b.md");
+        assert!(
+            found.contains(&cursor_a),
+            "cursor a.md should be in the detected list"
+        );
+        assert!(
+            found.contains(&cursor_b),
+            "cursor b.md should be in the detected list"
+        );
+    }
+
+    #[test]
+    fn test_select_rules_file_empty_returns_none() {
+        let files: Vec<PathBuf> = Vec::new();
+        let result = select_rules_file(&files, true, |_| Ok(0));
+        assert!(result.is_none(), "empty list should return None");
+    }
+
+    #[test]
+    fn test_select_rules_file_single_file_returns_first() {
+        let files = vec![PathBuf::from("AGENTS.md")];
+        let result = select_rules_file(&files, true, |_| panic!("selector should not be called"));
+        assert_eq!(result, Some(Path::new("AGENTS.md")));
+    }
+
+    #[test]
+    fn test_select_rules_file_non_tty_returns_first() {
+        let files = vec![PathBuf::from("AGENTS.md"), PathBuf::from("CLAUDE.md")];
+        let result = select_rules_file(&files, false, |_| panic!("selector should not be called"));
+        assert_eq!(
+            result,
+            Some(Path::new("AGENTS.md")),
+            "non-TTY should use first match"
+        );
+    }
+
+    #[test]
+    fn test_select_rules_file_tty_uses_selector() {
+        let files = vec![PathBuf::from("AGENTS.md"), PathBuf::from("CLAUDE.md")];
+        let result = select_rules_file(&files, true, |_| Ok(1));
+        assert_eq!(
+            result,
+            Some(Path::new("CLAUDE.md")),
+            "TTY should use selector result"
+        );
+    }
+
+    #[test]
+    fn test_select_rules_file_selector_error_falls_back_to_first() {
+        let files = vec![PathBuf::from("AGENTS.md"), PathBuf::from("CLAUDE.md")];
+        let result = select_rules_file(&files, true, |_| {
+            Err(RsGuardError::Config("cancelled".to_string()))
+        });
+        assert_eq!(
+            result,
+            Some(Path::new("AGENTS.md")),
+            "selector error should fall back to first match"
+        );
     }
 }
