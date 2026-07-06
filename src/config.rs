@@ -1206,23 +1206,25 @@ impl Config {
 
     /// Loads project rules from auto-detected AI-agent instruction files.
     ///
-    /// When `enabled` is `false` (from `--no-project-rules`), sets
-    /// `project_rules` to `None` and returns immediately — no file system
-    /// access occurs.
+    /// When `rules_file` is `Some`, the specified file is loaded directly and
+    /// auto-detection is skipped. This takes precedence even when `enabled` is
+    /// `false`, because an explicit file is a stronger signal than a disabled
+    /// auto-detection flag. Only `--no-project-rules` (checked as mutually
+    /// exclusive in [`Config::apply_args`]) fully disables rules loading.
     ///
-    /// When `enabled` is `true` and `rules_file` is `None`, calls
+    /// When `rules_file` is `None` and `enabled` is `false`, sets `project_rules`
+    /// to `None` and returns immediately — no file system access occurs.
+    ///
+    /// When `rules_file` is `None` and `enabled` is `true`, calls
     /// [`crate::rules::detect_project_rules`] to scan for `AGENTS.md`,
     /// `CLAUDE.md`, `.github/copilot-instructions.md`, `.gemini/styleguide.md`,
     /// `.cursor/rules/*.md`, or `.windsurfrules` in priority order. The first
     /// match's content is stored in `project_rules`.
     ///
-    /// When `enabled` is `true` and `rules_file` is `Some`, the specified file
-    /// is loaded directly and auto-detection is skipped.
-    ///
     /// # Arguments
     ///
     /// * `repo_root` — Directory to scan for rules files (usually the git root or CWD).
-    /// * `enabled` — Whether project rules loading is enabled (from
+    /// * `enabled` — Whether project rules auto-detection is enabled (from
     ///   [`Config::resolve_project_rules_enabled`]).
     /// * `rules_file` — Optional explicit rules file path from CLI/env/TOML.
     ///
@@ -1235,14 +1237,18 @@ impl Config {
         enabled: bool,
         rules_file: Option<&Path>,
     ) -> Result<(), RsGuardError> {
+        // An explicit rules_file overrides the enabled flag: if the user went
+        // to the trouble of specifying a file, load it even when
+        // project_rules_enabled is false. Only --no-project-rules (which is
+        // checked as mutually exclusive in apply_args) fully disables rules.
+        if let Some(path) = rules_file {
+            return self.load_explicit_rules_file(path);
+        }
+
         if !enabled {
             self.project_rules = None;
             self.project_rules_file = None;
             return Ok(());
-        }
-
-        if let Some(path) = rules_file {
-            return self.load_explicit_rules_file(path);
         }
 
         match crate::rules::detect_project_rules(repo_root)? {

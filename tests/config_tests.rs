@@ -1932,6 +1932,31 @@ fn test_load_project_rules_explicit_file_skips_auto_detection() {
 
 #[test]
 #[serial]
+fn test_load_project_rules_explicit_file_overrides_enabled_false() {
+    clean_env();
+    let dir = tempfile::TempDir::new().expect("temp dir");
+    let explicit_path = dir.path().join("explicit-rules.md");
+    std::fs::write(&explicit_path, "# Explicit rules\n").expect("write explicit rules");
+
+    let mut config = Config::empty();
+    config
+        .load_project_rules(dir.path(), false, Some(&explicit_path))
+        .expect("load_project_rules should load explicit file even when enabled=false");
+
+    assert_eq!(
+        config.project_rules,
+        Some("# Explicit rules\n".to_string()),
+        "explicit rules_file should override project_rules_enabled=false"
+    );
+    assert_eq!(
+        config.project_rules_file,
+        Some("explicit-rules.md".to_string()),
+        "project_rules_file should reflect the explicit file"
+    );
+}
+
+#[test]
+#[serial]
 fn test_load_project_rules_explicit_file_soft_cap() {
     clean_env();
     let dir = tempfile::TempDir::new().expect("temp dir");

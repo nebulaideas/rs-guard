@@ -65,10 +65,7 @@ async fn main() {
         Config::resolve_project_rules_enabled(args.no_project_rules, toml_project_rules_enabled);
 
     let repo_root = resolve_repo_root();
-    let rules_file = config
-        .rules_file
-        .as_deref()
-        .map(std::path::Path::to_path_buf);
+    let rules_file = config.rules_file.clone();
     exit_on_error(
         config.load_project_rules(&repo_root, project_rules_enabled, rules_file.as_deref()),
         "Failed to load project rules",
