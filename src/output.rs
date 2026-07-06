@@ -39,6 +39,9 @@ pub struct ReviewMetrics {
     pub verdict: String,
     /// Review state.
     pub state: String,
+    /// Project rules file that was loaded (e.g., `"AGENTS.md"`). `None` when no rules file.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub project_rules_file: Option<String>,
 }
 
 /// Metadata about the review run, used for artifact and console output.
@@ -252,6 +255,7 @@ mod tests {
             diff_lines: 150,
             verdict: "POSITIVE".to_string(),
             state: "APPROVE".to_string(),
+            project_rules_file: None,
         };
 
         write_metrics(&metrics, path_str).unwrap();

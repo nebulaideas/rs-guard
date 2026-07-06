@@ -236,16 +236,19 @@ fn effective_base_url(config: &Config) -> &str {
     config.provider_config.base_url.as_deref().unwrap_or("")
 }
 
-/// Obtains an LLM response, either from cache or by calling the provider.
-async fn obtain_llm_response(
+/// Obtains an LLM response with an already-composed prompt.
+async fn obtain_llm_response_with_composed_prompt(
     config: &Config,
     cache: &DiffCache,
     diff_content: &str,
+    composed_prompt: &str,
 ) -> anyhow::Result<(String, bool)> {
     let base_url = effective_base_url(config);
-    if let Some(cached) = cache.get(
+
+    if let Some(cached) = cache.get_with_project_rules(
         diff_content,
-        &config.prompt,
+        composed_prompt,
+        config.project_rules.as_deref(),
         &config.provider,
         &config.model,
         config.variant.as_deref(),
@@ -267,7 +270,7 @@ async fn obtain_llm_response(
     let response = with_retry(
         || async {
             provider
-                .chat_completion(&config.prompt, diff_content, config.temperature)
+                .chat_completion(composed_prompt, diff_content, config.temperature)
                 .await
         },
         config.circuit_breaker.as_ref(),
@@ -286,6 +289,7 @@ async fn obtain_llm_response(
 fn cache_response(
     cache: &DiffCache,
     config: &Config,
+    composed_prompt: &str,
     diff_content: &str,
     llm_response: &str,
     should_cache: bool,
@@ -294,9 +298,10 @@ fn cache_response(
         return;
     }
     log::info!("Caching LLM response for future runs");
-    if let Err(e) = cache.set(
+    if let Err(e) = cache.set_with_project_rules(
         diff_content,
-        &config.prompt,
+        composed_prompt,
+        config.project_rules.as_deref(),
         &config.provider,
         &config.model,
         config.variant.as_deref(),
@@ -367,6 +372,7 @@ fn write_review_outputs(
         diff_lines: diff.line_count,
         verdict: verdict.verdict.clone(),
         state: state.to_string(),
+        project_rules_file: config.project_rules_file.clone(),
     };
 
     let metrics_path =
@@ -582,8 +588,13 @@ pub async fn run_pipeline(
         }
     }
 
+    // Compose the final prompt with project rules layering (before token estimation)
+    let rules_path = config.project_rules_file.as_deref();
+    let composed_prompt =
+        compose_prompt(&config.prompt, config.project_rules.as_deref(), rules_path);
+
     let start = std::time::Instant::now();
-    let estimated_tokens_in = estimate_tokens(&config.prompt) + estimate_tokens(&diff_content);
+    let estimated_tokens_in = estimate_tokens(&composed_prompt) + estimate_tokens(&diff_content);
 
     if let Some(context_window) =
         crate::llm::providers::get_provider_context_window(&config.provider)
@@ -591,7 +602,9 @@ pub async fn run_pipeline(
         check_token_warning(estimated_tokens_in, context_window, &config.provider);
     }
 
-    let (llm_response, should_cache) = obtain_llm_response(&config, &cache, &diff_content).await?;
+    let (llm_response, should_cache) =
+        obtain_llm_response_with_composed_prompt(&config, &cache, &diff_content, &composed_prompt)
+            .await?;
     let latency = start.elapsed();
     let estimated_tokens_out = estimate_tokens(&llm_response);
     let estimated_cost_cents = estimate_cost_cents(
@@ -606,7 +619,14 @@ pub async fn run_pipeline(
     let (verdict, state) = parse_verdict(&llm_response, config.important_threshold)
         .context("Failed to parse verdict from LLM response")?;
 
-    cache_response(&cache, &config, &diff_content, &llm_response, should_cache);
+    cache_response(
+        &cache,
+        &config,
+        &composed_prompt,
+        &diff_content,
+        &llm_response,
+        should_cache,
+    );
 
     log::info!(
         "Verdict: {} (CriticalIssues: {}, SecurityIssues: {}, ImportantIssues: {}, Suggestions: {}) -> State: {}",
@@ -766,6 +786,49 @@ fn default_pricing(provider: &str) -> Option<(f64, f64)> {
         "glm" => None,
         _ => None, // Unknown/custom provider — pricing unknown
     }
+}
+
+/// Composes the final system prompt by layering project rules on top of the base prompt.
+///
+/// When `project_rules` is `Some(content)`, appends a "Project Conventions" section
+/// that instructs the LLM to enforce project-specific rules. When `None`, returns
+/// the base prompt unchanged.
+///
+/// # Arguments
+///
+/// * `base_prompt` — The base review prompt (e.g., the embedded `DEFAULT_PROMPT`).
+/// * `project_rules` — Optional project rules content from `AGENTS.md`, `CLAUDE.md`, etc.
+/// * `rules_file_path` — Optional path of the rules file (for display in the section header).
+///
+/// # Returns
+///
+/// The composed prompt string.
+#[must_use]
+pub fn compose_prompt(
+    base_prompt: &str,
+    project_rules: Option<&str>,
+    rules_file_path: Option<&str>,
+) -> String {
+    let Some(rules) = project_rules else {
+        return base_prompt.to_string();
+    };
+
+    if rules.is_empty() {
+        return base_prompt.to_string();
+    }
+
+    let header = match rules_file_path {
+        Some(path) if !path.is_empty() => format!(" (from {})", path),
+        _ => String::new(),
+    };
+
+    format!(
+        "{}\n\n---\n\n## Project Conventions{}\n\
+         The following project-specific rules MUST be enforced during this review. \
+         When a rule conflicts with the general review guidance above, the project rules take precedence.\n\n\
+         {}",
+        base_prompt, header, rules
+    )
 }
 
 #[cfg(test)]
