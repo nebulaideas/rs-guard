@@ -40,7 +40,8 @@
 
 use crate::error::RsGuardError;
 use std::fmt;
-use std::fs;
+use std::fs::{self, File};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 /// Default soft cap for rules file content: 32 KB (~8k tokens).
@@ -326,20 +327,12 @@ impl RulesDetector {
         for relative_path in candidates {
             let full_path = self.repo_root.join(&relative_path);
             if full_path.is_file() {
-                let content = fs::read_to_string(&full_path).map_err(|e| {
-                    RsGuardError::Config(format!(
-                        "Failed to read rules file {}: {}",
-                        full_path.display(),
-                        e
-                    ))
-                })?;
-                let original_size = content.len();
-                let (truncated_content, truncated) =
-                    apply_soft_cap(content, self.cap_bytes, &relative_path, original_size);
+                let (content, original_size, truncated) =
+                    self.read_with_cap(&full_path, &relative_path)?;
 
                 return Ok(Some(DetectedRules::new(
                     RulesFilePath::new(relative_path),
-                    RulesContent::new(truncated_content),
+                    RulesContent::new(content),
                     RulesFileSize::new(original_size),
                     truncated,
                 )));
@@ -347,6 +340,83 @@ impl RulesDetector {
         }
 
         Ok(None)
+    }
+
+    /// Reads a rules file, loading only up to `cap_bytes + 1` bytes to avoid
+    /// reading unnecessarily large files into memory.
+    ///
+    /// If the file size exceeds the cap, only the first `cap_bytes` bytes are
+    /// read and a truncation warning banner is appended. The `original_size`
+    /// is obtained from file metadata, not from the read content.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RsGuardError::Config`] if the file cannot be opened, read, or
+    /// its metadata cannot be obtained.
+    fn read_with_cap(
+        &self,
+        full_path: &Path,
+        relative_path: &Path,
+    ) -> Result<(String, usize, bool), RsGuardError> {
+        // Get original size from metadata — avoids reading the entire file
+        // just to learn its length.
+        let original_size = fs::metadata(full_path)
+            .map(|m| m.len() as usize)
+            .map_err(|e| {
+                RsGuardError::Config(format!(
+                    "Failed to read rules file metadata {}: {}",
+                    full_path.display(),
+                    e
+                ))
+            })?;
+
+        if original_size <= self.cap_bytes {
+            // File fits within the cap — read it fully
+            let content = fs::read_to_string(full_path).map_err(|e| {
+                RsGuardError::Config(format!(
+                    "Failed to read rules file {}: {}",
+                    full_path.display(),
+                    e
+                ))
+            })?;
+            return Ok((content, original_size, false));
+        }
+
+        // File exceeds the cap — read only up to cap_bytes + 1 byte.
+        // The extra byte lets us confirm the file is indeed larger than the cap
+        // (defensive: metadata size and actual readable content may differ on
+        // some filesystems). We then truncate to fit the banner overhead.
+        let mut file = File::open(full_path).map_err(|e| {
+            RsGuardError::Config(format!(
+                "Failed to open rules file {}: {}",
+                full_path.display(),
+                e
+            ))
+        })?;
+
+        // Read only what we need: cap_bytes + 1 to detect overflow
+        let mut raw_bytes = vec![0u8; self.cap_bytes + 1];
+        let bytes_read = file
+            .read(&mut raw_bytes)
+            .map_err(|e| RsGuardError::Config(format!("Failed to read rules file: {}", e)))?;
+        raw_bytes.truncate(bytes_read);
+
+        // Convert to string — truncate at UTF-8 boundary if we read a
+        // partial multi-byte character at the end of the buffer.
+        let content = match std::str::from_utf8(&raw_bytes) {
+            Ok(s) => s.to_string(),
+            Err(e) => {
+                // Truncate at the last valid UTF-8 boundary
+                let valid_up_to = e.valid_up_to();
+                raw_bytes.truncate(valid_up_to);
+                String::from_utf8(raw_bytes)
+                    .unwrap_or_else(|_| String::from_utf8_lossy(&[]).into_owned())
+            }
+        };
+
+        // Apply the soft cap with banner (subtracts banner overhead from cap)
+        let (result, _) = apply_soft_cap(content, self.cap_bytes, relative_path, original_size);
+        Ok((result, original_size, true))
     }
 
     /// Returns all matching rules files in priority order.
@@ -509,7 +579,11 @@ fn apply_soft_cap(
         return (content, false);
     }
 
-    // Truncate to cap, leaving room for the warning banner + separator
+    // The final output must fit within cap_bytes. Since we append a warning
+    // banner + separator after the truncated body, we must subtract their
+    // combined length from the cap to determine how many bytes of the original
+    // content we can keep. This ensures: body.len() + separator.len() +
+    // banner.len() <= cap_bytes.
     let banner = truncation_banner(file_path, original_size, cap_bytes);
     let separator = "\n\n";
     let overhead = banner.len() + separator.len();
