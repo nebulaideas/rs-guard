@@ -5,6 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0] - Unreleased
+
+### Added
+
+- **Project rules auto-detection** (`src/rules.rs`) — scans the repository root
+  for AI-agent instruction files in fixed priority order:
+  `AGENTS.md`, `CLAUDE.md`, `.github/copilot-instructions.md`,
+  `.gemini/styleguide.md`, `.cursor/rules/*.md` (first alphabetically),
+  `.windsurfrules`. The first match is loaded and layered into the review
+  prompt. Closes #81.
+- **`--no-project-rules` CLI flag**, `RS_GUARD_NO_PROJECT_RULES` environment
+  variable, and `project_rules_enabled` TOML key for opting out of project
+  rules detection. Precedence: CLI flag > env > TOML. Closes #82.
+- **Project rules layering into the review prompt** — loaded rules are appended
+  as a "Project Conventions" section that takes precedence over the base review
+  guidance. Closes #83.
+- **Soft cap (32 KB) for project rules files** with a truncation warning banner
+  informing the LLM when rules have been truncated. Closes #81.
+- **Cache key includes project rules content** so that changes to the rules file
+  invalidate cached LLM responses. Closes #83.
+- **`ReviewMetrics.project_rules_file` field** to record which rules file was
+  active for a review run. Closes #83.
+
+### Improved
+
+- Comprehensive test coverage for project rules auto-detection, priority
+  ordering, soft-cap truncation, opt-out mechanisms, cache invalidation, and
+  backwards compatibility with v1.4.0 prompt files. Closes #84.
+
 ## [1.4.0]
 
 ### Added
