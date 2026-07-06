@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.5.0] - Unreleased
+## [1.5.0] - 2026-07-06
 
 ### Added
 
@@ -36,12 +36,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is not a TTY. Closes #86.
 - **`should_show_picker` and `print_project_rules_notice` helpers** extracted for
   testability, with unit tests covering every branch. Closes #87.
+- **Scaffold commands are rules-aware** — `rs-guard init` scans for project rules
+  files after scaffolding and prints a detection notice or adoption hint.
+  `rs-guard validate-config` reports project rules status (ENABLED/DISABLED),
+  detected/explicit rules file path, and size with TRUNCATED warning. The
+  scaffolded `.reviewer.toml` includes `project_rules_enabled = true` and a
+  commented-out `rules_file` key for discoverability. Closes #89.
 
 ### Improved
 
 - Comprehensive test coverage for project rules auto-detection, priority
   ordering, soft-cap truncation, opt-out mechanisms, cache invalidation, and
   backwards compatibility with v1.4.0 prompt files. Closes #84.
+- `RS_GUARD_NO_PROJECT_RULES` env var disables rules when set to any non-empty
+  value (including `"false"` or `"0"`). This matches the existing pattern for
+  `RS_GUARD_NO_CACHE`. To enable rules via env, leave the variable unset.
 
 ## [1.4.0]
 

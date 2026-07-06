@@ -8,7 +8,7 @@
 
 **rs-guard** is a Rust-based AI code review CLI tool. It fetches Pull Request diffs from GitHub, sends them to an LLM provider for review, parses a structured verdict from the response, and submits the review state (`APPROVE`, `REQUEST_CHANGES`, or `COMMENT`) back to GitHub — all in a single execution.
 
-**Current Status:** Phases 1–7 are complete; v1.5.0 is in progress on `main`. The crate is published on crates.io and registered on crates.ai.
+**Current Status:** Phases 1–7 are complete; v1.5.0 released. The crate is published on crates.io and registered on crates.ai.
 
 **Project Rules Injection (v1.5.0):** rs-guard auto-detects AI-agent instruction files (`AGENTS.md`, `CLAUDE.md`, `.github/copilot-instructions.md`, `.gemini/styleguide.md`, `.cursor/rules/*.md`, `.windsurfrules`) and layers them into the review prompt as a "Project Conventions" section. Users can opt out with `--no-project-rules`, override with `--rules-file`, or select interactively in local mode when multiple files exist.
 
