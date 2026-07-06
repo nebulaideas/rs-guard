@@ -134,6 +134,14 @@ pub struct ReviewArgs {
     /// the repository. Always exits with code 0.
     #[arg(long, help = "Dry-run mode: review without submitting or blocking")]
     pub dry_run: bool,
+
+    /// Disable auto-detection of project rules files (AGENTS.md, CLAUDE.md, etc.).
+    ///
+    /// When set, rs-guard will not scan for or inject project-specific coding
+    /// conventions into the review prompt. Overrides `RS_GUARD_NO_PROJECT_RULES`
+    /// env var and `project_rules_enabled` TOML key.
+    #[arg(long, help = "Disable project rules auto-detection and injection")]
+    pub no_project_rules: bool,
 }
 
 /// Project type used by `rs-guard init` to select appropriate templates.
@@ -292,6 +300,25 @@ mod tests {
     fn test_dry_run_flag_default_false() {
         let cli = Cli::parse_from(["rs-guard"]);
         assert!(!cli.review.dry_run);
+        assert!(cli.command.is_none());
+    }
+
+    #[test]
+    fn test_no_project_rules_flag_default_false() {
+        let cli = Cli::parse_from(["rs-guard"]);
+        assert!(
+            !cli.review.no_project_rules,
+            "no_project_rules should default to false"
+        );
+    }
+
+    #[test]
+    fn test_no_project_rules_flag_parsing() {
+        let cli = Cli::parse_from(["rs-guard", "--no-project-rules"]);
+        assert!(
+            cli.review.no_project_rules,
+            "--no-project-rules should set no_project_rules to true"
+        );
         assert!(cli.command.is_none());
     }
 

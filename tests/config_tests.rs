@@ -31,6 +31,7 @@ const ALL_TEST_ENV_VARS: &[&str] = &[
     "PR_NUMBER",
     "REPO_FULL_NAME",
     "RS_GUARD_DIFF_FILE",
+    "RS_GUARD_NO_PROJECT_RULES",
 ];
 
 /// Removes all known env vars to guarantee a clean slate.
@@ -1461,4 +1462,262 @@ fn test_toml_provider_type_mismatch_gives_helpful_error() {
         err.contains("provider = \"deepseek\""),
         "error should show the correct string syntax: {err}"
     );
+}
+
+// ---------------------------------------------------------------------------
+// Project Rules — Config.project_rules field + load_project_rules method
+// ---------------------------------------------------------------------------
+
+#[test]
+#[serial]
+fn test_config_empty_has_project_rules_none() {
+    clean_env();
+    let config = Config::empty();
+    assert!(
+        config.project_rules.is_none(),
+        "Config::empty() should have project_rules = None"
+    );
+}
+
+#[test]
+#[serial]
+fn test_load_project_rules_disabled_sets_none() {
+    clean_env();
+    let mut config = Config::empty();
+    config
+        .load_project_rules(std::path::Path::new("."), false)
+        .expect("load_project_rules should not error when disabled");
+    assert!(
+        config.project_rules.is_none(),
+        "project_rules should be None when disabled"
+    );
+}
+
+#[test]
+#[serial]
+fn test_load_project_rules_enabled_no_files_sets_none() {
+    clean_env();
+    // Use a temp dir with no rules files
+    let dir = tempfile::TempDir::new().expect("temp dir");
+    let mut config = Config::empty();
+    config
+        .load_project_rules(dir.path(), true)
+        .expect("load_project_rules should not error when no files found");
+    assert!(
+        config.project_rules.is_none(),
+        "project_rules should be None when no rules files exist"
+    );
+}
+
+#[test]
+#[serial]
+fn test_load_project_rules_enabled_finds_agents_md() {
+    clean_env();
+    let dir = tempfile::TempDir::new().expect("temp dir");
+    std::fs::write(dir.path().join("AGENTS.md"), "# Project rules\n").expect("write AGENTS.md");
+
+    let mut config = Config::empty();
+    config
+        .load_project_rules(dir.path(), true)
+        .expect("load_project_rules should succeed");
+
+    assert_eq!(
+        config.project_rules.as_deref(),
+        Some("# Project rules\n"),
+        "project_rules should contain the AGENTS.md content"
+    );
+}
+
+#[test]
+#[serial]
+fn test_load_project_rules_enabled_finds_claude_md() {
+    clean_env();
+    let dir = tempfile::TempDir::new().expect("temp dir");
+    std::fs::write(dir.path().join("CLAUDE.md"), "# Claude rules\n").expect("write CLAUDE.md");
+
+    let mut config = Config::empty();
+    config
+        .load_project_rules(dir.path(), true)
+        .expect("load_project_rules should succeed");
+
+    assert_eq!(
+        config.project_rules.as_deref(),
+        Some("# Claude rules\n"),
+        "project_rules should contain the CLAUDE.md content"
+    );
+}
+
+#[test]
+#[serial]
+fn test_load_project_rules_does_not_overwrite_existing_when_disabled() {
+    clean_env();
+    let dir = tempfile::TempDir::new().expect("temp dir");
+    std::fs::write(dir.path().join("AGENTS.md"), "# Rules\n").expect("write AGENTS.md");
+
+    let mut config = Config::empty();
+    config.project_rules = Some("pre-existing rules".to_string());
+
+    // When disabled, should set to None even if a file exists
+    config
+        .load_project_rules(dir.path(), false)
+        .expect("should not error");
+
+    assert!(
+        config.project_rules.is_none(),
+        "disabled should clear project_rules to None even if file exists"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Project Rules — TOML config: project_rules_enabled key
+// ---------------------------------------------------------------------------
+
+#[test]
+#[serial]
+fn test_toml_project_rules_enabled_default_is_true() {
+    clean_env();
+    // When project_rules_enabled is not set in TOML, it defaults to true
+    let file = write_toml(br#"provider = "deepseek""#);
+    let toml = load_toml_config(file.path())
+        .expect("should parse")
+        .unwrap();
+    assert!(
+        toml.project_rules_enabled.is_none(),
+        "project_rules_enabled should be None when not set (defaults to true at resolution)"
+    );
+}
+
+#[test]
+#[serial]
+fn test_toml_project_rules_enabled_explicit_false() {
+    clean_env();
+    let file = write_toml(br#"project_rules_enabled = false"#);
+    let toml = load_toml_config(file.path())
+        .expect("should parse")
+        .unwrap();
+    assert_eq!(
+        toml.project_rules_enabled,
+        Some(false),
+        "project_rules_enabled should be explicitly false"
+    );
+}
+
+#[test]
+#[serial]
+fn test_toml_project_rules_enabled_explicit_true() {
+    clean_env();
+    let file = write_toml(br#"project_rules_enabled = true"#);
+    let toml = load_toml_config(file.path())
+        .expect("should parse")
+        .unwrap();
+    assert_eq!(
+        toml.project_rules_enabled,
+        Some(true),
+        "project_rules_enabled should be explicitly true"
+    );
+}
+
+#[test]
+#[serial]
+fn test_toml_project_rules_enabled_is_known_key() {
+    clean_env();
+    // project_rules_enabled should be in KNOWN_TOP_LEVEL_KEYS — no error
+    let file = write_toml(br#"project_rules_enabled = true"#);
+    let result = load_toml_config(file.path());
+    assert!(
+        result.is_ok(),
+        "project_rules_enabled should be a recognized key, not an unknown key error"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Project Rules — Precedence: CLI > env > TOML > default (enabled)
+// ---------------------------------------------------------------------------
+
+#[test]
+#[serial]
+fn test_resolve_project_rules_enabled_default_true() {
+    clean_env();
+    // No CLI, no env, no TOML → enabled
+    let enabled = Config::resolve_project_rules_enabled(false, None);
+    assert!(
+        enabled,
+        "default should be enabled when no flags/env/toml set"
+    );
+}
+
+#[test]
+#[serial]
+fn test_resolve_project_rules_enabled_cli_false_overrides() {
+    clean_env();
+    // CLI --no-project-rules overrides everything
+    let enabled = Config::resolve_project_rules_enabled(true, None);
+    assert!(
+        !enabled,
+        "CLI --no-project-rules should override to disabled"
+    );
+}
+
+#[test]
+#[serial]
+fn test_resolve_project_rules_enabled_env_overrides_toml() {
+    clean_env();
+    with_env(&[("RS_GUARD_NO_PROJECT_RULES", "1")], || {
+        // Env says disable, TOML says enable → env wins
+        let enabled = Config::resolve_project_rules_enabled(false, Some(true));
+        assert!(
+            !enabled,
+            "RS_GUARD_NO_PROJECT_RULES env should override TOML enabled=true"
+        );
+    });
+}
+
+#[test]
+#[serial]
+fn test_resolve_project_rules_enabled_toml_false_when_no_cli_no_env() {
+    clean_env();
+    // TOML says disable, no CLI, no env → TOML wins
+    let enabled = Config::resolve_project_rules_enabled(false, Some(false));
+    assert!(
+        !enabled,
+        "TOML project_rules_enabled=false should disable when no CLI/env override"
+    );
+}
+
+#[test]
+#[serial]
+fn test_resolve_project_rules_enabled_cli_false_overrides_env_enable() {
+    clean_env();
+    // CLI says disable, env not set, TOML says enable → CLI wins
+    let enabled = Config::resolve_project_rules_enabled(true, Some(true));
+    assert!(
+        !enabled,
+        "CLI --no-project-rules should override TOML enabled=true"
+    );
+}
+
+#[test]
+#[serial]
+fn test_resolve_project_rules_enabled_env_non_empty_disables() {
+    clean_env();
+    with_env(&[("RS_GUARD_NO_PROJECT_RULES", "yes")], || {
+        let enabled = Config::resolve_project_rules_enabled(false, None);
+        assert!(
+            !enabled,
+            "any non-empty RS_GUARD_NO_PROJECT_RULES value should disable"
+        );
+    });
+}
+
+#[test]
+#[serial]
+fn test_resolve_project_rules_enabled_env_empty_does_not_disable() {
+    clean_env();
+    with_env(&[("RS_GUARD_NO_PROJECT_RULES", "")], || {
+        let enabled = Config::resolve_project_rules_enabled(false, None);
+        assert!(
+            enabled,
+            "empty RS_GUARD_NO_PROJECT_RULES should NOT disable"
+        );
+    });
 }
