@@ -95,14 +95,12 @@ pub fn path_matches_glob(pattern: &str, path: &str) -> bool {
     if let Some(suf) = pattern.strip_prefix("*.") {
         return path.ends_with(&format!(".{}", suf)) || path.ends_with(suf);
     }
-    if pattern.starts_with("**/") {
-        let rest = &pattern[3..];
+    if let Some(rest) = pattern.strip_prefix("**/") {
         if path == rest || path.ends_with(&format!("/{}", rest)) {
             return true;
         }
         // **/foo/** style
-        if rest.ends_with("/**") {
-            let mid = &rest[..rest.len() - 3];
+        if let Some(mid) = rest.strip_suffix("/**") {
             return path == mid
                 || path.starts_with(&format!("{}/", mid))
                 || path.contains(&format!("/{}/", mid));
@@ -113,8 +111,7 @@ pub fn path_matches_glob(pattern: &str, path: &str) -> bool {
             return path.contains(rest) || path.ends_with(rest);
         }
     }
-    if pattern.ends_with("/**") {
-        let prefix = &pattern[..pattern.len() - 3];
+    if let Some(prefix) = pattern.strip_suffix("/**") {
         return path == prefix || path.starts_with(&format!("{}/", prefix));
     }
     // Segment * wildcard: src/*/foo.rs
@@ -716,6 +713,7 @@ mod tests {
         assert!(matches!(result, Err(RsGuardError::DiffTooLarge { .. })));
     }
 
+    #[test]
     fn test_validate_diff_content_valid() {
         assert!(validate_diff_content("diff --git a/f.rs b/f.rs\n").is_ok());
         assert!(validate_diff_content("@@ -1,3 +1,4 @@\n").is_ok());
