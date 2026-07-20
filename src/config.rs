@@ -231,6 +231,9 @@ pub struct TomlConfig {
     /// `AGENTS.md`, `CLAUDE.md`, etc. Can be overridden by the `--rules-file`
     /// CLI flag or `RS_GUARD_RULES_FILE` env var.
     pub rules_file: Option<String>,
+    /// Output format: `"text"` or `"json"`.
+    #[serde(default)]
+    pub output_format: Option<String>,
 }
 
 /// Returns `None` when `result_format` is unset or blank so static provider
@@ -262,6 +265,7 @@ const KNOWN_TOP_LEVEL_KEYS: &[&str] = &[
     "important_issues_threshold",
     "project_rules_enabled",
     "rules_file",
+    "output_format",
 ];
 
 /// Returns the closest known top-level key to `unknown`, or `None` if no
@@ -745,6 +749,40 @@ fn split_csv_paths(raw: &str) -> Vec<String> {
         .collect()
 }
 
+/// Parses output format from a string (`text` / `json`), case-insensitive.
+fn parse_output_format(raw: &str) -> Result<crate::cli::OutputFormat, RsGuardError> {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "text" => Ok(crate::cli::OutputFormat::Text),
+        "json" => Ok(crate::cli::OutputFormat::Json),
+        other => Err(RsGuardError::Config(format!(
+            "invalid output_format {:?}: expected \"text\" or \"json\"",
+            other
+        ))),
+    }
+}
+
+/// Resolves output format from env / TOML before CLI apply.
+///
+/// Precedence for this helper: `RS_GUARD_FORMAT` > TOML `output_format` > `text`.
+/// Clap also binds `RS_GUARD_FORMAT` to `--format`; `apply_args` always sets
+/// `Config.output_format` from `args.format` afterwards so CLI/env via clap wins
+/// over the TOML value loaded here when both are present.
+fn resolve_output_format(
+    toml: Option<&TomlConfig>,
+) -> Result<crate::cli::OutputFormat, RsGuardError> {
+    if let Ok(v) = std::env::var("RS_GUARD_FORMAT") {
+        if !v.is_empty() {
+            return parse_output_format(&v);
+        }
+    }
+    if let Some(ref v) = toml.and_then(|t| t.output_format.clone()) {
+        if !v.is_empty() {
+            return parse_output_format(v);
+        }
+    }
+    Ok(crate::cli::OutputFormat::Text)
+}
+
 /// Resolves the explicit rules file path from env > toml.
 ///
 /// Returns `None` when neither `RS_GUARD_RULES_FILE` nor the `rules_file`
@@ -885,6 +923,8 @@ pub struct Config {
     pub no_cache: bool,
     /// Dry-run mode: run pipeline without submitting or blocking.
     pub dry_run: bool,
+    /// Output format for the pipeline result (`text` or `json`).
+    pub output_format: crate::cli::OutputFormat,
     /// Custom cache directory path.
     pub cache_dir: Option<String>,
     /// Optional circuit breaker configuration.
@@ -965,6 +1005,7 @@ impl Config {
             model_set_via_cli: false,
             no_cache: false,
             dry_run: false,
+            output_format: crate::cli::OutputFormat::Text,
             cache_dir: None,
             circuit_breaker: None,
             pricing: None,
@@ -1062,6 +1103,7 @@ impl Config {
         let pricing = toml.as_ref().and_then(|t| t.pricing.clone());
         let auto_gitignore = toml.as_ref().and_then(|t| t.auto_gitignore).unwrap_or(true);
         let rules_file = resolve_rules_file_from_env_and_toml(toml.as_ref());
+        let output_format = resolve_output_format(toml.as_ref())?;
 
         Ok(Config {
             provider,
@@ -1082,6 +1124,7 @@ impl Config {
             model_set_via_cli: false,
             no_cache: false,
             dry_run: false,
+            output_format,
             cache_dir,
             circuit_breaker,
             pricing,
@@ -1214,6 +1257,8 @@ impl Config {
         if let Some(ref raw) = args.exclude_paths {
             self.exclude_paths = split_csv_paths(raw);
         }
+        // clap resolves --format / RS_GUARD_FORMAT; always apply (default Text is fine).
+        self.output_format = args.format;
         if let Some(threshold) = args.important_threshold {
             self.important_threshold = threshold;
         }
@@ -2083,5 +2128,68 @@ mod tests {
         assert!(config.pricing.is_some());
         let pricing = config.pricing.as_ref().unwrap();
         assert_eq!(pricing.get("deepseek").unwrap().input_per_million, 10);
+    }
+
+    #[test]
+    fn test_parse_output_format_valid_and_invalid() {
+        use crate::cli::OutputFormat;
+        assert_eq!(parse_output_format("text").unwrap(), OutputFormat::Text);
+        assert_eq!(parse_output_format("JSON").unwrap(), OutputFormat::Json);
+        assert_eq!(parse_output_format(" json ").unwrap(), OutputFormat::Json);
+        let err = parse_output_format("yaml").unwrap_err();
+        assert!(err.to_string().contains("invalid output_format"));
+    }
+
+    #[test]
+    fn test_resolve_output_format_default_text() {
+        use crate::cli::OutputFormat;
+        let _guard = ENV_MUTEX.lock().unwrap();
+        std::env::remove_var("RS_GUARD_FORMAT");
+        assert_eq!(resolve_output_format(None).unwrap(), OutputFormat::Text);
+    }
+
+    #[test]
+    fn test_resolve_output_format_from_env() {
+        use crate::cli::OutputFormat;
+        let _guard = ENV_MUTEX.lock().unwrap();
+        std::env::set_var("RS_GUARD_FORMAT", "json");
+        let fmt = resolve_output_format(None).unwrap();
+        std::env::remove_var("RS_GUARD_FORMAT");
+        assert_eq!(fmt, OutputFormat::Json);
+    }
+
+    #[test]
+    fn test_resolve_output_format_from_toml_when_env_unset() {
+        use crate::cli::OutputFormat;
+        let _guard = ENV_MUTEX.lock().unwrap();
+        std::env::remove_var("RS_GUARD_FORMAT");
+        let toml = TomlConfig {
+            output_format: Some("json".into()),
+            ..Default::default()
+        };
+        assert_eq!(resolve_output_format(Some(&toml)).unwrap(), OutputFormat::Json);
+    }
+
+    #[test]
+    fn test_resolve_output_format_env_overrides_toml() {
+        use crate::cli::OutputFormat;
+        let _guard = ENV_MUTEX.lock().unwrap();
+        std::env::set_var("RS_GUARD_FORMAT", "text");
+        let toml = TomlConfig {
+            output_format: Some("json".into()),
+            ..Default::default()
+        };
+        let fmt = resolve_output_format(Some(&toml)).unwrap();
+        std::env::remove_var("RS_GUARD_FORMAT");
+        assert_eq!(fmt, OutputFormat::Text);
+    }
+
+    #[test]
+    fn test_resolve_output_format_invalid_env() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        std::env::set_var("RS_GUARD_FORMAT", "yaml");
+        let err = resolve_output_format(None).unwrap_err();
+        std::env::remove_var("RS_GUARD_FORMAT");
+        assert!(err.to_string().contains("invalid output_format"));
     }
 }

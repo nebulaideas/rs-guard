@@ -158,6 +158,18 @@ rs-guard --dry-run
 
 ---
 
+## JSON output (`--format json`)
+
+Emit a single JSON object on stdout (progress on stderr):
+
+```bash
+rs-guard --format json --dry-run
+# or
+export RS_GUARD_FORMAT=json
+```
+
+Fields include `verdict`, severity counts, `state`, `provider`, `model`, token/latency/cost estimates, `diff_lines`, `project_rules_file`, and `dry_run`. Default remains `text`.
+
 ## Exit Codes
 
 | Code | Meaning                            | When                                              |
