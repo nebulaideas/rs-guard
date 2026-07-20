@@ -10,7 +10,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **Diff raw-fetch safety ceiling:** unfiltered fetches allow up to **10 MB / 100k lines**;
-  user `max_diff_*` apply after path filters (defaults **500 KB / 5000 lines** on this feature).
+  user `max_diff_*` apply after path filters (defaults **500 KB / 5000 lines**).
+
+### Deprecated
+
+- **`CriticalBugs` metadata field** — still accepted as an alias for `CriticalIssues`
+  when `CriticalIssues` is absent (value preferred from `CriticalIssues` when both
+  appear). A warning is logged whenever the legacy field is present in a metadata
+  block. Prefer `CriticalIssues:` in custom prompts. Removal planned for a future
+  major release. See #107.
 
 ## [1.5.0] - 2026-07-06
 

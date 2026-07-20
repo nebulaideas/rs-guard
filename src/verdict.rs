@@ -10,6 +10,7 @@
 
 use crate::error::RsGuardError;
 use regex::Regex;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::LazyLock;
 
 /// Maximum bytes to scan after the metadata marker for fields.
@@ -20,6 +21,9 @@ const METADATA_SCAN_WINDOW: usize = 4096;
 
 /// Marker string that identifies the verdict metadata block.
 const METADATA_MARKER: &str = "[RS_GUARD_VERDICT_METADATA]";
+
+/// Ensures the CriticalBugs deprecation warning is emitted at most once per process.
+static CRITICAL_BUGS_WARNED: AtomicBool = AtomicBool::new(false);
 
 /// Compiled regex for counting critical bug tags.
 static CRITICAL_RE: LazyLock<Regex> = LazyLock::new(|| {
@@ -155,10 +159,26 @@ pub fn parse_metadata_block(response: &str) -> Option<Verdict> {
     let scan_window = &section[..METADATA_SCAN_WINDOW.min(section.len())];
 
     let verdict = extract_field(scan_window, "Verdict:")?.to_string();
-    // Accept both "CriticalIssues:" (new format) and "CriticalBugs:" (legacy format)
-    // so that user-supplied prompt files using the old field name continue to work.
-    let critical_issues: u32 = extract_field(scan_window, "CriticalIssues:")
-        .or_else(|| extract_field(scan_window, "CriticalBugs:"))
+    // Accept both "CriticalIssues:" (current) and "CriticalBugs:" (legacy alias).
+    // Prefer CriticalIssues when both are present.
+    let critical_from_issues = extract_field(scan_window, "CriticalIssues:");
+    let critical_from_bugs = extract_field(scan_window, "CriticalBugs:");
+    if critical_from_bugs.is_some() {
+        // Log at most once per process to avoid spam if many responses are parsed.
+        if !CRITICAL_BUGS_WARNED.swap(true, Ordering::Relaxed) {
+            if critical_from_issues.is_some() {
+                log::warn!(
+                    "Deprecated metadata field 'CriticalBugs:' detected alongside                      'CriticalIssues:'; 'CriticalBugs:' is ignored. Prefer                      'CriticalIssues:' only. CriticalBugs will be removed in a                      future major release."
+                );
+            } else {
+                log::warn!(
+                    "Deprecated metadata field 'CriticalBugs:' detected; use                      'CriticalIssues:' instead. CriticalBugs will be removed in                      a future major release."
+                );
+            }
+        }
+    }
+    let critical_issues: u32 = critical_from_issues
+        .or(critical_from_bugs)
         .and_then(|v| v.parse().ok())
         .unwrap_or(0);
     let security_issues: u32 = extract_field(scan_window, "SecurityIssues:")
@@ -465,7 +485,7 @@ mod tests {
 
     #[test]
     fn test_legacy_critical_issues_field_still_parses() {
-        // Regression: user-supplied prompts using old CriticalBugs: field must keep working
+        // Legacy CriticalBugs: alias still parses (deprecated; prefer CriticalIssues:)
         let response =
             "[RS_GUARD_VERDICT_METADATA]\nVerdict: NEGATIVE\nCriticalBugs: 2\nSecurityIssues: 1";
         let verdict = parse_metadata_block(response).unwrap();
