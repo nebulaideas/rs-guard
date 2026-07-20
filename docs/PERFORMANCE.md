@@ -147,22 +147,24 @@ binaries are published, prefer a direct download over `cargo install`.)
 
 ## Caching
 
-rs-guard caches LLM responses keyed on `(diff, prompt, provider, model,
-temperature)` in `.rs-guard/cache/` (SHA-256). Re-running on an unchanged diff
-with `--no-cache` unset is a cache hit and skips the LLM call entirely — the
-single biggest performance lever for repeated runs.
+rs-guard caches LLM responses keyed on a SHA-256 over all parameters that affect
+the outgoing request (see list below) in `.rs-guard/cache/`. Re-running on an
+unchanged input with `--no-cache` unset is a cache hit and skips the LLM call
+entirely — the single biggest performance lever for repeated runs.
 
 ### Cache key components
 
 The cache key includes **all parameters that affect the outgoing request**:
 - `diff_content` (SHA-256 hash)
 - `prompt` (SHA-256 hash)
+- `project_rules` content (SHA-256 hash when present; presence-tagged when absent)
 - `provider` name
 - `model` identifier
 - `variant` (if set)
 - `temperature`
 - `base_url` (effective, including overrides)
 - `max_tokens` (if set)
+- `result_format` (if set; presence-tagged when absent)
 
 **Important:** Changing any of these parameters will cause a cache miss. For
 example:
@@ -170,6 +172,8 @@ example:
   entry from the real provider endpoint (prevents cache poisoning)
 - Changing `max_tokens` will create a separate cache entry (prevents serving
   truncated responses to full-length requests)
+- Changing project rules content invalidates the cache for that configuration
+- Changing `result_format` creates a separate cache entry (response shape may differ)
 
 This ensures cache correctness but means that configuration changes will
 invalidate cached responses.
