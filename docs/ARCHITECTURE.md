@@ -219,6 +219,9 @@ All provider base URLs are validated against a per-provider allowlist before any
 
 ### Secret Handling
 
+- **Outbound diffs** are scrubbed with `redact_secrets_with_count` before cache keying
+  and the LLM call. Matches are replaced with `[REDACTED]`; the count is stored in
+  metrics and shown in local mode.
 - API keys are read from environment variables, never from the diff content or command-line arguments.
 - The `redact.rs` module strips known secret patterns from LLM responses before writing artifacts or submitting reviews.
 - `log_redacted()` truncates sensitive content in debug log output.

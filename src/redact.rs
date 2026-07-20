@@ -32,16 +32,35 @@ static SECRET_PATTERNS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
 /// Redacts sensitive information from the given text.
 ///
 /// Scans for common secret patterns (Bearer tokens, API keys, GitHub PATs,
-/// private keys, passwords) and replaces matches with `[REDACTED]`.
+/// private keys, passwords) and replaces matches with [`REDACTED`].
 ///
 /// This function is safe to call on any text — if no secrets are found,
 /// the original text is returned unchanged (via clone).
 pub fn redact_secrets(text: &str) -> String {
+    redact_secrets_with_count(text).0
+}
+
+/// Redacts sensitive information and returns how many secret matches were replaced.
+///
+/// The count is the number of regex matches replaced across all secret patterns
+/// (a single multi-line private key counts as one match). When no secrets are
+/// found, returns a clone of the input and `0`.
+///
+/// Used for outbound redaction of diffs before LLM calls so callers can surface
+/// a user-facing notice and record metrics.
+pub fn redact_secrets_with_count(text: &str) -> (String, usize) {
     let mut result = text.to_string();
+    let mut count = 0usize;
     for pattern in SECRET_PATTERNS.iter() {
-        result = pattern.replace_all(&result, REDACTED).to_string();
+        let mut replaced = 0usize;
+        let next = pattern.replace_all(&result, |_caps: &regex::Captures| {
+            replaced += 1;
+            REDACTED
+        });
+        count += replaced;
+        result = next.into_owned();
     }
-    result
+    (result, count)
 }
 
 /// Redacts secrets from text and logs the result at debug level.
@@ -100,6 +119,33 @@ mod tests {
         let result = redact_secrets(text);
         assert!(!result.contains("super_secret_123"));
         assert!(result.contains(REDACTED));
+    }
+
+    #[test]
+    fn test_redact_secrets_with_count_no_secrets() {
+        let text = "This is a normal code review comment.";
+        let (out, count) = redact_secrets_with_count(text);
+        assert_eq!(out, text);
+        assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn test_redact_secrets_with_count_multiple_types() {
+        let text = "token: ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij\napi_key=sk-1234567890abcdefghij\npassword: super_secret_123";
+        let (out, count) = redact_secrets_with_count(text);
+        assert!(!out.contains("ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij"));
+        assert!(!out.contains("sk-1234567890abcdefghij"));
+        assert!(!out.contains("super_secret_123"));
+        assert!(count >= 2, "expected multiple redactions, got {count}");
+    }
+
+    #[test]
+    fn test_redact_secrets_with_count_in_diff_added_line() {
+        let text = "diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -1 +1,2 @@\n+api_key=sk-abcdefghijklmnopqrst\n keep";
+        let (out, count) = redact_secrets_with_count(text);
+        assert!(!out.contains("sk-abcdefghijklmnopqrst"));
+        assert!(out.contains(REDACTED));
+        assert_eq!(count, 1);
     }
 
     #[test]

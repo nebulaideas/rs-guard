@@ -43,6 +43,8 @@ pub struct ReviewMetrics {
     /// Project rules file that was loaded (e.g., `"AGENTS.md"`). `None` when no rules file.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub project_rules_file: Option<String>,
+    /// Number of secret patterns redacted from the outbound diff before the LLM call.
+    pub secrets_redacted_count: u32,
 }
 
 /// Metadata about the review run, used for artifact and console output.
@@ -291,6 +293,7 @@ mod tests {
             verdict: "POSITIVE".to_string(),
             state: "APPROVE".to_string(),
             project_rules_file: None,
+            secrets_redacted_count: 0,
         };
 
         write_metrics(&metrics, path_str).unwrap();
