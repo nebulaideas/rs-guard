@@ -202,3 +202,26 @@ States are color-coded:
 - **Progress indicators** — In local mode, rs-guard prints
   `🤖 Calling {provider} ({model})...` before the LLM call and
   `✅ Response received (N chars)` after, so you know the tool is working.
+
+
+## Branch-range review (`--base`)
+
+By default local mode reviews **staged** changes (`git diff --cached`).
+
+To review an entire branch the way a PR would look, pass a base ref:
+
+```bash
+rs-guard --base origin/main
+# or
+export RS_GUARD_BASE=main
+rs-guard
+```
+
+This runs `git diff <base>...HEAD` (three-dot, merge-base aware). The base ref
+must not be empty, contain whitespace/NUL, or start with `-` (rejected to avoid
+git option injection). Precedence:
+
+1. `--diff-file` (always wins)
+2. CI mode (ignores `--base`)
+3. `--base` / `RS_GUARD_BASE` / TOML `diff_base`
+4. Staged diff (`git diff --cached`)

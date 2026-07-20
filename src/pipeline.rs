@@ -8,7 +8,7 @@ use crate::cli::OutputFormat;
 use crate::config::{CiConfig, Config};
 use crate::diff::{
     apply_path_filters, chunk_diff_with_params, fetch_file_diff, fetch_local_diff, fetch_pr_diff,
-    DiffLimits, DiffResult,
+    fetch_range_diff, DiffLimits, DiffResult,
 };
 use crate::error::RsGuardError;
 use crate::github::{dismiss_previous_reviews, submit_review};
@@ -179,6 +179,26 @@ async fn fetch_diff(config: &Config, diff_file: Option<&str>) -> anyhow::Result<
                 Ok(DiffFetchOutcome::Diff(diff))
             }
             Err(e) => handle_diff_fetch_error(e, DiffSource::Ci { config: ci_config })
+                .await
+                .map(Into::into),
+        }
+    } else if let Some(ref base) = config.diff_base {
+        log::info!(
+            "Local mode with --base: fetching range diff {}...HEAD",
+            base
+        );
+        match fetch_range_diff(base) {
+            Ok(diff) => {
+                log::info!(
+                    "Fetched range diff ({}...HEAD): {} lines ({} bytes)",
+                    base,
+                    diff.line_count,
+                    diff.size_bytes
+                );
+                log_redacted("Diff content", &diff.content);
+                Ok(DiffFetchOutcome::Diff(diff))
+            }
+            Err(e) => handle_diff_fetch_error(e, DiffSource::Local)
                 .await
                 .map(Into::into),
         }

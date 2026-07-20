@@ -558,6 +558,61 @@ pub fn fetch_local_diff(limits: DiffLimits) -> Result<DiffResult, RsGuardError> 
     build_local_diff_result(content, limits)
 }
 
+/// Fetches a three-dot range diff via `git diff <base>...HEAD`.
+///
+/// Three-dot syntax is merge-base aware and closer to GitHub PR diffs than
+/// two-dot `base..HEAD`. Used for local branch reviews when `--base` /
+/// `RS_GUARD_BASE` / `diff_base` is set.
+///
+/// # Errors
+///
+/// Returns [`RsGuardError::Io`] if the git command fails to spawn,
+/// [`RsGuardError::Config`] if git exits non-zero (e.g. unknown ref),
+/// or the same validation errors as [`build_local_diff_result`].
+pub fn fetch_range_diff(base: &str) -> Result<DiffResult, RsGuardError> {
+    if base.trim().is_empty() {
+        return Err(RsGuardError::Config(
+            "diff base ref must not be empty".to_string(),
+        ));
+    }
+
+    // Reject characters / shapes that could break the range argument or be
+    // interpreted as git options (defense in depth).
+    if base.starts_with('-') {
+        return Err(RsGuardError::Config(format!(
+            "invalid diff base ref {:?}: must not start with '-' (looks like a git option)",
+            base
+        )));
+    }
+    if base.chars().any(|c| c.is_whitespace() || c == ' ') {
+        return Err(RsGuardError::Config(format!(
+            "invalid diff base ref {:?}: whitespace or null bytes are not allowed",
+            base
+        )));
+    }
+
+    // Three-dot range as a single argv element. Leading '-' already rejected so
+    // git will not treat the range as an option. Trailing `--` ends option parsing
+    // before any accidental pathspecs.
+    let range = format!("{}...HEAD", base);
+    let output = std::process::Command::new("git")
+        .args(["diff", &range, "--"])
+        .output()
+        .map_err(RsGuardError::Io)?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(RsGuardError::Config(format!(
+            "git diff {} failed: {}",
+            range, stderr
+        )));
+    }
+
+    let content = String::from_utf8_lossy(&output.stdout).to_string();
+    // User size limits applied later via apply_path_filters; use raw-fetch ceiling here.
+    build_local_diff_result(content, DiffLimits::raw_fetch())
+}
+
 /// Builds a [`DiffResult`] from already-validated local diff content.
 ///
 /// Extracted from [`fetch_local_diff`] to enable unit testing of content
@@ -1305,5 +1360,29 @@ diff --git a/README.md b/README.md\n--- a/README.md\n+++ b/README.md\n@@ -1 +1,2
         .expect("excluding lockfile should leave a reviewable src diff");
         assert!(filtered.content.contains("src/main.rs"));
         assert!(!filtered.content.contains("Cargo.lock"));
+    }
+
+    #[test]
+    fn test_fetch_range_diff_rejects_empty_base() {
+        let err = fetch_range_diff("").unwrap_err();
+        assert!(err.to_string().contains("empty"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn test_fetch_range_diff_rejects_whitespace_base() {
+        let err = fetch_range_diff("main branch").unwrap_err();
+        assert!(
+            err.to_string().contains("invalid"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn test_fetch_range_diff_rejects_leading_dash() {
+        let err = fetch_range_diff("-p").unwrap_err();
+        assert!(
+            err.to_string().contains("must not start with '-'"),
+            "unexpected error: {err}"
+        );
     }
 }

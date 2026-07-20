@@ -134,6 +134,18 @@ pub struct ReviewArgs {
     )]
     pub diff_file: Option<String>,
 
+    /// Git base ref for local three-dot range review (`git diff <base>...HEAD`).
+    ///
+    /// When set in local mode (and `--diff-file` is not set), rs-guard reviews
+    /// the range against HEAD instead of staged changes. Ignored in CI mode.
+    /// Overrides `RS_GUARD_BASE` and TOML `diff_base`.
+    #[arg(
+        long = "base",
+        env = "RS_GUARD_BASE",
+        help = "Local mode: review git diff <base>...HEAD instead of staged changes"
+    )]
+    pub base: Option<String>,
+
     /// Bypass the response cache, forcing an LLM API call.
     #[arg(long, help = "Bypass response cache and force LLM API call")]
     pub no_cache: bool,
