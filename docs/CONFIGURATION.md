@@ -323,3 +323,15 @@ cooldown_secs = 60
 input_per_million = 15
 output_per_million = 60
 ```
+
+
+## Diff size and path filters (v1.6)
+
+| Key | Env | Default | Description |
+|-----|-----|---------|-------------|
+| `max_diff_bytes` | `RS_GUARD_MAX_DIFF_BYTES` | `512000` (500 KB) | Hard reject above this size |
+| `max_diff_lines` | `RS_GUARD_MAX_DIFF_LINES` | `5000` | Hard reject above this line count |
+| `include_paths` | `RS_GUARD_INCLUDE_PATHS` (comma-separated) | all | Only keep matching file sections |
+| `exclude_paths` | `RS_GUARD_EXCLUDE_PATHS` (comma-separated) | none | Drop matching file sections |
+
+Path filters run after fetch and before the size check re-validation / chunking, so excluding large lockfiles can keep a PR reviewable.
