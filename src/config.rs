@@ -2167,7 +2167,10 @@ mod tests {
             output_format: Some("json".into()),
             ..Default::default()
         };
-        assert_eq!(resolve_output_format(Some(&toml)).unwrap(), OutputFormat::Json);
+        assert_eq!(
+            resolve_output_format(Some(&toml)).unwrap(),
+            OutputFormat::Json
+        );
     }
 
     #[test]
