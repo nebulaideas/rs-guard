@@ -349,6 +349,7 @@ fn write_review_outputs(
     estimated_tokens_out: usize,
     latency: std::time::Duration,
     estimated_cost_cents: Option<f64>,
+    secrets_redacted_count: u32,
 ) -> anyhow::Result<()> {
     let sanitized_response = redact_secrets(llm_response);
 
@@ -373,6 +374,7 @@ fn write_review_outputs(
         verdict: verdict.verdict.clone(),
         state: state.to_string(),
         project_rules_file: config.project_rules_file.clone(),
+        secrets_redacted_count,
     };
 
     let metrics_path =
@@ -579,6 +581,22 @@ pub async fn run_pipeline(
     let (diff_content, was_chunked, removed_lines) =
         chunk_diff(&diff, config.chunk_head_lines, config.chunk_tail_lines);
 
+    // Redact secrets from the outbound diff before cache keying and the LLM call.
+    let (diff_content, secrets_redacted_count) =
+        crate::redact::redact_secrets_with_count(&diff_content);
+    if secrets_redacted_count > 0 {
+        log::info!(
+            "Redacted {} secret pattern(s) from diff before LLM call",
+            secrets_redacted_count
+        );
+        if !config.is_ci {
+            eprintln!(
+                "🔒 {} secret pattern(s) redacted from diff before review",
+                secrets_redacted_count
+            );
+        }
+    }
+
     let cache = build_cache(&config)?;
 
     // Only auto-add to .gitignore in local mode — CI environments are often read-only
@@ -659,6 +677,7 @@ pub async fn run_pipeline(
         estimated_tokens_out,
         latency,
         estimated_cost_cents,
+        u32::try_from(secrets_redacted_count).unwrap_or(u32::MAX),
     )?;
 
     if config.is_ci {

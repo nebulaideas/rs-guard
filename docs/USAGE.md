@@ -648,6 +648,13 @@ rs-guard --diff-file /path/to/test.diff --no-cache
 
 ---
 
+## Outbound secret redaction
+
+Before sending a diff to the LLM, rs-guard redacts common secret patterns (API keys,
+GitHub tokens, private keys, password assignments, etc.). In local mode a notice is
+printed when redactions occur. The count is recorded in `rs-guard-metrics.json` as
+`secrets_redacted_count`.
+
 ## Troubleshooting
 
 ### `GITHUB_TOKEN is required in CI mode`
