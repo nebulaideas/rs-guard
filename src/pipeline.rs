@@ -4,6 +4,7 @@
 //! workflow, and [`PipelineResult`] for communicating exit intentions.
 
 use crate::cache::{CacheConfig, DiffCache};
+use crate::cli::OutputFormat;
 use crate::config::{CiConfig, Config};
 use crate::diff::{
     apply_path_filters, chunk_diff_with_params, fetch_file_diff, fetch_local_diff, fetch_pr_diff,
@@ -13,8 +14,8 @@ use crate::error::RsGuardError;
 use crate::github::{dismiss_previous_reviews, submit_review};
 use crate::llm::factory::create_provider;
 use crate::output::{
-    print_colored_summary, write_artifact, write_metrics, ReviewConfig, ReviewMetrics,
-    ARTIFACT_FILENAME, METRICS_FILENAME,
+    print_colored_summary, write_artifact, write_json_result, write_metrics, ReviewConfig,
+    ReviewMetrics, ReviewResultJson, ARTIFACT_FILENAME, METRICS_FILENAME,
 };
 use crate::redact::{log_redacted, redact_secrets};
 use crate::retry::with_retry;
@@ -271,7 +272,12 @@ async fn obtain_llm_response_with_composed_prompt(
     }
 
     if !config.is_ci {
-        println!("🤖 Calling {} ({})...", config.provider, config.model);
+        let msg = format!("🤖 Calling {} ({})...", config.provider, config.model);
+        if config.output_format == OutputFormat::Json {
+            eprintln!("{}", msg);
+        } else {
+            println!("{}", msg);
+        }
     }
     let provider = create_provider(&config.provider, &config.api_key, &config.provider_config)
         .context("Failed to create LLM provider")?;
@@ -288,7 +294,12 @@ async fn obtain_llm_response_with_composed_prompt(
     .context("LLM API call failed")?;
 
     if !config.is_ci {
-        println!("✅ Response received ({} chars)", response.len());
+        let msg = format!("✅ Response received ({} chars)", response.len());
+        if config.output_format == OutputFormat::Json {
+            eprintln!("{}", msg);
+        } else {
+            println!("{}", msg);
+        }
     }
 
     Ok((response, !config.no_cache))
@@ -509,16 +520,18 @@ async fn handle_ci_output(
     };
 
     submit_ci_review(config, state, &review_body).await?;
-    print_ci_summary(
-        config,
-        diff,
-        verdict,
-        state,
-        estimated_tokens_in,
-        estimated_tokens_out,
-        latency,
-        estimated_cost_cents,
-    );
+    if config.output_format == OutputFormat::Text {
+        print_ci_summary(
+            config,
+            diff,
+            verdict,
+            state,
+            estimated_tokens_in,
+            estimated_tokens_out,
+            latency,
+            estimated_cost_cents,
+        );
+    }
 
     Ok(PipelineResult::Success)
 }
@@ -542,24 +555,28 @@ fn handle_local_output(
     }
 
     let sanitized_response = redact_secrets(llm_response);
-    print_colored_summary(
-        &sanitized_response,
-        verdict,
-        state,
-        review_config,
-        &mut std::io::stdout(),
-    )
-    .context("Failed to print review summary")?;
+    if config.output_format == OutputFormat::Text {
+        print_colored_summary(
+            &sanitized_response,
+            verdict,
+            state,
+            review_config,
+            &mut std::io::stdout(),
+        )
+        .context("Failed to print review summary")?;
+    }
 
     if config.dry_run {
-        println!(
-            "\n🔍 DRY RUN — would exit with: {}",
-            if *state == ReviewState::RequestChanges {
-                "2 (ReviewBlocked)"
-            } else {
-                "0 (Success)"
-            }
-        );
+        if config.output_format == OutputFormat::Text {
+            println!(
+                "\n🔍 DRY RUN — would exit with: {}",
+                if *state == ReviewState::RequestChanges {
+                    "2 (ReviewBlocked)"
+                } else {
+                    "0 (Success)"
+                }
+            );
+        }
         Ok(PipelineResult::Success)
     } else if *state == ReviewState::RequestChanges {
         Ok(PipelineResult::ReviewBlocked)
@@ -704,6 +721,29 @@ pub async fn run_pipeline(
         estimated_cost_cents,
         u32::try_from(secrets_redacted_count).unwrap_or(u32::MAX),
     )?;
+
+    if config.output_format == OutputFormat::Json {
+        let json = ReviewResultJson {
+            verdict: verdict.verdict.clone(),
+            critical_issues: verdict.critical_issues,
+            security_issues: verdict.security_issues,
+            important_issues: verdict.important_issues,
+            suggestions: verdict.suggestions,
+            state: state.to_string(),
+            provider: config.provider.clone(),
+            model: config.model.clone(),
+            variant: config.variant.clone(),
+            estimated_tokens_in,
+            estimated_tokens_out,
+            latency_secs: latency.as_secs_f64(),
+            estimated_cost_cents,
+            diff_lines: diff.line_count,
+            project_rules_file: config.project_rules_file.clone(),
+            dry_run: config.dry_run,
+        };
+        write_json_result(&json, &mut std::io::stdout())
+            .context("Failed to write JSON review result")?;
+    }
 
     if config.is_ci {
         handle_ci_output(

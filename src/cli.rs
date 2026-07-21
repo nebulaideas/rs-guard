@@ -3,6 +3,16 @@
 use clap::{Parser, Subcommand, ValueEnum};
 use std::path::PathBuf;
 
+/// Machine-readable vs human terminal output for the review pipeline.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum, Default)]
+pub enum OutputFormat {
+    /// Colored / human-readable summaries (default).
+    #[default]
+    Text,
+    /// Single JSON object on stdout.
+    Json,
+}
+
 /// Top-level CLI entry point for rs-guard.
 ///
 /// Supports subcommands for setup automation while preserving the original
@@ -166,6 +176,20 @@ pub struct ReviewArgs {
         help = "Comma-separated path exclude globs (e.g. **/Cargo.lock,vendor/**)"
     )]
     pub exclude_paths: Option<String>,
+    /// Output format: `text` (default) or `json`.
+    ///
+    /// JSON emits one object to stdout with verdict, counts, state, and metrics.
+    /// Progress lines go to stderr so stdout stays machine-parseable.
+    ///
+    /// When omitted, falls back to TOML `output_format` then `text`.
+    /// `RS_GUARD_FORMAT` is handled by clap (same as `--format`).
+    #[arg(
+        long = "format",
+        env = "RS_GUARD_FORMAT",
+        value_enum,
+        help = "Output format: text or json [default: text]"
+    )]
+    pub format: Option<OutputFormat>,
 
     /// Disable auto-detection of project rules files (AGENTS.md, CLAUDE.md, etc.).
     ///

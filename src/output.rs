@@ -47,6 +47,57 @@ pub struct ReviewMetrics {
     pub secrets_redacted_count: u32,
 }
 
+/// Machine-readable review result for `--format json`.
+#[derive(Debug, Clone, Serialize)]
+pub struct ReviewResultJson {
+    /// Parsed verdict string (`POSITIVE` / `NEGATIVE`).
+    pub verdict: String,
+    /// Critical issue count.
+    pub critical_issues: u32,
+    /// Security issue count.
+    pub security_issues: u32,
+    /// Important issue count.
+    pub important_issues: u32,
+    /// Suggestion count.
+    pub suggestions: u32,
+    /// Review state (`APPROVE` / `REQUEST_CHANGES` / `COMMENT`).
+    pub state: String,
+    /// LLM provider name.
+    pub provider: String,
+    /// Model identifier.
+    pub model: String,
+    /// Optional model variant.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub variant: Option<String>,
+    /// Estimated input tokens.
+    pub estimated_tokens_in: usize,
+    /// Estimated output tokens.
+    pub estimated_tokens_out: usize,
+    /// Latency in seconds.
+    pub latency_secs: f64,
+    /// Estimated cost in cents, if known.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub estimated_cost_cents: Option<f64>,
+    /// Diff line count.
+    pub diff_lines: usize,
+    /// Active project rules file path, if any.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub project_rules_file: Option<String>,
+    /// Whether this run was a dry-run.
+    pub dry_run: bool,
+}
+
+/// Writes a single JSON review result object to `out` (typically stdout).
+///
+/// # Errors
+///
+/// Returns I/O or serialization errors.
+pub fn write_json_result(result: &ReviewResultJson, out: &mut impl Write) -> std::io::Result<()> {
+    serde_json::to_writer(&mut *out, result)?;
+    writeln!(out)?;
+    Ok(())
+}
+
 /// Metadata about the review run, used for artifact and console output.
 #[derive(Debug, Clone)]
 pub struct ReviewConfig {
@@ -596,5 +647,35 @@ mod tests {
             output.contains("info:"),
             "notice should include info prefix"
         );
+    }
+
+    #[test]
+    fn test_write_json_result_roundtrip() {
+        let result = ReviewResultJson {
+            verdict: "POSITIVE".into(),
+            critical_issues: 0,
+            security_issues: 0,
+            important_issues: 1,
+            suggestions: 2,
+            state: "COMMENT".into(),
+            provider: "deepseek".into(),
+            model: "deepseek-v4-flash".into(),
+            variant: None,
+            estimated_tokens_in: 100,
+            estimated_tokens_out: 50,
+            latency_secs: 1.5,
+            estimated_cost_cents: Some(0.02),
+            diff_lines: 42,
+            project_rules_file: None,
+            dry_run: true,
+        };
+        let mut buf = Vec::new();
+        write_json_result(&result, &mut buf).unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&buf).unwrap();
+        assert_eq!(v["verdict"], "POSITIVE");
+        assert_eq!(v["state"], "COMMENT");
+        assert_eq!(v["important_issues"], 1);
+        assert_eq!(v["dry_run"], true);
+        assert_eq!(v["diff_lines"], 42);
     }
 }
