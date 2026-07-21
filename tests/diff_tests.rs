@@ -1,4 +1,4 @@
-use rs_guard::diff::fetch_pr_diff;
+use rs_guard::diff::{fetch_pr_diff, DiffLimits};
 use wiremock::matchers::{header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -22,6 +22,7 @@ async fn test_fetch_diff_success() {
         "test-repo",
         42,
         "test-token",
+        DiffLimits::default(),
     )
     .await;
     assert!(result.is_ok());
@@ -54,6 +55,7 @@ async fn test_fetch_diff_rate_limited_then_success() {
         "test-repo",
         42,
         "test-token",
+        DiffLimits::default(),
     )
     .await;
     assert!(result.is_ok());
@@ -75,6 +77,7 @@ async fn test_fetch_diff_not_found() {
         "test-repo",
         999,
         "test-token",
+        DiffLimits::default(),
     )
     .await;
     assert!(result.is_err());
@@ -98,6 +101,7 @@ async fn test_fetch_diff_empty() {
         "test-repo",
         42,
         "test-token",
+        DiffLimits::default(),
     )
     .await;
     assert!(result.is_err());
@@ -122,6 +126,7 @@ async fn test_fetch_diff_rejects_json_body() {
         "test-repo",
         42,
         "test-token",
+        DiffLimits::default(),
     )
     .await;
     assert!(result.is_err());

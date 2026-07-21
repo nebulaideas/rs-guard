@@ -6,7 +6,8 @@
 use crate::cache::{CacheConfig, DiffCache};
 use crate::config::{CiConfig, Config};
 use crate::diff::{
-    chunk_diff_with_params, fetch_file_diff, fetch_local_diff, fetch_pr_diff, DiffResult,
+    apply_path_filters, chunk_diff_with_params, fetch_file_diff, fetch_local_diff, fetch_pr_diff,
+    DiffLimits, DiffResult,
 };
 use crate::error::RsGuardError;
 use crate::github::{dismiss_previous_reviews, submit_review};
@@ -127,10 +128,17 @@ enum DiffFetchOutcome {
 /// Reads from `diff_file` when provided, otherwise fetches from GitHub in CI
 /// mode or from the local git index in local mode. Empty or oversized diffs
 /// produce an early [`PipelineResult`] rather than an error.
+fn config_diff_limits(config: &Config) -> DiffLimits {
+    DiffLimits {
+        max_bytes: config.max_diff_bytes,
+        max_lines: config.max_diff_lines,
+    }
+}
+
 async fn fetch_diff(config: &Config, diff_file: Option<&str>) -> anyhow::Result<DiffFetchOutcome> {
     if let Some(path) = diff_file {
         log::info!("Reading diff from file: {}", path);
-        match fetch_file_diff(path) {
+        match fetch_file_diff(path, DiffLimits::raw_fetch()) {
             Ok(diff) => {
                 log::info!(
                     "Read diff from file: {} lines ({} bytes)",
@@ -156,6 +164,7 @@ async fn fetch_diff(config: &Config, diff_file: Option<&str>) -> anyhow::Result<
             &ci_config.repo_name,
             ci_config.pr_number,
             &ci_config.github_token,
+            DiffLimits::raw_fetch(),
         )
         .await
         {
@@ -174,7 +183,7 @@ async fn fetch_diff(config: &Config, diff_file: Option<&str>) -> anyhow::Result<
         }
     } else {
         log::info!("Local mode detected. Fetching staged diff...");
-        match fetch_local_diff() {
+        match fetch_local_diff(DiffLimits::raw_fetch()) {
             Ok(diff) => {
                 log::info!(
                     "Fetched local diff: {} lines ({} bytes)",
@@ -573,9 +582,25 @@ pub async fn run_pipeline(
     config: Config,
     diff_file: Option<&str>,
 ) -> anyhow::Result<PipelineResult> {
+    // `Complete` is an intentional early exit (empty / too-large / handled fetch
+    // errors) — not a successful diff ready for filtering.
     let diff = match fetch_diff(&config, diff_file).await? {
         DiffFetchOutcome::Diff(d) => d,
         DiffFetchOutcome::Complete(result) => return Ok(result),
+    };
+
+    let limits = config_diff_limits(&config);
+    let diff = match apply_path_filters(diff, &config.include_paths, &config.exclude_paths, limits)
+    {
+        Ok(d) => d,
+        Err(e) => {
+            let source = if let Some(path) = diff_file {
+                DiffSource::File(path)
+            } else {
+                DiffSource::Local
+            };
+            return handle_diff_fetch_error(e, source).await;
+        }
     };
 
     let (diff_content, was_chunked, removed_lines) =

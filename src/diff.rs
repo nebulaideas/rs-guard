@@ -8,11 +8,58 @@ use crate::http::{build_github_http_client, github_diff_headers, validate_github
 use crate::retry::with_retry_simple;
 use std::borrow::Cow;
 
-/// Maximum allowed diff size in bytes (100 KB).
-const MAX_DIFF_BYTES: usize = 100 * 1024;
+/// Default maximum allowed diff size in bytes (500 KB).
+///
+/// Raised from 100 KB in v1.6 so typical monorepo PRs can be reviewed; override
+/// via config / CLI when needed.
+pub const DEFAULT_MAX_DIFF_BYTES: usize = 500 * 1024;
 
-/// Maximum allowed diff line count.
-const MAX_DIFF_LINES: usize = 1500;
+/// Default maximum allowed diff line count.
+pub const DEFAULT_MAX_DIFF_LINES: usize = 5_000;
+
+/// Absolute safety ceiling for *unfiltered* raw fetches.
+///
+/// User-facing [`DiffLimits`] are enforced only after path include/exclude
+/// filtering so monorepo lockfiles can be dropped before the size gate.
+/// This higher ceiling still bounds memory for pathological diffs.
+pub const RAW_FETCH_MAX_DIFF_BYTES: usize = 10 * 1024 * 1024; // 10 MB
+/// Absolute safety ceiling for unfiltered raw fetch line counts.
+pub const RAW_FETCH_MAX_DIFF_LINES: usize = 100_000;
+
+/// User-facing size/line limits for an accepted (post-filter) diff.
+///
+/// Distinct from [`DiffLimits::raw_fetch`], which only bounds the unfiltered
+/// download. Configure via `max_diff_bytes` / `max_diff_lines`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DiffLimits {
+    /// Maximum size in bytes.
+    pub max_bytes: usize,
+    /// Maximum line count.
+    pub max_lines: usize,
+}
+
+impl Default for DiffLimits {
+    fn default() -> Self {
+        Self {
+            max_bytes: DEFAULT_MAX_DIFF_BYTES,
+            max_lines: DEFAULT_MAX_DIFF_LINES,
+        }
+    }
+}
+
+impl DiffLimits {
+    /// Limits used only for raw network/file fetch before path filtering.
+    ///
+    /// User-facing limits are applied in [`apply_path_filters`] after
+    /// include/exclude so large lockfiles can be dropped first.
+    #[must_use]
+    pub const fn raw_fetch() -> Self {
+        Self {
+            max_bytes: RAW_FETCH_MAX_DIFF_BYTES,
+            max_lines: RAW_FETCH_MAX_DIFF_LINES,
+        }
+    }
+}
 
 /// HTTP request timeout for diff fetching.
 const REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
@@ -41,6 +88,208 @@ pub struct DiffResult {
     pub size_bytes: usize,
     /// Number of lines in the diff.
     pub line_count: usize,
+}
+
+/// Validates diff size against the configured limits.
+fn check_diff_limits(content: &str, limits: DiffLimits) -> Result<(), RsGuardError> {
+    let size_bytes = content.len();
+    let line_count = content.lines().count();
+    if size_bytes > limits.max_bytes || line_count > limits.max_lines {
+        return Err(RsGuardError::DiffTooLarge {
+            size_bytes,
+            line_count,
+        });
+    }
+    Ok(())
+}
+
+/// Returns true if `path` matches a simple glob pattern.
+///
+/// Supported constructs (not full gitignore):
+/// - exact path match (`src/main.rs`)
+/// - basename / suffix (`Cargo.lock`, `*.lock`)
+/// - directory prefix (`src/**`)
+/// - any-depth suffix (`**/Cargo.lock`, `**/foo*`)
+/// - single `*` segment wildcard (`src/*/lib.rs`)
+///
+/// Matching is case-sensitive; paths are compared with `/` separators and a
+/// leading `./` is stripped from both pattern and path.
+/// Counts `*` wildcards that are not part of a `**` sequence.
+fn count_single_star_wildcards(pattern: &str) -> usize {
+    let bytes = pattern.as_bytes();
+    let mut i = 0;
+    let mut count = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'*' {
+            if i + 1 < bytes.len() && bytes[i + 1] == b'*' {
+                i += 2;
+            } else {
+                count += 1;
+                i += 1;
+            }
+        } else {
+            i += 1;
+        }
+    }
+    count
+}
+
+/// Returns true if `path` matches a simple glob pattern.
+///
+/// Supported constructs (not full gitignore):
+/// - exact path match (`src/main.rs`)
+/// - basename / suffix (`Cargo.lock`, `*.lock`)
+/// - directory prefix (`src/**`)
+/// - any-depth suffix (`**/Cargo.lock`, `**/foo*`)
+/// - single `*` segment wildcard (`src/*/lib.rs`)
+///
+/// Patterns with more than one single-`*` wildcard never match.
+/// Matching is case-sensitive; paths use `/` separators; leading `./` is stripped.
+pub fn path_matches_glob(pattern: &str, path: &str) -> bool {
+    let path = path.trim_start_matches("./");
+    let pattern = pattern.trim_start_matches("./");
+    // Bare `*` / `**` match every path (documented in CONFIGURATION.md).
+    if pattern == "**" || pattern == "*" {
+        return true;
+    }
+    // Only a single single-star wildcard is supported (e.g. `**/foo*`, `src/*/a.rs`).
+    // Patterns like `**/foo*bar*` are rejected (no match) to avoid silent mis-parsing.
+    if count_single_star_wildcards(pattern) > 1 {
+        return false;
+    }
+    if pattern == path {
+        return true;
+    }
+    // Extension suffix: *.lock
+    if let Some(suf) = pattern.strip_prefix("*.") {
+        return path.ends_with(&format!(".{}", suf));
+    }
+    if let Some(rest) = pattern.strip_prefix("**/") {
+        // **/foo/** directory containment
+        if let Some(mid) = rest.strip_suffix("/**") {
+            return path == mid
+                || path.starts_with(&format!("{}/", mid))
+                || path.contains(&format!("/{}/", mid));
+        }
+        // **/foo* — final path component only
+        if rest.contains('*') {
+            let parts: Vec<&str> = rest.splitn(2, '*').collect();
+            if parts.len() == 2 {
+                let (pre, post) = (parts[0], parts[1]);
+                let file = path.rsplit('/').next().unwrap_or(path);
+                return file.starts_with(pre) && file.ends_with(post);
+            }
+            return false;
+        }
+        // **/name — basename at any depth
+        return path == rest || path.ends_with(&format!("/{}", rest));
+    }
+    if let Some(prefix) = pattern.strip_suffix("/**") {
+        return path == prefix || path.starts_with(&format!("{}/", prefix));
+    }
+    // Single `*` spanning exactly one path segment: src/*/lib.rs
+    if pattern.contains('*') {
+        return match_single_star_segment(pattern, path);
+    }
+    // Basename-only patterns (no '/'): match final component.
+    // Path patterns with '/' are exact-match only (handled above).
+    if !pattern.contains('/') {
+        return path.rsplit('/').next() == Some(pattern);
+    }
+    false
+}
+
+/// Matches `pre*post` where the wildcard spans exactly one path segment.
+fn match_single_star_segment(pattern: &str, path: &str) -> bool {
+    let parts: Vec<&str> = pattern.splitn(2, '*').collect();
+    if parts.len() != 2 {
+        return false;
+    }
+    let (pre, post) = (parts[0], parts[1]);
+    if !path.starts_with(pre) || !path.ends_with(post) {
+        return false;
+    }
+    let mid_end = path.len().saturating_sub(post.len());
+    if mid_end < pre.len() {
+        return false;
+    }
+    let mid = &path[pre.len()..mid_end];
+    !mid.is_empty() && !mid.contains('/')
+}
+
+/// Whether a file path should be kept given include/exclude patterns.
+///
+/// Empty `include` means "include all". Exclude is applied after include.
+pub fn path_allowed(path: &str, include: &[String], exclude: &[String]) -> bool {
+    if !include.is_empty() && !include.iter().any(|p| path_matches_glob(p, path)) {
+        return false;
+    }
+    if exclude.iter().any(|p| path_matches_glob(p, path)) {
+        return false;
+    }
+    true
+}
+
+/// Extracts the `b/` path from a `diff --git a/... b/...` header line.
+fn path_from_diff_git_header(line: &str) -> Option<String> {
+    let rest = line.strip_prefix("diff --git ")?;
+    // Split into a/ and b/ tokens; prefer b/ path
+    let mut b_path = None;
+    for tok in rest.split_whitespace() {
+        if let Some(p) = tok.strip_prefix("b/") {
+            b_path = Some(p.to_string());
+        } else if let Some(p) = tok.strip_prefix("a/") {
+            b_path = b_path.or(Some(p.to_string()));
+        }
+    }
+    b_path
+}
+
+/// Filters a unified diff by include/exclude path patterns.
+///
+/// File sections are split on `diff --git` headers. Sections whose path is not
+/// allowed are dropped. When both include and exclude are empty, returns the
+/// original content unchanged.
+pub fn filter_diff_by_paths(content: &str, include: &[String], exclude: &[String]) -> String {
+    if include.is_empty() && exclude.is_empty() {
+        return content.to_string();
+    }
+
+    let mut out = String::new();
+    let mut current = String::new();
+    let mut current_path: Option<String> = None;
+
+    fn flush(
+        out: &mut String,
+        current: &mut String,
+        path: &Option<String>,
+        include: &[String],
+        exclude: &[String],
+    ) {
+        if current.is_empty() {
+            return;
+        }
+        let keep = match path {
+            Some(p) => path_allowed(p, include, exclude),
+            None => true,
+        };
+        if keep {
+            out.push_str(current);
+        }
+        current.clear();
+    }
+
+    for line in content.split_inclusive('\n') {
+        if line.starts_with("diff --git ") {
+            flush(&mut out, &mut current, &current_path, include, exclude);
+            current_path = path_from_diff_git_header(line.trim_end());
+            current.push_str(line);
+        } else {
+            current.push_str(line);
+        }
+    }
+    flush(&mut out, &mut current, &current_path, include, exclude);
+    out
 }
 
 /// Validates that the response body looks like a diff and not a JSON error.
@@ -183,6 +432,7 @@ pub async fn fetch_pr_diff(
     repo: &str,
     pr_number: u64,
     token: &str,
+    limits: DiffLimits,
 ) -> Result<DiffResult, RsGuardError> {
     validate_github_base_url(base_url)?;
 
@@ -237,16 +487,10 @@ pub async fn fetch_pr_diff(
     }
 
     validate_diff_content(&response)?;
+    check_diff_limits(&response, limits)?;
 
     let size_bytes = response.len();
     let line_count = response.lines().count();
-
-    if size_bytes > MAX_DIFF_BYTES || line_count > MAX_DIFF_LINES {
-        return Err(RsGuardError::DiffTooLarge {
-            size_bytes,
-            line_count,
-        });
-    }
 
     Ok(DiffResult {
         content: response,
@@ -266,7 +510,7 @@ pub async fn fetch_pr_diff(
 /// be read, [`RsGuardError::EmptyDiff`] if the file is empty,
 /// [`RsGuardError::InvalidDiffContent`] if the content does not look
 /// like a diff, or [`RsGuardError::DiffTooLarge`] if it exceeds size limits.
-pub fn fetch_file_diff(path: &str) -> Result<DiffResult, RsGuardError> {
+pub fn fetch_file_diff(path: &str, limits: DiffLimits) -> Result<DiffResult, RsGuardError> {
     let content = std::fs::read_to_string(path)
         .map_err(|e| RsGuardError::Config(format!("Failed to read diff file '{}': {}", path, e)))?;
 
@@ -275,16 +519,10 @@ pub fn fetch_file_diff(path: &str) -> Result<DiffResult, RsGuardError> {
     }
 
     validate_diff_content(&content)?;
+    check_diff_limits(&content, limits)?;
 
     let size_bytes = content.len();
     let line_count = content.lines().count();
-
-    if size_bytes > MAX_DIFF_BYTES || line_count > MAX_DIFF_LINES {
-        return Err(RsGuardError::DiffTooLarge {
-            size_bytes,
-            line_count,
-        });
-    }
 
     Ok(DiffResult {
         content,
@@ -302,7 +540,7 @@ pub fn fetch_file_diff(path: &str) -> Result<DiffResult, RsGuardError> {
 /// [`RsGuardError::EmptyDiff`] if there are no staged changes,
 /// [`RsGuardError::InvalidDiffContent`] if the output does not look like a diff,
 /// or [`RsGuardError::DiffTooLarge`] if the diff exceeds size limits.
-pub fn fetch_local_diff() -> Result<DiffResult, RsGuardError> {
+pub fn fetch_local_diff(limits: DiffLimits) -> Result<DiffResult, RsGuardError> {
     let output = std::process::Command::new("git")
         .args(["diff", "--cached"])
         .output()
@@ -317,7 +555,7 @@ pub fn fetch_local_diff() -> Result<DiffResult, RsGuardError> {
     }
 
     let content = String::from_utf8_lossy(&output.stdout).to_string();
-    build_local_diff_result(content)
+    build_local_diff_result(content, limits)
 }
 
 /// Builds a [`DiffResult`] from already-validated local diff content.
@@ -329,25 +567,46 @@ pub fn fetch_local_diff() -> Result<DiffResult, RsGuardError> {
 ///
 /// Returns [`RsGuardError::EmptyDiff`], [`RsGuardError::InvalidDiffContent`],
 /// or [`RsGuardError::DiffTooLarge`] based on the content.
-pub(crate) fn build_local_diff_result(content: String) -> Result<DiffResult, RsGuardError> {
+pub(crate) fn build_local_diff_result(
+    content: String,
+    limits: DiffLimits,
+) -> Result<DiffResult, RsGuardError> {
     if content.is_empty() {
         return Err(RsGuardError::EmptyDiff);
     }
 
     validate_diff_content(&content)?;
+    check_diff_limits(&content, limits)?;
 
     let size_bytes = content.len();
     let line_count = content.lines().count();
 
-    if size_bytes > MAX_DIFF_BYTES || line_count > MAX_DIFF_LINES {
-        return Err(RsGuardError::DiffTooLarge {
-            size_bytes,
-            line_count,
-        });
-    }
-
     Ok(DiffResult {
         content,
+        size_bytes,
+        line_count,
+    })
+}
+
+/// Applies path filters then re-validates size limits.
+///
+/// Returns [`RsGuardError::EmptyDiff`] when every file section is filtered out.
+pub fn apply_path_filters(
+    diff: DiffResult,
+    include: &[String],
+    exclude: &[String],
+    limits: DiffLimits,
+) -> Result<DiffResult, RsGuardError> {
+    let filtered = filter_diff_by_paths(&diff.content, include, exclude);
+    if filtered.trim().is_empty() {
+        return Err(RsGuardError::EmptyDiff);
+    }
+    validate_diff_content(&filtered)?;
+    check_diff_limits(&filtered, limits)?;
+    let size_bytes = filtered.len();
+    let line_count = filtered.lines().count();
+    Ok(DiffResult {
+        content: filtered,
         size_bytes,
         line_count,
     })
@@ -378,6 +637,7 @@ mod tests {
             "test-repo",
             42,
             "test-token",
+            DiffLimits::default(),
         )
         .await;
 
@@ -403,6 +663,7 @@ mod tests {
             "test-repo",
             999,
             "test-token",
+            DiffLimits::default(),
         )
         .await;
 
@@ -429,6 +690,7 @@ mod tests {
             "test-repo",
             42,
             "test-token",
+            DiffLimits::default(),
         )
         .await;
 
@@ -439,17 +701,20 @@ mod tests {
             .contains("not appear to be a diff"));
     }
 
-    // --- Issue #24: Boundary tests for fetch_pr_diff at 100KB ---
+    // --- Boundary tests for fetch_pr_diff size limits ---
 
     #[tokio::test]
-    async fn test_fetch_pr_diff_exactly_100kb_passes() {
+    async fn test_fetch_pr_diff_exactly_at_configured_byte_limit_passes() {
         let mock_server = MockServer::start().await;
+        let limits = DiffLimits {
+            max_bytes: 100 * 1024,
+            max_lines: 10_000,
+        };
 
-        // Create a diff that is exactly 100KB
         let diff_header =
             "diff --git a/file.rs b/file.rs\n--- a/file.rs\n+++ b/file.rs\n@@ -1,2 +1,3 @@\n";
         let header_bytes = diff_header.len();
-        let content_bytes = 100 * 1024 - header_bytes;
+        let content_bytes = limits.max_bytes - header_bytes;
         let diff_content = format!("{}{}", diff_header, "+".repeat(content_bytes));
 
         Mock::given(method("GET"))
@@ -465,23 +730,27 @@ mod tests {
             "test-repo",
             42,
             "test-token",
+            limits,
         )
         .await;
 
-        assert!(result.is_ok(), "Exactly 100KB diff should pass");
+        assert!(result.is_ok(), "diff at exact byte limit should pass");
         let diff = result.unwrap();
-        assert_eq!(diff.size_bytes, 100 * 1024);
+        assert_eq!(diff.size_bytes, limits.max_bytes);
     }
 
     #[tokio::test]
-    async fn test_fetch_pr_diff_100kb_plus_1_fails() {
+    async fn test_fetch_pr_diff_over_configured_byte_limit_fails() {
         let mock_server = MockServer::start().await;
+        let limits = DiffLimits {
+            max_bytes: 100 * 1024,
+            max_lines: 10_000,
+        };
 
-        // Create a diff that is 100KB + 1 byte
         let diff_header =
             "diff --git a/file.rs b/file.rs\n--- a/file.rs\n+++ b/file.rs\n@@ -1,2 +1,3 @@\n";
         let header_bytes = diff_header.len();
-        let content_bytes = 100 * 1024 - header_bytes + 1;
+        let content_bytes = limits.max_bytes - header_bytes + 1;
         let diff_content = format!("{}{}", diff_header, "+".repeat(content_bytes));
 
         Mock::given(method("GET"))
@@ -497,19 +766,21 @@ mod tests {
             "test-repo",
             42,
             "test-token",
+            limits,
         )
         .await;
 
-        assert!(result.is_err(), "100KB + 1 byte diff should fail");
         assert!(matches!(result, Err(RsGuardError::DiffTooLarge { .. })));
     }
 
     #[tokio::test]
-    async fn test_fetch_pr_diff_1501_lines_fails() {
+    async fn test_fetch_pr_diff_over_configured_line_limit_fails() {
         let mock_server = MockServer::start().await;
+        let limits = DiffLimits {
+            max_bytes: 10 * 1024 * 1024,
+            max_lines: 1500,
+        };
 
-        // Create a diff with 1501 lines
-        // diff_header has 4 lines, so we need 1497 more lines
         let diff_header =
             "diff --git a/file.rs b/file.rs\n--- a/file.rs\n+++ b/file.rs\n@@ -1,2 +1,3 @@\n";
         let lines: Vec<String> = (0..1497).map(|i| format!("+line {}", i)).collect();
@@ -528,10 +799,10 @@ mod tests {
             "test-repo",
             42,
             "test-token",
+            limits,
         )
         .await;
 
-        assert!(result.is_err(), "1501 lines should fail");
         assert!(matches!(result, Err(RsGuardError::DiffTooLarge { .. })));
     }
 
@@ -725,7 +996,7 @@ mod tests {
             "diff --git a/f.rs b/f.rs\n--- a/f.rs\n+++ b/f.rs\n@@ -1 +1,2 @@\n+line1\n line0";
         std::fs::write(&diff_path, diff_content).unwrap();
 
-        let result = fetch_file_diff(diff_path.to_str().unwrap()).unwrap();
+        let result = fetch_file_diff(diff_path.to_str().unwrap(), DiffLimits::default()).unwrap();
         assert_eq!(result.content, diff_content);
         assert!(result.size_bytes > 0);
         assert!(result.line_count > 0);
@@ -737,7 +1008,7 @@ mod tests {
         let diff_path = dir.path().join("empty.diff");
         std::fs::write(&diff_path, "").unwrap();
 
-        let result = fetch_file_diff(diff_path.to_str().unwrap());
+        let result = fetch_file_diff(diff_path.to_str().unwrap(), DiffLimits::default());
         assert!(matches!(result, Err(RsGuardError::EmptyDiff)));
     }
 
@@ -747,7 +1018,7 @@ mod tests {
         let diff_path = dir.path().join("invalid.diff");
         std::fs::write(&diff_path, "not a diff").unwrap();
 
-        let result = fetch_file_diff(diff_path.to_str().unwrap());
+        let result = fetch_file_diff(diff_path.to_str().unwrap(), DiffLimits::default());
         assert!(matches!(result, Err(RsGuardError::InvalidDiffContent)));
     }
 
@@ -755,18 +1026,18 @@ mod tests {
     fn test_fetch_file_diff_too_large() {
         let dir = tempfile::tempdir().unwrap();
         let diff_path = dir.path().join("large.diff");
-        // Create a valid diff header followed by large content to exceed MAX_DIFF_BYTES (100KB)
+        // Create a valid diff header followed by large content to exceed DEFAULT_MAX_DIFF_BYTES (500KB)
         let diff_header = "diff --git a/f.rs b/f.rs\n--- a/f.rs\n+++ b/f.rs\n@@ -1 +1,2 @@\n";
         let large_content = format!("{}{}", diff_header, "+line\n".repeat(200 * 1024));
         std::fs::write(&diff_path, &large_content).unwrap();
 
-        let result = fetch_file_diff(diff_path.to_str().unwrap());
+        let result = fetch_file_diff(diff_path.to_str().unwrap(), DiffLimits::default());
         assert!(matches!(result, Err(RsGuardError::DiffTooLarge { .. })));
     }
 
     #[test]
     fn test_fetch_file_diff_not_found() {
-        let result = fetch_file_diff("/nonexistent/path.diff");
+        let result = fetch_file_diff("/nonexistent/path.diff", DiffLimits::default());
         assert!(matches!(result, Err(RsGuardError::Config(_))));
     }
 
@@ -778,7 +1049,7 @@ mod tests {
         let original_dir = std::env::current_dir().unwrap();
         std::env::set_current_dir(dir.path()).unwrap();
 
-        let result = fetch_local_diff();
+        let result = fetch_local_diff(DiffLimits::default());
         // Depending on environment, git may not be installed (Io error),
         // may return non-zero exit (Config error), or may succeed with
         // empty output (EmptyDiff). All are valid error states.
@@ -792,7 +1063,10 @@ mod tests {
     #[test]
     fn test_build_local_diff_result_rejects_invalid_content() {
         // Non-diff content (e.g. corrupted git output) must be rejected
-        let result = build_local_diff_result("this is not a diff at all".to_string());
+        let result = build_local_diff_result(
+            "this is not a diff at all".to_string(),
+            DiffLimits::default(),
+        );
         assert!(
             matches!(result, Err(RsGuardError::InvalidDiffContent)),
             "expected InvalidDiffContent, got {:?}",
@@ -803,7 +1077,10 @@ mod tests {
     #[test]
     fn test_build_local_diff_result_rejects_json_content() {
         // JSON error bodies from git should be rejected (e.g. corrupt stdout)
-        let result = build_local_diff_result(r#"{"error": "something went wrong"}"#.to_string());
+        let result = build_local_diff_result(
+            r#"{"error": "something went wrong"}"#.to_string(),
+            DiffLimits::default(),
+        );
         assert!(
             matches!(result, Err(RsGuardError::InvalidDiffContent)),
             "expected InvalidDiffContent, got {:?}",
@@ -813,14 +1090,14 @@ mod tests {
 
     #[test]
     fn test_build_local_diff_result_rejects_empty() {
-        let result = build_local_diff_result(String::new());
+        let result = build_local_diff_result(String::new(), DiffLimits::default());
         assert!(matches!(result, Err(RsGuardError::EmptyDiff)));
     }
 
     #[test]
     fn test_build_local_diff_result_accepts_valid_diff() {
         let content = "diff --git a/src/main.rs b/src/main.rs\n--- a/src/main.rs\n+++ b/src/main.rs\n@@ -1 +1,2 @@\n+new line\n old line".to_string();
-        let result = build_local_diff_result(content.clone());
+        let result = build_local_diff_result(content.clone(), DiffLimits::default());
         assert!(result.is_ok(), "expected Ok, got {:?}", result);
         let diff = result.unwrap();
         assert_eq!(diff.content, content);
@@ -832,7 +1109,7 @@ mod tests {
     fn test_build_local_diff_result_rejects_too_large() {
         let header = "diff --git a/f.rs b/f.rs\n--- a/f.rs\n+++ b/f.rs\n@@ -1 +1,2 @@\n";
         let huge = format!("{}{}", header, "+line\n".repeat(200 * 1024));
-        let result = build_local_diff_result(huge);
+        let result = build_local_diff_result(huge, DiffLimits::default());
         assert!(matches!(result, Err(RsGuardError::DiffTooLarge { .. })));
     }
 
@@ -886,11 +1163,147 @@ mod tests {
 
         // The result should be accepted (lossy conversion allows it to proceed)
         // In practice, git diff outputs UTF-8, but we handle binary gracefully
-        let result = build_local_diff_result(lossy_string);
+        let result = build_local_diff_result(lossy_string, DiffLimits::default());
         // Should succeed because the diff markers are present
         assert!(
             result.is_ok(),
             "non-UTF8 diff with valid markers should be accepted"
         );
+    }
+
+    #[test]
+    fn test_path_matches_glob_basic() {
+        assert!(path_matches_glob("Cargo.lock", "Cargo.lock"));
+        assert!(path_matches_glob("Cargo.lock", "pkg/Cargo.lock")); // basename
+        assert!(path_matches_glob("**/Cargo.lock", "foo/Cargo.lock"));
+        assert!(path_matches_glob("src/**", "src/main.rs"));
+        assert!(!path_matches_glob("src/**", "tests/main.rs"));
+        assert!(path_matches_glob("*.lock", "Cargo.lock"));
+        // Exact path with '/' must not match nested suffix.
+        assert!(path_matches_glob("src/main.rs", "src/main.rs"));
+        assert!(!path_matches_glob("src/main.rs", "vendor/src/main.rs"));
+        // Bare * matches everything.
+        assert!(path_matches_glob("*", "anything/here.rs"));
+    }
+
+    #[test]
+    fn test_path_matches_glob_star_suffix_after_globstar() {
+        assert!(path_matches_glob("**/foo*", "pkg/foo_bar.rs"));
+        assert!(path_matches_glob("**/foo*", "foo.rs"));
+        assert!(!path_matches_glob("**/foo*", "pkg/bar.rs"));
+        // Only final path component is matched — not intermediate directories.
+        assert!(!path_matches_glob("**/foo*", "src/foo_module/bar.rs"));
+    }
+
+    #[test]
+    fn test_path_matches_glob_single_segment_wildcard() {
+        assert!(path_matches_glob("src/*/lib.rs", "src/foo/lib.rs"));
+        assert!(!path_matches_glob("src/*/lib.rs", "src/foo/bar/lib.rs"));
+        assert!(!path_matches_glob("src/*/lib.rs", "src/lib.rs"));
+    }
+
+    #[test]
+    fn test_path_matches_glob_rejects_multiple_single_stars() {
+        // Multi-star patterns are unsupported and must not silently partial-match.
+        assert!(!path_matches_glob("**/foo*bar*", "pkg/foobar"));
+        assert!(!path_matches_glob("a*b*c", "axbxc"));
+    }
+
+    #[test]
+    fn test_apply_path_filters_all_excluded_returns_empty_diff() {
+        let content = "\
+diff --git a/src/a.rs b/src/a.rs\n--- a/src/a.rs\n+++ b/src/a.rs\n@@ -1 +1,2 @@\n+x\n";
+        let err = apply_path_filters(
+            DiffResult {
+                content: content.to_string(),
+                size_bytes: content.len(),
+                line_count: content.lines().count(),
+            },
+            &[],
+            &["src/**".into()],
+            DiffLimits::default(),
+        )
+        .unwrap_err();
+        assert!(
+            matches!(err, RsGuardError::EmptyDiff),
+            "expected EmptyDiff when every file is excluded, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn test_apply_path_filters_include_miss_returns_empty_diff() {
+        let content = "\
+diff --git a/src/a.rs b/src/a.rs\n--- a/src/a.rs\n+++ b/src/a.rs\n@@ -1 +1,2 @@\n+x\n";
+        let err = apply_path_filters(
+            DiffResult {
+                content: content.to_string(),
+                size_bytes: content.len(),
+                line_count: content.lines().count(),
+            },
+            &["docs/**".into()],
+            &[],
+            DiffLimits::default(),
+        )
+        .unwrap_err();
+        assert!(matches!(err, RsGuardError::EmptyDiff));
+    }
+
+    #[test]
+    fn test_filter_diff_by_paths_exclude_lockfile() {
+        let content = "\
+diff --git a/Cargo.lock b/Cargo.lock\n--- a/Cargo.lock\n+++ b/Cargo.lock\n@@ -1 +1,2 @@\n+foo\ndiff --git a/src/main.rs b/src/main.rs\n--- a/src/main.rs\n+++ b/src/main.rs\n@@ -1 +1,2 @@\n+bar\n";
+        let filtered = filter_diff_by_paths(content, &[], &["**/Cargo.lock".into()]);
+        assert!(!filtered.contains("Cargo.lock"));
+        assert!(filtered.contains("src/main.rs"));
+        assert!(filtered.contains("+bar"));
+    }
+
+    #[test]
+    fn test_filter_diff_by_paths_include_only_src() {
+        let content = "\
+diff --git a/README.md b/README.md\n--- a/README.md\n+++ b/README.md\n@@ -1 +1,2 @@\n+docs\ndiff --git a/src/lib.rs b/src/lib.rs\n--- a/src/lib.rs\n+++ b/src/lib.rs\n@@ -1 +1,2 @@\n+code\n";
+        let filtered = filter_diff_by_paths(content, &["src/**".into()], &[]);
+        assert!(!filtered.contains("README.md"));
+        assert!(filtered.contains("src/lib.rs"));
+    }
+
+    #[test]
+    fn test_default_limits_raised() {
+        assert_eq!(DEFAULT_MAX_DIFF_BYTES, 500 * 1024);
+        assert_eq!(DEFAULT_MAX_DIFF_LINES, 5000);
+    }
+
+    #[test]
+    fn test_apply_path_filters_excludes_lockfile_before_user_size_limit() {
+        // Build a filtered-out lockfile section that alone would exceed a tiny limit,
+        // plus a small source file that fits.
+        let mut content = String::from(
+            "diff --git a/Cargo.lock b/Cargo.lock\n--- a/Cargo.lock\n+++ b/Cargo.lock\n@@ -1 +1,2 @@\n",
+        );
+        content.push_str(&("+x\n".repeat(200)));
+        content.push_str(
+            "diff --git a/src/main.rs b/src/main.rs\n--- a/src/main.rs\n+++ b/src/main.rs\n@@ -1 +1,2 @@\n+ok\n",
+        );
+
+        let tiny = DiffLimits {
+            max_bytes: 500,
+            max_lines: 50,
+        };
+        // Unfiltered would be too large for tiny limits:
+        assert!(check_diff_limits(&content, tiny).is_err());
+
+        let filtered = apply_path_filters(
+            DiffResult {
+                content: content.clone(),
+                size_bytes: content.len(),
+                line_count: content.lines().count(),
+            },
+            &[],
+            &["**/Cargo.lock".into()],
+            tiny,
+        )
+        .expect("excluding lockfile should leave a reviewable src diff");
+        assert!(filtered.content.contains("src/main.rs"));
+        assert!(!filtered.content.contains("Cargo.lock"));
     }
 }

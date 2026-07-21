@@ -197,6 +197,14 @@ pub struct TomlConfig {
     ///
     /// Overrides [`crate::diff::DEFAULT_CHUNK_TAIL_LINES`].
     pub chunk_tail_lines: Option<usize>,
+    /// Maximum accepted diff size in bytes.
+    pub max_diff_bytes: Option<usize>,
+    /// Maximum accepted diff line count.
+    pub max_diff_lines: Option<usize>,
+    /// Glob patterns of paths to include (empty = all).
+    pub include_paths: Option<Vec<String>>,
+    /// Glob patterns of paths to exclude from the review diff.
+    pub exclude_paths: Option<Vec<String>>,
     /// Per-provider configuration sections.
     pub providers: Option<HashMap<String, ProviderTomlConfig>>,
     /// Provider-specific model variant (e.g. "flash", "thinking-on").
@@ -242,6 +250,10 @@ const KNOWN_TOP_LEVEL_KEYS: &[&str] = &[
     "llm_timeout_secs",
     "chunk_head_lines",
     "chunk_tail_lines",
+    "max_diff_bytes",
+    "max_diff_lines",
+    "include_paths",
+    "exclude_paths",
     "providers",
     "cache_dir",
     "circuit_breaker",
@@ -724,6 +736,15 @@ fn resolve_important_threshold(toml: Option<&TomlConfig>) -> Result<u32, RsGuard
         .unwrap_or(3))
 }
 
+/// Splits a comma-separated path list into trimmed non-empty entries.
+fn split_csv_paths(raw: &str) -> Vec<String> {
+    raw.trim()
+        .split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect()
+}
+
 /// Resolves the explicit rules file path from env > toml.
 ///
 /// Returns `None` when neither `RS_GUARD_RULES_FILE` nor the `rules_file`
@@ -876,6 +897,14 @@ pub struct Config {
     pub chunk_head_lines: usize,
     /// Lines to preserve from the end of the diff when chunking.
     pub chunk_tail_lines: usize,
+    /// Maximum accepted diff size in bytes.
+    pub max_diff_bytes: usize,
+    /// Maximum accepted diff line count.
+    pub max_diff_lines: usize,
+    /// Path include globs (empty = include all).
+    pub include_paths: Vec<String>,
+    /// Path exclude globs.
+    pub exclude_paths: Vec<String>,
     /// Resolved LLM request timeout in seconds.
     pub llm_timeout_secs: u64,
     /// Number of "Important" issues required to trigger REQUEST_CHANGES.
@@ -942,6 +971,10 @@ impl Config {
             auto_gitignore: true,
             chunk_head_lines: crate::diff::DEFAULT_CHUNK_HEAD_LINES,
             chunk_tail_lines: crate::diff::DEFAULT_CHUNK_TAIL_LINES,
+            max_diff_bytes: crate::diff::DEFAULT_MAX_DIFF_BYTES,
+            max_diff_lines: crate::diff::DEFAULT_MAX_DIFF_LINES,
+            include_paths: Vec::new(),
+            exclude_paths: Vec::new(),
             llm_timeout_secs: DEFAULT_LLM_TIMEOUT_SECS,
             important_threshold: 3,
             project_rules: None,
@@ -990,6 +1023,29 @@ impl Config {
             .and_then(|t| t.chunk_tail_lines)
             .unwrap_or(crate::diff::DEFAULT_CHUNK_TAIL_LINES);
 
+        let max_diff_bytes = std::env::var("RS_GUARD_MAX_DIFF_BYTES")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .or_else(|| toml.as_ref().and_then(|t| t.max_diff_bytes))
+            .unwrap_or(crate::diff::DEFAULT_MAX_DIFF_BYTES);
+        let max_diff_lines = std::env::var("RS_GUARD_MAX_DIFF_LINES")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .or_else(|| toml.as_ref().and_then(|t| t.max_diff_lines))
+            .unwrap_or(crate::diff::DEFAULT_MAX_DIFF_LINES);
+        let include_paths = std::env::var("RS_GUARD_INCLUDE_PATHS")
+            .ok()
+            .filter(|s| !s.is_empty())
+            .map(|s| split_csv_paths(&s))
+            .or_else(|| toml.as_ref().and_then(|t| t.include_paths.clone()))
+            .unwrap_or_default();
+        let exclude_paths = std::env::var("RS_GUARD_EXCLUDE_PATHS")
+            .ok()
+            .filter(|s| !s.is_empty())
+            .map(|s| split_csv_paths(&s))
+            .or_else(|| toml.as_ref().and_then(|t| t.exclude_paths.clone()))
+            .unwrap_or_default();
+
         let toml_provider = toml_providers.get(&provider);
         let base_url = resolve_base_url(toml_provider, is_ci)?;
         let (variant, top_level_variant) = resolve_variant(toml.as_ref(), toml_provider);
@@ -1032,6 +1088,10 @@ impl Config {
             auto_gitignore,
             chunk_head_lines,
             chunk_tail_lines,
+            max_diff_bytes,
+            max_diff_lines,
+            include_paths,
+            exclude_paths,
             llm_timeout_secs,
             important_threshold,
             project_rules: None,
@@ -1141,6 +1201,18 @@ impl Config {
         }
         if args.dry_run {
             self.dry_run = true;
+        }
+        if let Some(v) = args.max_diff_bytes {
+            self.max_diff_bytes = v;
+        }
+        if let Some(v) = args.max_diff_lines {
+            self.max_diff_lines = v;
+        }
+        if let Some(ref raw) = args.include_paths {
+            self.include_paths = split_csv_paths(raw);
+        }
+        if let Some(ref raw) = args.exclude_paths {
+            self.exclude_paths = split_csv_paths(raw);
         }
         if let Some(threshold) = args.important_threshold {
             self.important_threshold = threshold;

@@ -323,3 +323,42 @@ cooldown_secs = 60
 input_per_million = 15
 output_per_million = 60
 ```
+
+
+## Diff size and path filters (v1.6)
+
+| Key | Env | Default | Description |
+|-----|-----|---------|-------------|
+| `max_diff_bytes` | `RS_GUARD_MAX_DIFF_BYTES` | `512000` (500 KB) | Hard reject above this size |
+| `max_diff_lines` | `RS_GUARD_MAX_DIFF_LINES` | `5000` | Hard reject above this line count |
+| `include_paths` | `RS_GUARD_INCLUDE_PATHS` (comma-separated) | all | Only keep matching file sections |
+| `exclude_paths` | `RS_GUARD_EXCLUDE_PATHS` (comma-separated) | none | Drop matching file sections |
+
+Path filters run after the raw fetch and **before** the user-facing size gate
+(`max_diff_bytes` / `max_diff_lines`) and chunking. The raw fetch only applies a
+high safety ceiling (10 MB / 100k lines) so excluding large lockfiles can keep a
+PR reviewable under the configured limits.
+
+### Supported path pattern constructs
+
+rs-guard uses a **small custom matcher** (not full gitignore / full glob):
+
+| Pattern | Meaning | Example matches |
+|---------|---------|-----------------|
+| `path/to/file` | Exact path | `src/main.rs` |
+| `*.ext` | Basename suffix | `Cargo.lock` via `*.lock` |
+| `dir/**` | Directory prefix | `src/**` → `src/a.rs` |
+| `**/name` | Any-depth suffix | `**/Cargo.lock` |
+| `**/foo*` | Any-depth prefix on a segment | `pkg/foo_bar.rs` |
+| `a/*/b` | Single `*` = exactly one path segment | `src/*/lib.rs` (not multi-level) |
+| `*` or `**` alone | Match every path | Use carefully with include/exclude |
+
+Patterns are case-sensitive and use `/` separators. Leading `./` is ignored.
+
+Patterns that contain `/` (and no `*` / `**` operators already handled above) are
+**exact path matches only** — `src/main.rs` does **not** match `vendor/src/main.rs`.
+Basename-only patterns without `/` (e.g. `Cargo.lock`) match the final path component
+at any depth.
+
+**Unsupported:** patterns with more than one single-`*` wildcard (e.g. `**/foo*bar*`
+or `a*b*c`) never match. Prefer simple documented forms only.

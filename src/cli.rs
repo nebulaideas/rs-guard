@@ -135,6 +135,38 @@ pub struct ReviewArgs {
     #[arg(long, help = "Dry-run mode: review without submitting or blocking")]
     pub dry_run: bool,
 
+    /// Maximum diff size in bytes (default: 512000).
+    #[arg(
+        long,
+        env = "RS_GUARD_MAX_DIFF_BYTES",
+        help = "Maximum accepted diff size in bytes"
+    )]
+    pub max_diff_bytes: Option<usize>,
+
+    /// Maximum diff line count (default: 5000).
+    #[arg(
+        long,
+        env = "RS_GUARD_MAX_DIFF_LINES",
+        help = "Maximum accepted diff line count"
+    )]
+    pub max_diff_lines: Option<usize>,
+
+    /// Comma-separated path include globs (empty = all paths).
+    #[arg(
+        long,
+        env = "RS_GUARD_INCLUDE_PATHS",
+        help = "Comma-separated path include globs (e.g. src/**,*.rs)"
+    )]
+    pub include_paths: Option<String>,
+
+    /// Comma-separated path exclude globs.
+    #[arg(
+        long,
+        env = "RS_GUARD_EXCLUDE_PATHS",
+        help = "Comma-separated path exclude globs (e.g. **/Cargo.lock,vendor/**)"
+    )]
+    pub exclude_paths: Option<String>,
+
     /// Disable auto-detection of project rules files (AGENTS.md, CLAUDE.md, etc.).
     ///
     /// When set, rs-guard will not scan for or inject project-specific coding
