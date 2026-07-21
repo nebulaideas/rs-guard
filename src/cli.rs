@@ -180,14 +180,16 @@ pub struct ReviewArgs {
     ///
     /// JSON emits one object to stdout with verdict, counts, state, and metrics.
     /// Progress lines go to stderr so stdout stays machine-parseable.
+    ///
+    /// When omitted, falls back to TOML `output_format` then `text`.
+    /// `RS_GUARD_FORMAT` is handled by clap (same as `--format`).
     #[arg(
         long = "format",
         env = "RS_GUARD_FORMAT",
         value_enum,
-        default_value_t = OutputFormat::Text,
         help = "Output format: text or json [default: text]"
     )]
-    pub format: OutputFormat,
+    pub format: Option<OutputFormat>,
 
     /// Disable auto-detection of project rules files (AGENTS.md, CLAUDE.md, etc.).
     ///

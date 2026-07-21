@@ -761,20 +761,14 @@ fn parse_output_format(raw: &str) -> Result<crate::cli::OutputFormat, RsGuardErr
     }
 }
 
-/// Resolves output format from env / TOML before CLI apply.
+/// Resolves output format from TOML before CLI apply.
 ///
-/// Precedence for this helper: `RS_GUARD_FORMAT` > TOML `output_format` > `text`.
-/// Clap also binds `RS_GUARD_FORMAT` to `--format`; `apply_args` always sets
-/// `Config.output_format` from `args.format` afterwards so CLI/env via clap wins
-/// over the TOML value loaded here when both are present.
+/// Precedence: CLI `--format` / `RS_GUARD_FORMAT` (via clap in `apply_args`) >
+/// TOML `output_format` > `text`. This helper only reads TOML so the env var is
+/// not double-parsed outside clap.
 fn resolve_output_format(
     toml: Option<&TomlConfig>,
 ) -> Result<crate::cli::OutputFormat, RsGuardError> {
-    if let Ok(v) = std::env::var("RS_GUARD_FORMAT") {
-        if !v.is_empty() {
-            return parse_output_format(&v);
-        }
-    }
     if let Some(ref v) = toml.and_then(|t| t.output_format.clone()) {
         if !v.is_empty() {
             return parse_output_format(v);
@@ -1257,8 +1251,10 @@ impl Config {
         if let Some(ref raw) = args.exclude_paths {
             self.exclude_paths = split_csv_paths(raw);
         }
-        // clap resolves --format / RS_GUARD_FORMAT; always apply (default Text is fine).
-        self.output_format = args.format;
+        // clap resolves --format / RS_GUARD_FORMAT when present.
+        if let Some(fmt) = args.format {
+            self.output_format = fmt;
+        }
         if let Some(threshold) = args.important_threshold {
             self.important_threshold = threshold;
         }
@@ -2143,26 +2139,12 @@ mod tests {
     #[test]
     fn test_resolve_output_format_default_text() {
         use crate::cli::OutputFormat;
-        let _guard = ENV_MUTEX.lock().unwrap();
-        std::env::remove_var("RS_GUARD_FORMAT");
         assert_eq!(resolve_output_format(None).unwrap(), OutputFormat::Text);
     }
 
     #[test]
-    fn test_resolve_output_format_from_env() {
+    fn test_resolve_output_format_from_toml() {
         use crate::cli::OutputFormat;
-        let _guard = ENV_MUTEX.lock().unwrap();
-        std::env::set_var("RS_GUARD_FORMAT", "json");
-        let fmt = resolve_output_format(None).unwrap();
-        std::env::remove_var("RS_GUARD_FORMAT");
-        assert_eq!(fmt, OutputFormat::Json);
-    }
-
-    #[test]
-    fn test_resolve_output_format_from_toml_when_env_unset() {
-        use crate::cli::OutputFormat;
-        let _guard = ENV_MUTEX.lock().unwrap();
-        std::env::remove_var("RS_GUARD_FORMAT");
         let toml = TomlConfig {
             output_format: Some("json".into()),
             ..Default::default()
@@ -2174,25 +2156,30 @@ mod tests {
     }
 
     #[test]
-    fn test_resolve_output_format_env_overrides_toml() {
-        use crate::cli::OutputFormat;
-        let _guard = ENV_MUTEX.lock().unwrap();
-        std::env::set_var("RS_GUARD_FORMAT", "text");
+    fn test_resolve_output_format_invalid_toml() {
         let toml = TomlConfig {
-            output_format: Some("json".into()),
+            output_format: Some("yaml".into()),
             ..Default::default()
         };
-        let fmt = resolve_output_format(Some(&toml)).unwrap();
-        std::env::remove_var("RS_GUARD_FORMAT");
-        assert_eq!(fmt, OutputFormat::Text);
+        let err = resolve_output_format(Some(&toml)).unwrap_err();
+        assert!(err.to_string().contains("invalid output_format"));
     }
 
     #[test]
-    fn test_resolve_output_format_invalid_env() {
+    fn test_apply_args_format_overrides_toml() {
+        use crate::cli::OutputFormat;
         let _guard = ENV_MUTEX.lock().unwrap();
-        std::env::set_var("RS_GUARD_FORMAT", "yaml");
-        let err = resolve_output_format(None).unwrap_err();
-        std::env::remove_var("RS_GUARD_FORMAT");
-        assert!(err.to_string().contains("invalid output_format"));
+        std::env::set_var("DEEPSEEK_API_KEY", "test-key");
+        let toml = TomlConfig {
+            output_format: Some("text".into()),
+            ..Default::default()
+        };
+        let mut config = Config::from_env(Some(toml)).unwrap();
+        assert_eq!(config.output_format, OutputFormat::Text);
+        use clap::Parser;
+        let cli = crate::cli::Cli::parse_from(["rs-guard", "--format", "json"]);
+        config.apply_args(&cli.review).unwrap();
+        assert_eq!(config.output_format, OutputFormat::Json);
+        std::env::remove_var("DEEPSEEK_API_KEY");
     }
 }

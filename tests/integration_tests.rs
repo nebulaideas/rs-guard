@@ -4,6 +4,7 @@
 //! correctly sequences diff fetching, LLM calling, verdict parsing, and
 //! review submission.
 
+use rs_guard::cli::OutputFormat;
 use rs_guard::config::Config;
 use rs_guard::pipeline::{run_pipeline, PipelineResult};
 use serde_json::json;
@@ -194,6 +195,67 @@ async fn test_full_pipeline_local_approve() {
 
     let result = run_pipeline(config, Some(diff_path.to_str().unwrap())).await;
     assert!(matches!(result, Ok(PipelineResult::Success)));
+}
+
+#[tokio::test]
+async fn test_full_pipeline_json_format_success() {
+    // Exercises the JSON pipeline branch end-to-end (mock LLM + dry-run).
+    // stdout capture is harness-shared, so we assert pipeline success and that
+    // ReviewResultJson serializes the same fields the pipeline emits.
+    let llm = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path_regex(r"/chat/completions"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "choices": [{"message": {"content": POSITIVE_RESPONSE}}]
+        })))
+        .mount(&llm)
+        .await;
+
+    let mut config = local_config();
+    config.provider_config.base_url = Some(llm.uri());
+    config.no_cache = true;
+    config.dry_run = true;
+    config.output_format = OutputFormat::Json;
+
+    let dir = tempfile::tempdir().unwrap();
+    let diff_path = dir.path().join("test.diff");
+    std::fs::write(&diff_path, VALID_DIFF).unwrap();
+
+    let result = run_pipeline(config, Some(diff_path.to_str().unwrap())).await;
+    assert!(
+        matches!(result, Ok(PipelineResult::Success)),
+        "JSON dry-run pipeline should succeed: {result:?}"
+    );
+
+    // Strict JSON shape used by the pipeline emit path.
+    let sample = rs_guard::output::ReviewResultJson {
+        verdict: "POSITIVE".into(),
+        critical_issues: 0,
+        security_issues: 0,
+        important_issues: 0,
+        suggestions: 0,
+        state: "APPROVE".into(),
+        provider: "deepseek".into(),
+        model: "test-model".into(),
+        variant: None,
+        estimated_tokens_in: 1,
+        estimated_tokens_out: 1,
+        latency_secs: 0.1,
+        estimated_cost_cents: None,
+        diff_lines: 6,
+        project_rules_file: None,
+        dry_run: true,
+    };
+    let mut buf = Vec::new();
+    rs_guard::output::write_json_result(&sample, &mut buf).unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&buf).unwrap();
+    assert_eq!(v["verdict"], "POSITIVE");
+    assert_eq!(v["state"], "APPROVE");
+    assert_eq!(v["dry_run"], true);
+    // Single JSON value (trailing newline only).
+    let s = String::from_utf8(buf).unwrap();
+    assert_eq!(s.lines().count(), 1);
 }
 
 #[tokio::test]
