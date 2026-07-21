@@ -7,18 +7,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-07-21
+
+### Added
+
+- **Outbound secret redaction** — diffs are scrubbed with `redact_secrets_with_count`
+  before cache keying and the LLM call. Local mode prints a notice; metrics include
+  `secrets_redacted_count`. Closes #102.
+- **Configurable hard size limits** — `max_diff_bytes` / `max_diff_lines` via CLI, env
+  (`RS_GUARD_MAX_DIFF_*`), or TOML. Defaults raised to **500 KB / 5000 lines**. Closes #103.
+- **Path include/exclude filters** — `include_paths` / `exclude_paths` (comma-separated
+  globs) filter unified-diff file sections before the user size gate. Closes #103.
+- **`--format json` machine-readable output** — single JSON object on stdout
+  (`ReviewResultJson`); progress on stderr. Env `RS_GUARD_FORMAT`, TOML
+  `output_format`. Closes #104.
+- **Local branch-diff mode** — `--base` / `RS_GUARD_BASE` / TOML `diff_base` runs
+  `git diff <base>...HEAD` instead of staged changes (CI and `--diff-file` unchanged).
+  Closes #105 / PR #122 (merge before tagging if not yet on main).
+
 ### Changed
 
-- **Diff raw-fetch safety ceiling:** unfiltered fetches allow up to **10 MB / 100k lines**;
-  user `max_diff_*` apply after path filters (defaults **500 KB / 5000 lines**).
+- **Raw-fetch safety ceiling** — unfiltered GitHub/local/file fetches allow up to
+  **10 MB / 100k lines** so path filters can drop large lockfiles before the
+  user-facing size gate. Closes #103.
+- **Architecture / performance docs** — verdict rules, ProviderMeta extension path,
+  module inventory, and full cache-key components aligned with the v1.5+ code.
+  Closes #106.
+- **CI supply-chain** — `crossbeam-epoch` ≥ 0.9.20 (RUSTSEC-2026-0204); `cargo deny check`
+  without deprecated `--config` flag.
 
 ### Deprecated
 
 - **`CriticalBugs` metadata field** — still accepted as an alias for `CriticalIssues`
-  when `CriticalIssues` is absent (value preferred from `CriticalIssues` when both
-  appear). A warning is logged whenever the legacy field is present in a metadata
-  block. Prefer `CriticalIssues:` in custom prompts. Removal planned for a future
-  major release. See #107.
+  when `CriticalIssues` is absent (`CriticalIssues` wins when both appear). A
+  one-time-per-process warning is logged whenever the legacy field is present.
+  Prefer `CriticalIssues:`. Removal planned for a future major release. Closes #107.
+
+### Fixed
+
+- Path glob exact matches no longer match nested suffixes (e.g. `src/main.rs` does
+  not match `vendor/src/main.rs`); multi single-`*` patterns never match; empty
+  include/exclude results return `EmptyDiff`. Related to #103.
+- `--base` rejects refs starting with `-` to avoid git option injection. Related to #105.
 
 ## [1.5.0] - 2026-07-06
 
