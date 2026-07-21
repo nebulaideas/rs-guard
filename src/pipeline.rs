@@ -138,7 +138,7 @@ fn config_diff_limits(config: &Config) -> DiffLimits {
 async fn fetch_diff(config: &Config, diff_file: Option<&str>) -> anyhow::Result<DiffFetchOutcome> {
     if let Some(path) = diff_file {
         log::info!("Reading diff from file: {}", path);
-        match fetch_file_diff(path, config_diff_limits(config)) {
+        match fetch_file_diff(path, DiffLimits::raw_fetch()) {
             Ok(diff) => {
                 log::info!(
                     "Read diff from file: {} lines ({} bytes)",
@@ -164,7 +164,7 @@ async fn fetch_diff(config: &Config, diff_file: Option<&str>) -> anyhow::Result<
             &ci_config.repo_name,
             ci_config.pr_number,
             &ci_config.github_token,
-            config_diff_limits(config),
+            DiffLimits::raw_fetch(),
         )
         .await
         {
@@ -183,7 +183,7 @@ async fn fetch_diff(config: &Config, diff_file: Option<&str>) -> anyhow::Result<
         }
     } else {
         log::info!("Local mode detected. Fetching staged diff...");
-        match fetch_local_diff(config_diff_limits(config)) {
+        match fetch_local_diff(DiffLimits::raw_fetch()) {
             Ok(diff) => {
                 log::info!(
                     "Fetched local diff: {} lines ({} bytes)",

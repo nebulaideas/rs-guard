@@ -17,6 +17,15 @@ pub const DEFAULT_MAX_DIFF_BYTES: usize = 500 * 1024;
 /// Default maximum allowed diff line count.
 pub const DEFAULT_MAX_DIFF_LINES: usize = 5_000;
 
+/// Absolute safety ceiling for *unfiltered* raw fetches.
+///
+/// User-facing [`DiffLimits`] are enforced only after path include/exclude
+/// filtering so monorepo lockfiles can be dropped before the size gate.
+/// This higher ceiling still bounds memory for pathological diffs.
+pub const RAW_FETCH_MAX_DIFF_BYTES: usize = 10 * 1024 * 1024; // 10 MB
+/// Absolute safety ceiling for unfiltered raw fetch line counts.
+pub const RAW_FETCH_MAX_DIFF_LINES: usize = 100_000;
+
 /// Limits applied when accepting a fetched or filtered diff.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DiffLimits {
@@ -31,6 +40,20 @@ impl Default for DiffLimits {
         Self {
             max_bytes: DEFAULT_MAX_DIFF_BYTES,
             max_lines: DEFAULT_MAX_DIFF_LINES,
+        }
+    }
+}
+
+impl DiffLimits {
+    /// Limits used only for raw network/file fetch before path filtering.
+    ///
+    /// User-facing limits are applied in [`apply_path_filters`] after
+    /// include/exclude so large lockfiles can be dropped first.
+    #[must_use]
+    pub const fn raw_fetch() -> Self {
+        Self {
+            max_bytes: RAW_FETCH_MAX_DIFF_BYTES,
+            max_lines: RAW_FETCH_MAX_DIFF_LINES,
         }
     }
 }
@@ -99,7 +122,7 @@ pub fn path_matches_glob(pattern: &str, path: &str) -> bool {
     }
     // Suffix: *.lock
     if let Some(suf) = pattern.strip_prefix("*.") {
-        return path.ends_with(&format!(".{}", suf)) || path.ends_with(suf);
+        return path.ends_with(&format!(".{}", suf));
     }
     if let Some(rest) = pattern.strip_prefix("**/") {
         // **/foo/** directory containment
@@ -108,32 +131,19 @@ pub fn path_matches_glob(pattern: &str, path: &str) -> bool {
                 || path.starts_with(&format!("{}/", mid))
                 || path.contains(&format!("/{}/", mid));
         }
-        // **/foo* or **/bar.rs — match against any path suffix segment chain
+        // **/foo* — match against the final path component only
         if rest.contains('*') {
             let parts: Vec<&str> = rest.split('*').collect();
             if parts.len() == 2 {
                 let (pre, post) = (parts[0], parts[1]);
-                // Match on full path or final component
                 let file = path.rsplit('/').next().unwrap_or(path);
-                if (file.starts_with(pre) && file.ends_with(post))
-                    || (path.starts_with(pre) && path.ends_with(post))
-                {
-                    return true;
-                }
-                // Also allow pre to appear after a directory boundary
-                if let Some(idx) = path.rfind(pre) {
-                    let slice = &path[idx..];
-                    if slice.starts_with(pre) && slice.ends_with(post) {
-                        return true;
-                    }
-                }
-                return false;
+                return file.starts_with(pre) && file.ends_with(post);
             }
-        } else {
-            return path == rest
-                || path.ends_with(&format!("/{}", rest))
-                || path.contains(&format!("/{}/", rest));
+            return false;
         }
+        return path == rest
+            || path.ends_with(&format!("/{}", rest))
+            || path.contains(&format!("/{}/", rest));
     }
     if let Some(prefix) = pattern.strip_suffix("/**") {
         return path == prefix || path.starts_with(&format!("{}/", prefix));
@@ -1116,6 +1126,8 @@ mod tests {
         assert!(path_matches_glob("**/foo*", "pkg/foo_bar.rs"));
         assert!(path_matches_glob("**/foo*", "foo.rs"));
         assert!(!path_matches_glob("**/foo*", "pkg/bar.rs"));
+        // Only final path component is matched — not intermediate directories.
+        assert!(!path_matches_glob("**/foo*", "src/foo_module/bar.rs"));
     }
 
     #[test]
@@ -1141,5 +1153,39 @@ diff --git a/README.md b/README.md\n--- a/README.md\n+++ b/README.md\n@@ -1 +1,2
     fn test_default_limits_raised() {
         assert_eq!(DEFAULT_MAX_DIFF_BYTES, 500 * 1024);
         assert_eq!(DEFAULT_MAX_DIFF_LINES, 5000);
+    }
+
+    #[test]
+    fn test_apply_path_filters_excludes_lockfile_before_user_size_limit() {
+        // Build a filtered-out lockfile section that alone would exceed a tiny limit,
+        // plus a small source file that fits.
+        let mut content = String::from(
+            "diff --git a/Cargo.lock b/Cargo.lock\n--- a/Cargo.lock\n+++ b/Cargo.lock\n@@ -1 +1,2 @@\n",
+        );
+        content.push_str(&("+x\n".repeat(200)));
+        content.push_str(
+            "diff --git a/src/main.rs b/src/main.rs\n--- a/src/main.rs\n+++ b/src/main.rs\n@@ -1 +1,2 @@\n+ok\n",
+        );
+
+        let tiny = DiffLimits {
+            max_bytes: 500,
+            max_lines: 50,
+        };
+        // Unfiltered would be too large for tiny limits:
+        assert!(check_diff_limits(&content, tiny).is_err());
+
+        let filtered = apply_path_filters(
+            DiffResult {
+                content: content.clone(),
+                size_bytes: content.len(),
+                line_count: content.lines().count(),
+            },
+            &[],
+            &["**/Cargo.lock".into()],
+            tiny,
+        )
+        .expect("excluding lockfile should leave a reviewable src diff");
+        assert!(filtered.content.contains("src/main.rs"));
+        assert!(!filtered.content.contains("Cargo.lock"));
     }
 }

@@ -736,11 +736,6 @@ fn resolve_important_threshold(toml: Option<&TomlConfig>) -> Result<u32, RsGuard
         .unwrap_or(3))
 }
 
-/// Resolves the explicit rules file path from env > toml.
-///
-/// Returns `None` when neither `RS_GUARD_RULES_FILE` nor the `rules_file`
-/// TOML key is set. Empty environment values are treated as unset.
-
 /// Splits a comma-separated path list into trimmed non-empty entries.
 fn split_csv_paths(raw: &str) -> Vec<String> {
     raw.split(',')
@@ -748,6 +743,11 @@ fn split_csv_paths(raw: &str) -> Vec<String> {
         .filter(|s| !s.is_empty())
         .collect()
 }
+
+/// Resolves the explicit rules file path from env > toml.
+///
+/// Returns `None` when neither `RS_GUARD_RULES_FILE` nor the `rules_file`
+/// TOML key is set. Empty environment values are treated as unset.
 fn resolve_rules_file_from_env_and_toml(toml: Option<&TomlConfig>) -> Option<PathBuf> {
     std::env::var("RS_GUARD_RULES_FILE")
         .ok()

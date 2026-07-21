@@ -334,7 +334,10 @@ output_per_million = 60
 | `include_paths` | `RS_GUARD_INCLUDE_PATHS` (comma-separated) | all | Only keep matching file sections |
 | `exclude_paths` | `RS_GUARD_EXCLUDE_PATHS` (comma-separated) | none | Drop matching file sections |
 
-Path filters run after fetch and before the size check re-validation / chunking, so excluding large lockfiles can keep a PR reviewable.
+Path filters run after the raw fetch and **before** the user-facing size gate
+(`max_diff_bytes` / `max_diff_lines`) and chunking. The raw fetch only applies a
+high safety ceiling (10 MB / 100k lines) so excluding large lockfiles can keep a
+PR reviewable under the configured limits.
 
 ### Supported path pattern constructs
 
