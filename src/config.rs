@@ -738,7 +738,8 @@ fn resolve_important_threshold(toml: Option<&TomlConfig>) -> Result<u32, RsGuard
 
 /// Splits a comma-separated path list into trimmed non-empty entries.
 fn split_csv_paths(raw: &str) -> Vec<String> {
-    raw.split(',')
+    raw.trim()
+        .split(',')
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
         .collect()

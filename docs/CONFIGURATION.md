@@ -359,3 +359,6 @@ Patterns that contain `/` (and no `*` / `**` operators already handled above) ar
 **exact path matches only** — `src/main.rs` does **not** match `vendor/src/main.rs`.
 Basename-only patterns without `/` (e.g. `Cargo.lock`) match the final path component
 at any depth.
+
+**Unsupported:** patterns with more than one single-`*` wildcard (e.g. `**/foo*bar*`
+or `a*b*c`) never match. Prefer simple documented forms only.

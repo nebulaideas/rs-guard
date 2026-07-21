@@ -155,7 +155,7 @@ pub struct ReviewArgs {
     #[arg(
         long,
         env = "RS_GUARD_INCLUDE_PATHS",
-        help = "Comma-separated path include globs"
+        help = "Comma-separated path include globs (e.g. src/**,*.rs)"
     )]
     pub include_paths: Option<String>,
 
@@ -163,7 +163,7 @@ pub struct ReviewArgs {
     #[arg(
         long,
         env = "RS_GUARD_EXCLUDE_PATHS",
-        help = "Comma-separated path exclude globs"
+        help = "Comma-separated path exclude globs (e.g. **/Cargo.lock,vendor/**)"
     )]
     pub exclude_paths: Option<String>,
 

@@ -26,7 +26,10 @@ pub const RAW_FETCH_MAX_DIFF_BYTES: usize = 10 * 1024 * 1024; // 10 MB
 /// Absolute safety ceiling for unfiltered raw fetch line counts.
 pub const RAW_FETCH_MAX_DIFF_LINES: usize = 100_000;
 
-/// Limits applied when accepting a fetched or filtered diff.
+/// User-facing size/line limits for an accepted (post-filter) diff.
+///
+/// Distinct from [`DiffLimits::raw_fetch`], which only bounds the unfiltered
+/// download. Configure via `max_diff_bytes` / `max_diff_lines`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DiffLimits {
     /// Maximum size in bytes.
@@ -111,12 +114,48 @@ fn check_diff_limits(content: &str, limits: DiffLimits) -> Result<(), RsGuardErr
 ///
 /// Matching is case-sensitive; paths are compared with `/` separators and a
 /// leading `./` is stripped from both pattern and path.
+/// Counts `*` wildcards that are not part of a `**` sequence.
+fn count_single_star_wildcards(pattern: &str) -> usize {
+    let bytes = pattern.as_bytes();
+    let mut i = 0;
+    let mut count = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'*' {
+            if i + 1 < bytes.len() && bytes[i + 1] == b'*' {
+                i += 2;
+            } else {
+                count += 1;
+                i += 1;
+            }
+        } else {
+            i += 1;
+        }
+    }
+    count
+}
+
+/// Returns true if `path` matches a simple glob pattern.
+///
+/// Supported constructs (not full gitignore):
+/// - exact path match (`src/main.rs`)
+/// - basename / suffix (`Cargo.lock`, `*.lock`)
+/// - directory prefix (`src/**`)
+/// - any-depth suffix (`**/Cargo.lock`, `**/foo*`)
+/// - single `*` segment wildcard (`src/*/lib.rs`)
+///
+/// Patterns with more than one single-`*` wildcard never match.
+/// Matching is case-sensitive; paths use `/` separators; leading `./` is stripped.
 pub fn path_matches_glob(pattern: &str, path: &str) -> bool {
     let path = path.trim_start_matches("./");
     let pattern = pattern.trim_start_matches("./");
     // Bare `*` / `**` match every path (documented in CONFIGURATION.md).
     if pattern == "**" || pattern == "*" {
         return true;
+    }
+    // Only a single single-star wildcard is supported (e.g. `**/foo*`, `src/*/a.rs`).
+    // Patterns like `**/foo*bar*` are rejected (no match) to avoid silent mis-parsing.
+    if count_single_star_wildcards(pattern) > 1 {
+        return false;
     }
     if pattern == path {
         return true;
@@ -1161,6 +1200,52 @@ mod tests {
         assert!(path_matches_glob("src/*/lib.rs", "src/foo/lib.rs"));
         assert!(!path_matches_glob("src/*/lib.rs", "src/foo/bar/lib.rs"));
         assert!(!path_matches_glob("src/*/lib.rs", "src/lib.rs"));
+    }
+
+    #[test]
+    fn test_path_matches_glob_rejects_multiple_single_stars() {
+        // Multi-star patterns are unsupported and must not silently partial-match.
+        assert!(!path_matches_glob("**/foo*bar*", "pkg/foobar"));
+        assert!(!path_matches_glob("a*b*c", "axbxc"));
+    }
+
+    #[test]
+    fn test_apply_path_filters_all_excluded_returns_empty_diff() {
+        let content = "\
+diff --git a/src/a.rs b/src/a.rs\n--- a/src/a.rs\n+++ b/src/a.rs\n@@ -1 +1,2 @@\n+x\n";
+        let err = apply_path_filters(
+            DiffResult {
+                content: content.to_string(),
+                size_bytes: content.len(),
+                line_count: content.lines().count(),
+            },
+            &[],
+            &["src/**".into()],
+            DiffLimits::default(),
+        )
+        .unwrap_err();
+        assert!(
+            matches!(err, RsGuardError::EmptyDiff),
+            "expected EmptyDiff when every file is excluded, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn test_apply_path_filters_include_miss_returns_empty_diff() {
+        let content = "\
+diff --git a/src/a.rs b/src/a.rs\n--- a/src/a.rs\n+++ b/src/a.rs\n@@ -1 +1,2 @@\n+x\n";
+        let err = apply_path_filters(
+            DiffResult {
+                content: content.to_string(),
+                size_bytes: content.len(),
+                line_count: content.lines().count(),
+            },
+            &["docs/**".into()],
+            &[],
+            DiffLimits::default(),
+        )
+        .unwrap_err();
+        assert!(matches!(err, RsGuardError::EmptyDiff));
     }
 
     #[test]
