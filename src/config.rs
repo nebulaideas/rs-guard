@@ -803,23 +803,16 @@ fn normalize_diff_base(raw: &str) -> Option<String> {
     }
 }
 
-/// Resolves the optional local diff base ref from env > TOML.
+/// Resolves the optional local diff base ref from TOML.
 ///
-/// Env: `RS_GUARD_BASE`. TOML: `diff_base`. Values are trimmed; blank strings
-/// (including accidental whitespace) are treated as unset.
+/// TOML: `diff_base`. Values are trimmed; blank strings are treated as unset.
 ///
-/// Note: clap also binds `RS_GUARD_BASE` to `--base`. That is intentional —
-/// `from_env` must resolve env/TOML before CLI merge, and `apply_args` then
-/// applies the clap value (flag or env) so CLI always wins. Reading the env
-/// in both places is idempotent because both paths use [`normalize_diff_base`].
-fn resolve_diff_base_from_env_and_toml(toml: Option<&TomlConfig>) -> Option<String> {
-    std::env::var("RS_GUARD_BASE")
-        .ok()
-        .and_then(|s| normalize_diff_base(&s))
-        .or_else(|| {
-            toml.and_then(|t| t.diff_base.as_deref())
-                .and_then(normalize_diff_base)
-        })
+/// `RS_GUARD_BASE` and CLI `--base` are applied later via clap + [`Config::apply_args`]
+/// (clap's `env` attribute binds the env var to the same flag). That keeps a single
+/// override path: CLI/env win over TOML without reading the env twice.
+fn resolve_diff_base_from_toml(toml: Option<&TomlConfig>) -> Option<String> {
+    toml.and_then(|t| t.diff_base.as_deref())
+        .and_then(normalize_diff_base)
 }
 
 /// Resolves and validates the provider base URL from TOML.
@@ -1137,7 +1130,7 @@ impl Config {
         let auto_gitignore = toml.as_ref().and_then(|t| t.auto_gitignore).unwrap_or(true);
         let rules_file = resolve_rules_file_from_env_and_toml(toml.as_ref());
         let output_format = resolve_output_format(toml.as_ref())?;
-        let diff_base = resolve_diff_base_from_env_and_toml(toml.as_ref());
+        let diff_base = resolve_diff_base_from_toml(toml.as_ref());
 
         Ok(Config {
             provider,
@@ -1303,7 +1296,8 @@ impl Config {
             self.rules_file = Some(rules_file.clone());
         }
         if let Some(ref base) = args.base {
-            // Explicit empty `--base ""` means unset → fall back to staged diff.
+            // Clap may set this from `--base` or `RS_GUARD_BASE`. Empty/whitespace
+            // means unset → fall back to staged (overrides TOML `diff_base`).
             self.diff_base = normalize_diff_base(base);
         }
 

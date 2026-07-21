@@ -582,19 +582,19 @@ pub fn fetch_range_diff(base: &str) -> Result<DiffResult, RsGuardError> {
     // interpreted as git options (defense in depth).
     if base.starts_with('-') {
         return Err(RsGuardError::Config(format!(
-            "invalid diff base ref {:?}: must not start with '-' (looks like a git option)",
+            "invalid diff base ref '{}': must not start with '-' (looks like a git option)",
             base
         )));
     }
     if base.contains("..") {
         return Err(RsGuardError::Config(format!(
-            "invalid diff base ref {:?}: must not contain '..' (ambiguous range syntax)",
+            "invalid diff base ref '{}': must not contain '..' (ambiguous range syntax)",
             base
         )));
     }
     if base.chars().any(|c| c.is_whitespace() || c == ' ') {
         return Err(RsGuardError::Config(format!(
-            "invalid diff base ref {:?}: whitespace or null bytes are not allowed",
+            "invalid diff base ref '{}': whitespace or null bytes are not allowed",
             base
         )));
     }
