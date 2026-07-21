@@ -89,7 +89,7 @@ jobs:
           toolchain: stable
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32
       - run: cargo install cargo-deny --locked
-      - run: cargo deny check --config deny.toml
+      - run: cargo deny check
 
   audit:
     name: cargo-audit
