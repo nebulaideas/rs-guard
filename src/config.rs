@@ -793,16 +793,27 @@ fn resolve_rules_file_from_env_and_toml(toml: Option<&TomlConfig>) -> Option<Pat
         .or_else(|| toml.and_then(|t| t.rules_file.clone()).map(PathBuf::from))
 }
 
+/// Trims a diff-base string; empty / whitespace-only becomes `None` (unset).
+fn normalize_diff_base(raw: &str) -> Option<String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
 /// Resolves the optional local diff base ref from env > TOML.
 ///
-/// Env: `RS_GUARD_BASE`. TOML: `diff_base`. Empty env values are treated as unset.
+/// Env: `RS_GUARD_BASE`. TOML: `diff_base`. Values are trimmed; blank strings
+/// (including accidental whitespace) are treated as unset.
 fn resolve_diff_base_from_env_and_toml(toml: Option<&TomlConfig>) -> Option<String> {
     std::env::var("RS_GUARD_BASE")
         .ok()
-        .filter(|s| !s.is_empty())
+        .and_then(|s| normalize_diff_base(&s))
         .or_else(|| {
-            toml.and_then(|t| t.diff_base.clone())
-                .filter(|s| !s.is_empty())
+            toml.and_then(|t| t.diff_base.as_deref())
+                .and_then(normalize_diff_base)
         })
 }
 
@@ -1287,7 +1298,8 @@ impl Config {
             self.rules_file = Some(rules_file.clone());
         }
         if let Some(ref base) = args.base {
-            self.diff_base = Some(base.clone());
+            // Explicit empty `--base ""` means unset → fall back to staged diff.
+            self.diff_base = normalize_diff_base(base);
         }
 
         if args.no_project_rules && self.rules_file.is_some() {
@@ -2208,6 +2220,31 @@ mod tests {
         let cli = crate::cli::Cli::parse_from(["rs-guard", "--format", "json"]);
         config.apply_args(&cli.review).unwrap();
         assert_eq!(config.output_format, OutputFormat::Json);
+        std::env::remove_var("DEEPSEEK_API_KEY");
+    }
+
+    #[test]
+    fn test_normalize_diff_base_empty_and_whitespace() {
+        assert_eq!(normalize_diff_base(""), None);
+        assert_eq!(normalize_diff_base("   "), None);
+        assert_eq!(normalize_diff_base("\t\n"), None);
+        assert_eq!(normalize_diff_base(" main "), Some("main".into()));
+        assert_eq!(
+            normalize_diff_base("origin/main"),
+            Some("origin/main".into())
+        );
+    }
+
+    #[test]
+    fn test_apply_args_empty_base_unsets_diff_base() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        std::env::set_var("DEEPSEEK_API_KEY", "test-key");
+        let mut config = Config::from_env(None).unwrap();
+        config.diff_base = Some("main".into());
+        use clap::Parser;
+        let cli = crate::cli::Cli::parse_from(["rs-guard", "--base", ""]);
+        config.apply_args(&cli.review).unwrap();
+        assert_eq!(config.diff_base, None);
         std::env::remove_var("DEEPSEEK_API_KEY");
     }
 }

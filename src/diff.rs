@@ -570,7 +570,9 @@ pub fn fetch_local_diff(limits: DiffLimits) -> Result<DiffResult, RsGuardError> 
 /// [`RsGuardError::Config`] if git exits non-zero (e.g. unknown ref),
 /// or the same validation errors as [`build_local_diff_result`].
 pub fn fetch_range_diff(base: &str) -> Result<DiffResult, RsGuardError> {
-    if base.trim().is_empty() {
+    // Trim accidental leading/trailing whitespace from env/TOML/CLI values.
+    let base = base.trim();
+    if base.is_empty() {
         return Err(RsGuardError::Config(
             "diff base ref must not be empty".to_string(),
         ));
