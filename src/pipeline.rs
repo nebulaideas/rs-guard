@@ -582,6 +582,8 @@ pub async fn run_pipeline(
     config: Config,
     diff_file: Option<&str>,
 ) -> anyhow::Result<PipelineResult> {
+    // `Complete` is an intentional early exit (empty / too-large / handled fetch
+    // errors) — not a successful diff ready for filtering.
     let diff = match fetch_diff(&config, diff_file).await? {
         DiffFetchOutcome::Diff(d) => d,
         DiffFetchOutcome::Complete(result) => return Ok(result),

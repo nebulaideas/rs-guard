@@ -242,9 +242,15 @@ async fn test_full_pipeline_ci_diff_too_large_submits_comment() {
     let mut config = ci_config(42, "deepseek", "test-token");
     config.github_base_url = github.uri();
     config.no_cache = true;
+    // Keep this test independent of the raised default hard limits (5000 lines).
+    config.max_diff_lines = 1500;
+    config.max_diff_bytes = 100 * 1024;
 
     let result = run_pipeline(config, None).await;
-    assert!(matches!(result, Ok(PipelineResult::Success)));
+    assert!(
+        matches!(result, Ok(PipelineResult::Success)),
+        "expected Success on DiffTooLarge CI path, got: {result:?}"
+    );
 }
 
 #[tokio::test]

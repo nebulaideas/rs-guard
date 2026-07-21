@@ -335,3 +335,18 @@ output_per_million = 60
 | `exclude_paths` | `RS_GUARD_EXCLUDE_PATHS` (comma-separated) | none | Drop matching file sections |
 
 Path filters run after fetch and before the size check re-validation / chunking, so excluding large lockfiles can keep a PR reviewable.
+
+### Supported path pattern constructs
+
+rs-guard uses a **small custom matcher** (not full gitignore / full glob):
+
+| Pattern | Meaning | Example matches |
+|---------|---------|-----------------|
+| `path/to/file` | Exact path | `src/main.rs` |
+| `*.ext` | Basename suffix | `Cargo.lock` via `*.lock` |
+| `dir/**` | Directory prefix | `src/**` → `src/a.rs` |
+| `**/name` | Any-depth suffix | `**/Cargo.lock` |
+| `**/foo*` | Any-depth prefix on a segment | `pkg/foo_bar.rs` |
+| `a/*/b` | Single `*` wildcard | `src/*/lib.rs` |
+
+Patterns are case-sensitive and use `/` separators. Leading `./` is ignored.

@@ -79,42 +79,66 @@ fn check_diff_limits(content: &str, limits: DiffLimits) -> Result<(), RsGuardErr
 
 /// Returns true if `path` matches a simple glob pattern.
 ///
-/// Supports `*` (single path segment wildcard) and `**` (any path prefix/suffix).
-/// Matching is case-sensitive and treats paths as relative with `/` separators.
+/// Supported constructs (not full gitignore):
+/// - exact path match (`src/main.rs`)
+/// - basename / suffix (`Cargo.lock`, `*.lock`)
+/// - directory prefix (`src/**`)
+/// - any-depth suffix (`**/Cargo.lock`, `**/foo*`)
+/// - single `*` segment wildcard (`src/*/lib.rs`)
+///
+/// Matching is case-sensitive; paths are compared with `/` separators and a
+/// leading `./` is stripped from both pattern and path.
 pub fn path_matches_glob(pattern: &str, path: &str) -> bool {
     let path = path.trim_start_matches("./");
     let pattern = pattern.trim_start_matches("./");
     if pattern == "**" || pattern == "*" {
         return true;
     }
-    // Exact match
     if pattern == path {
         return true;
     }
-    // Suffix: *.lock or Cargo.lock
+    // Suffix: *.lock
     if let Some(suf) = pattern.strip_prefix("*.") {
         return path.ends_with(&format!(".{}", suf)) || path.ends_with(suf);
     }
     if let Some(rest) = pattern.strip_prefix("**/") {
-        if path == rest || path.ends_with(&format!("/{}", rest)) {
-            return true;
-        }
-        // **/foo/** style
+        // **/foo/** directory containment
         if let Some(mid) = rest.strip_suffix("/**") {
             return path == mid
                 || path.starts_with(&format!("{}/", mid))
                 || path.contains(&format!("/{}/", mid));
         }
+        // **/foo* or **/bar.rs — match against any path suffix segment chain
         if rest.contains('*') {
-            // fall through to simple contains of static prefix
+            let parts: Vec<&str> = rest.split('*').collect();
+            if parts.len() == 2 {
+                let (pre, post) = (parts[0], parts[1]);
+                // Match on full path or final component
+                let file = path.rsplit('/').next().unwrap_or(path);
+                if (file.starts_with(pre) && file.ends_with(post))
+                    || (path.starts_with(pre) && path.ends_with(post))
+                {
+                    return true;
+                }
+                // Also allow pre to appear after a directory boundary
+                if let Some(idx) = path.rfind(pre) {
+                    let slice = &path[idx..];
+                    if slice.starts_with(pre) && slice.ends_with(post) {
+                        return true;
+                    }
+                }
+                return false;
+            }
         } else {
-            return path.contains(rest) || path.ends_with(rest);
+            return path == rest
+                || path.ends_with(&format!("/{}", rest))
+                || path.contains(&format!("/{}/", rest));
         }
     }
     if let Some(prefix) = pattern.strip_suffix("/**") {
         return path == prefix || path.starts_with(&format!("{}/", prefix));
     }
-    // Segment * wildcard: src/*/foo.rs
+    // Single * wildcard: src/*/foo.rs or foo*bar
     if pattern.contains('*') {
         let parts: Vec<&str> = pattern.split('*').collect();
         if parts.len() == 2 {
@@ -1085,6 +1109,13 @@ mod tests {
         assert!(path_matches_glob("src/**", "src/main.rs"));
         assert!(!path_matches_glob("src/**", "tests/main.rs"));
         assert!(path_matches_glob("*.lock", "Cargo.lock"));
+    }
+
+    #[test]
+    fn test_path_matches_glob_star_suffix_after_globstar() {
+        assert!(path_matches_glob("**/foo*", "pkg/foo_bar.rs"));
+        assert!(path_matches_glob("**/foo*", "foo.rs"));
+        assert!(!path_matches_glob("**/foo*", "pkg/bar.rs"));
     }
 
     #[test]
