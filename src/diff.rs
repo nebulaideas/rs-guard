@@ -114,13 +114,14 @@ fn check_diff_limits(content: &str, limits: DiffLimits) -> Result<(), RsGuardErr
 pub fn path_matches_glob(pattern: &str, path: &str) -> bool {
     let path = path.trim_start_matches("./");
     let pattern = pattern.trim_start_matches("./");
+    // Bare `*` / `**` match every path (documented in CONFIGURATION.md).
     if pattern == "**" || pattern == "*" {
         return true;
     }
     if pattern == path {
         return true;
     }
-    // Suffix: *.lock
+    // Extension suffix: *.lock
     if let Some(suf) = pattern.strip_prefix("*.") {
         return path.ends_with(&format!(".{}", suf));
     }
@@ -131,9 +132,9 @@ pub fn path_matches_glob(pattern: &str, path: &str) -> bool {
                 || path.starts_with(&format!("{}/", mid))
                 || path.contains(&format!("/{}/", mid));
         }
-        // **/foo* — match against the final path component only
+        // **/foo* — final path component only
         if rest.contains('*') {
-            let parts: Vec<&str> = rest.split('*').collect();
+            let parts: Vec<&str> = rest.splitn(2, '*').collect();
             if parts.len() == 2 {
                 let (pre, post) = (parts[0], parts[1]);
                 let file = path.rsplit('/').next().unwrap_or(path);
@@ -141,21 +142,40 @@ pub fn path_matches_glob(pattern: &str, path: &str) -> bool {
             }
             return false;
         }
-        return path == rest
-            || path.ends_with(&format!("/{}", rest))
-            || path.contains(&format!("/{}/", rest));
+        // **/name — basename at any depth
+        return path == rest || path.ends_with(&format!("/{}", rest));
     }
     if let Some(prefix) = pattern.strip_suffix("/**") {
         return path == prefix || path.starts_with(&format!("{}/", prefix));
     }
-    // Single * wildcard: src/*/foo.rs or foo*bar
+    // Single `*` spanning exactly one path segment: src/*/lib.rs
     if pattern.contains('*') {
-        let parts: Vec<&str> = pattern.split('*').collect();
-        if parts.len() == 2 {
-            return path.starts_with(parts[0]) && path.ends_with(parts[1]);
-        }
+        return match_single_star_segment(pattern, path);
     }
-    path == pattern || path.ends_with(&format!("/{}", pattern))
+    // Basename-only patterns (no '/'): match final component.
+    // Path patterns with '/' are exact-match only (handled above).
+    if !pattern.contains('/') {
+        return path.rsplit('/').next() == Some(pattern);
+    }
+    false
+}
+
+/// Matches `pre*post` where the wildcard spans exactly one path segment.
+fn match_single_star_segment(pattern: &str, path: &str) -> bool {
+    let parts: Vec<&str> = pattern.splitn(2, '*').collect();
+    if parts.len() != 2 {
+        return false;
+    }
+    let (pre, post) = (parts[0], parts[1]);
+    if !path.starts_with(pre) || !path.ends_with(post) {
+        return false;
+    }
+    let mid_end = path.len().saturating_sub(post.len());
+    if mid_end < pre.len() {
+        return false;
+    }
+    let mid = &path[pre.len()..mid_end];
+    !mid.is_empty() && !mid.contains('/')
 }
 
 /// Whether a file path should be kept given include/exclude patterns.
@@ -1115,10 +1135,16 @@ mod tests {
     #[test]
     fn test_path_matches_glob_basic() {
         assert!(path_matches_glob("Cargo.lock", "Cargo.lock"));
+        assert!(path_matches_glob("Cargo.lock", "pkg/Cargo.lock")); // basename
         assert!(path_matches_glob("**/Cargo.lock", "foo/Cargo.lock"));
         assert!(path_matches_glob("src/**", "src/main.rs"));
         assert!(!path_matches_glob("src/**", "tests/main.rs"));
         assert!(path_matches_glob("*.lock", "Cargo.lock"));
+        // Exact path with '/' must not match nested suffix.
+        assert!(path_matches_glob("src/main.rs", "src/main.rs"));
+        assert!(!path_matches_glob("src/main.rs", "vendor/src/main.rs"));
+        // Bare * matches everything.
+        assert!(path_matches_glob("*", "anything/here.rs"));
     }
 
     #[test]
@@ -1128,6 +1154,13 @@ mod tests {
         assert!(!path_matches_glob("**/foo*", "pkg/bar.rs"));
         // Only final path component is matched — not intermediate directories.
         assert!(!path_matches_glob("**/foo*", "src/foo_module/bar.rs"));
+    }
+
+    #[test]
+    fn test_path_matches_glob_single_segment_wildcard() {
+        assert!(path_matches_glob("src/*/lib.rs", "src/foo/lib.rs"));
+        assert!(!path_matches_glob("src/*/lib.rs", "src/foo/bar/lib.rs"));
+        assert!(!path_matches_glob("src/*/lib.rs", "src/lib.rs"));
     }
 
     #[test]

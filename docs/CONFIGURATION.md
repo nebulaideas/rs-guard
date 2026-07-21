@@ -350,6 +350,12 @@ rs-guard uses a **small custom matcher** (not full gitignore / full glob):
 | `dir/**` | Directory prefix | `src/**` → `src/a.rs` |
 | `**/name` | Any-depth suffix | `**/Cargo.lock` |
 | `**/foo*` | Any-depth prefix on a segment | `pkg/foo_bar.rs` |
-| `a/*/b` | Single `*` wildcard | `src/*/lib.rs` |
+| `a/*/b` | Single `*` = exactly one path segment | `src/*/lib.rs` (not multi-level) |
+| `*` or `**` alone | Match every path | Use carefully with include/exclude |
 
 Patterns are case-sensitive and use `/` separators. Leading `./` is ignored.
+
+Patterns that contain `/` (and no `*` / `**` operators already handled above) are
+**exact path matches only** — `src/main.rs` does **not** match `vendor/src/main.rs`.
+Basename-only patterns without `/` (e.g. `Cargo.lock`) match the final path component
+at any depth.
