@@ -8,6 +8,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![crates.io](https://img.shields.io/crates/v/rs-guard.svg)](https://crates.io/crates/rs-guard)
 [![docs.rs](https://docs.rs/rs-guard/badge.svg)](https://docs.rs/rs-guard)
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/nebulaideas/rs-guard)
 
 ---
 
