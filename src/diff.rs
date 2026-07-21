@@ -586,6 +586,12 @@ pub fn fetch_range_diff(base: &str) -> Result<DiffResult, RsGuardError> {
             base
         )));
     }
+    if base.contains("..") {
+        return Err(RsGuardError::Config(format!(
+            "invalid diff base ref {:?}: must not contain '..' (ambiguous range syntax)",
+            base
+        )));
+    }
     if base.chars().any(|c| c.is_whitespace() || c == ' ') {
         return Err(RsGuardError::Config(format!(
             "invalid diff base ref {:?}: whitespace or null bytes are not allowed",
@@ -1386,5 +1392,74 @@ diff --git a/README.md b/README.md\n--- a/README.md\n+++ b/README.md\n@@ -1 +1,2
             err.to_string().contains("must not start with '-'"),
             "unexpected error: {err}"
         );
+    }
+
+    #[test]
+    fn test_fetch_range_diff_rejects_double_dot() {
+        let err = fetch_range_diff("origin/main..").unwrap_err();
+        assert!(
+            err.to_string().contains("must not contain '..'"),
+            "unexpected error: {err}"
+        );
+        let err = fetch_range_diff("a..b").unwrap_err();
+        assert!(
+            err.to_string().contains("must not contain '..'"),
+            "unexpected error: {err}"
+        );
+    }
+
+    /// Builds a linear two-commit repo: branch `base` at first commit, HEAD at second.
+    fn setup_two_commit_repo() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        let run = |args: &[&str]| {
+            let out = std::process::Command::new("git")
+                .args(args)
+                .current_dir(dir.path())
+                .env("GIT_AUTHOR_NAME", "rs-guard-test")
+                .env("GIT_AUTHOR_EMAIL", "test@example.com")
+                .env("GIT_COMMITTER_NAME", "rs-guard-test")
+                .env("GIT_COMMITTER_EMAIL", "test@example.com")
+                .output()
+                .expect("spawn git");
+            assert!(
+                out.status.success(),
+                "git {:?} failed: {}",
+                args,
+                String::from_utf8_lossy(&out.stderr)
+            );
+        };
+        run(&["init"]);
+        run(&["config", "user.email", "test@example.com"]);
+        run(&["config", "user.name", "rs-guard-test"]);
+        // Avoid depending on default branch name (master vs main).
+        run(&["checkout", "-B", "main"]);
+        std::fs::write(dir.path().join("file.txt"), "version-one\n").unwrap();
+        run(&["add", "file.txt"]);
+        run(&["commit", "-m", "first"]);
+        run(&["branch", "base"]);
+        std::fs::write(dir.path().join("file.txt"), "version-two\n").unwrap();
+        run(&["add", "file.txt"]);
+        run(&["commit", "-m", "second"]);
+        dir
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn test_fetch_range_diff_returns_commits_since_base() {
+        let dir = setup_two_commit_repo();
+        let original = std::env::current_dir().unwrap();
+        std::env::set_current_dir(dir.path()).unwrap();
+
+        let result = fetch_range_diff("base");
+        let _ = std::env::set_current_dir(&original);
+
+        let diff = result.expect("range diff should succeed");
+        assert!(
+            diff.content.contains("version-two") || diff.content.contains("+version-two"),
+            "expected second-commit content, got: {}",
+            diff.content
+        );
+        assert!(diff.line_count > 0);
+        assert!(diff.size_bytes > 0);
     }
 }

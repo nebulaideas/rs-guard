@@ -119,6 +119,7 @@ async fn handle_diff_fetch_error(
 ///
 /// `Diff` carries the fetched diff; `Complete` means the pipeline should
 /// return early with the given [`PipelineResult`] (e.g. empty diff).
+#[derive(Debug)]
 enum DiffFetchOutcome {
     Diff(DiffResult),
     Complete(PipelineResult),
@@ -1182,5 +1183,127 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("Failed to read diff file"));
+    }
+
+    /// Temp repo: branch `base` at first commit, HEAD at second (file change).
+    fn setup_pipeline_range_repo() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        let run = |args: &[&str]| {
+            let out = std::process::Command::new("git")
+                .args(args)
+                .current_dir(dir.path())
+                .env("GIT_AUTHOR_NAME", "rs-guard-test")
+                .env("GIT_AUTHOR_EMAIL", "test@example.com")
+                .env("GIT_COMMITTER_NAME", "rs-guard-test")
+                .env("GIT_COMMITTER_EMAIL", "test@example.com")
+                .output()
+                .expect("spawn git");
+            assert!(
+                out.status.success(),
+                "git {:?} failed: {}",
+                args,
+                String::from_utf8_lossy(&out.stderr)
+            );
+        };
+        run(&["init"]);
+        run(&["config", "user.email", "test@example.com"]);
+        run(&["config", "user.name", "rs-guard-test"]);
+        run(&["checkout", "-B", "main"]);
+        std::fs::write(dir.path().join("file.txt"), "pipeline-v1\n").unwrap();
+        run(&["add", "file.txt"]);
+        run(&["commit", "-m", "first"]);
+        run(&["branch", "base"]);
+        std::fs::write(dir.path().join("file.txt"), "pipeline-v2\n").unwrap();
+        run(&["add", "file.txt"]);
+        run(&["commit", "-m", "second"]);
+        dir
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_fetch_diff_routes_to_range_when_diff_base_set() {
+        let dir = setup_pipeline_range_repo();
+        let original = std::env::current_dir().unwrap();
+        std::env::set_current_dir(dir.path()).unwrap();
+
+        let mut config = Config::empty();
+        config.is_ci = false;
+        config.diff_base = Some("base".into());
+
+        let outcome = fetch_diff(&config, None).await;
+        let _ = std::env::set_current_dir(&original);
+
+        match outcome.expect("fetch_diff should succeed") {
+            DiffFetchOutcome::Diff(diff) => {
+                assert!(
+                    diff.content.contains("pipeline-v2") || diff.content.contains("+pipeline-v2"),
+                    "expected range-diff content for base...HEAD, got: {}",
+                    diff.content
+                );
+            }
+            DiffFetchOutcome::Complete(r) => {
+                panic!("expected Diff outcome, got Complete({r:?})");
+            }
+        }
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_fetch_diff_range_unknown_base_propagates_error() {
+        let dir = setup_pipeline_range_repo();
+        let original = std::env::current_dir().unwrap();
+        std::env::set_current_dir(dir.path()).unwrap();
+
+        let mut config = Config::empty();
+        config.is_ci = false;
+        config.diff_base = Some("definitely-missing-ref".into());
+
+        let outcome = fetch_diff(&config, None).await;
+        let _ = std::env::set_current_dir(&original);
+
+        assert!(
+            outcome.is_err(),
+            "unknown base should error, got {outcome:?}"
+        );
+        let msg = outcome.unwrap_err().to_string();
+        assert!(
+            msg.contains("local") || msg.contains("git") || msg.contains("failed"),
+            "unexpected error message: {msg}"
+        );
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_fetch_diff_file_precedence_over_diff_base() {
+        let dir = setup_pipeline_range_repo();
+        let original = std::env::current_dir().unwrap();
+        std::env::set_current_dir(dir.path()).unwrap();
+
+        let file_path = dir.path().join("premade.diff");
+        let file_content =
+            "diff --git a/x.rs b/x.rs\n--- a/x.rs\n+++ b/x.rs\n@@ -1 +1,2 @@\n+from-file\n";
+        std::fs::write(&file_path, file_content).unwrap();
+
+        let mut config = Config::empty();
+        config.is_ci = false;
+        config.diff_base = Some("base".into());
+
+        let outcome = fetch_diff(&config, Some(file_path.to_str().unwrap())).await;
+        let _ = std::env::set_current_dir(&original);
+
+        match outcome.expect("file diff should win") {
+            DiffFetchOutcome::Diff(diff) => {
+                assert!(
+                    diff.content.contains("from-file"),
+                    "diff-file must take precedence over --base, got: {}",
+                    diff.content
+                );
+                assert!(
+                    !diff.content.contains("pipeline-v2"),
+                    "must not use range diff when --diff-file is set"
+                );
+            }
+            DiffFetchOutcome::Complete(r) => panic!("expected Diff, got Complete({r:?})"),
+        }
     }
 }

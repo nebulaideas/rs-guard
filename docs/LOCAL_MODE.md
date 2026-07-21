@@ -218,7 +218,7 @@ rs-guard
 ```
 
 This runs `git diff <base>...HEAD` (three-dot, merge-base aware). The base ref
-is trimmed; blank/`--base ""` is treated as unset (staged diff). Non-empty values must not contain internal whitespace/NUL or start with `-` (rejected to avoid
+is trimmed; blank/`--base ""` is treated as unset (staged diff). Non-empty values must not contain `..`, internal whitespace/NUL, or start with `-` (rejected to avoid
 git option injection). Precedence:
 
 1. `--diff-file` (always wins)
