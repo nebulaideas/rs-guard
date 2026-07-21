@@ -97,6 +97,7 @@ base_url = "https://open.bigmodel.cn/api/paas/v4"
 | `important_issues_threshold` | integer | `3`      | Number of `[Important]` issues required to trigger `REQUEST_CHANGES`. `0` disables blocking on important issues (they still surface as `COMMENT`). |
 | `project_rules_enabled` | boolean | `true` | Whether to scan for and load project rules files. Set to `false` to disable auto-detection. Can also be disabled via `--no-project-rules` CLI flag or `RS_GUARD_NO_PROJECT_RULES` env var (any non-empty value disables). |
 | `rules_file` | string | (none) | Path to an explicit project rules file. Overrides auto-detection. Mutually exclusive with `--no-project-rules` / `RS_GUARD_NO_PROJECT_RULES`. Can also be set via `--rules-file` CLI flag or `RS_GUARD_RULES_FILE` env var. |
+| `diff_base` | string | (none) | Local mode only: git base ref for three-dot range review (`git diff <base>...HEAD`) instead of staged changes. Equivalent to `--base` / `RS_GUARD_BASE`. Ignored in CI mode. Blank values are treated as unset. |
 
 #### Provider Section Fields
 
@@ -229,6 +230,7 @@ These flags are available at the top level for the default review command:
 | `--important-threshold` | | `3`                    | `[Important]` issues required to `REQUEST_CHANGES`. |
 | `--no-cache`    |       | Off                        | Bypass response cache.               |
 | `--dry-run`     |       | Off                        | Run without submitting or blocking.  |
+| `--base`        |       | (none)                     | Local mode: review `git diff <base>...HEAD` instead of staged changes. |
 | `--help`        | `-h`  |                            | Display help.                        |
 | `--version`     | `-V`  |                            | Display version.                     |
 
@@ -271,6 +273,7 @@ Run `rs-guard <subcommand> --help` for details on each subcommand.
 | `RS_GUARD_IMPORTANT_THRESHOLD` | Optional     | Override TOML/default important-issues threshold. |
 | `GITHUB_API_URL`        | Optional            | Custom GitHub API base URL (Enterprise). |
 | `RS_GUARD_DIFF_FILE`    | Optional            | Path to a pre-existing diff file.        |
+| `RS_GUARD_BASE`         | Optional            | Local mode: base ref for `git diff <base>...HEAD` (same as `--base` / TOML `diff_base`). |
 | `RS_GUARD_METRICS_PATH` | Optional            | Path for the metrics JSON artifact.      |
 | `RS_GUARD_NO_PROJECT_RULES` | Optional        | Disables project rules auto-detection when set to **any non-empty value** (including `"false"` or `"0"`). To keep rules enabled, leave this variable unset. This matches the pattern used by `RS_GUARD_NO_CACHE`. |
 | `RS_GUARD_RULES_FILE`   | Optional            | Path to an explicit project rules file. Overrides auto-detection. Mutually exclusive with `RS_GUARD_NO_PROJECT_RULES` / `--no-project-rules`. |
@@ -362,3 +365,19 @@ at any depth.
 
 **Unsupported:** patterns with more than one single-`*` wildcard (e.g. `**/foo*bar*`
 or `a*b*c`) never match. Prefer simple documented forms only.
+
+
+## Local branch-range review (`diff_base`)
+
+In **local mode**, you can review a branch range instead of staged changes:
+
+| Source | Key / flag |
+|--------|------------|
+| CLI | `--base <ref>` |
+| Environment | `RS_GUARD_BASE` |
+| TOML | `diff_base = "<ref>"` |
+
+Precedence for the base ref value itself: CLI `--base` > `RS_GUARD_BASE` > TOML `diff_base`.  
+Diff source precedence: `--diff-file` > CI mode > base range > staged diff.
+
+See [LOCAL_MODE.md — Branch-range review](LOCAL_MODE.md#branch-range-review---base) for validation rules and examples.

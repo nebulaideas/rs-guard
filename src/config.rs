@@ -205,6 +205,9 @@ pub struct TomlConfig {
     pub include_paths: Option<Vec<String>>,
     /// Glob patterns of paths to exclude from the review diff.
     pub exclude_paths: Option<Vec<String>>,
+    /// Optional git base ref for local three-dot range diffs (`base...HEAD`).
+    #[serde(default)]
+    pub diff_base: Option<String>,
     /// Per-provider configuration sections.
     pub providers: Option<HashMap<String, ProviderTomlConfig>>,
     /// Provider-specific model variant (e.g. "flash", "thinking-on").
@@ -257,6 +260,7 @@ const KNOWN_TOP_LEVEL_KEYS: &[&str] = &[
     "max_diff_lines",
     "include_paths",
     "exclude_paths",
+    "diff_base",
     "providers",
     "cache_dir",
     "circuit_breaker",
@@ -789,6 +793,28 @@ fn resolve_rules_file_from_env_and_toml(toml: Option<&TomlConfig>) -> Option<Pat
         .or_else(|| toml.and_then(|t| t.rules_file.clone()).map(PathBuf::from))
 }
 
+/// Trims a diff-base string; empty / whitespace-only becomes `None` (unset).
+fn normalize_diff_base(raw: &str) -> Option<String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+/// Resolves the optional local diff base ref from TOML.
+///
+/// TOML: `diff_base`. Values are trimmed; blank strings are treated as unset.
+///
+/// `RS_GUARD_BASE` and CLI `--base` are applied later via clap + [`Config::apply_args`]
+/// (clap's `env` attribute binds the env var to the same flag). That keeps a single
+/// override path: CLI/env win over TOML without reading the env twice.
+fn resolve_diff_base_from_toml(toml: Option<&TomlConfig>) -> Option<String> {
+    toml.and_then(|t| t.diff_base.as_deref())
+        .and_then(normalize_diff_base)
+}
+
 /// Resolves and validates the provider base URL from TOML.
 fn resolve_base_url(
     toml_provider: Option<&ProviderTomlConfig>,
@@ -965,6 +991,11 @@ pub struct Config {
     /// `.reviewer.toml`. When set, auto-detection is skipped and this file is
     /// loaded directly. `None` when no explicit file is requested.
     pub rules_file: Option<PathBuf>,
+    /// Optional git base ref for local mode range diffs (`git diff base...HEAD`).
+    ///
+    /// When set (and not CI / not `--diff-file`), local mode uses
+    /// [`crate::diff::fetch_range_diff`] instead of staged changes.
+    pub diff_base: Option<String>,
 }
 
 impl Config {
@@ -1015,6 +1046,7 @@ impl Config {
             project_rules: None,
             project_rules_file: None,
             rules_file: None,
+            diff_base: None,
         }
     }
 
@@ -1098,6 +1130,7 @@ impl Config {
         let auto_gitignore = toml.as_ref().and_then(|t| t.auto_gitignore).unwrap_or(true);
         let rules_file = resolve_rules_file_from_env_and_toml(toml.as_ref());
         let output_format = resolve_output_format(toml.as_ref())?;
+        let diff_base = resolve_diff_base_from_toml(toml.as_ref());
 
         Ok(Config {
             provider,
@@ -1134,6 +1167,7 @@ impl Config {
             project_rules: None,
             project_rules_file: None,
             rules_file,
+            diff_base,
         })
     }
 
@@ -1260,6 +1294,11 @@ impl Config {
         }
         if let Some(ref rules_file) = args.rules_file {
             self.rules_file = Some(rules_file.clone());
+        }
+        if let Some(ref base) = args.base {
+            // Clap may set this from `--base` or `RS_GUARD_BASE`. Empty/whitespace
+            // means unset → fall back to staged (overrides TOML `diff_base`).
+            self.diff_base = normalize_diff_base(base);
         }
 
         if args.no_project_rules && self.rules_file.is_some() {
@@ -2180,6 +2219,31 @@ mod tests {
         let cli = crate::cli::Cli::parse_from(["rs-guard", "--format", "json"]);
         config.apply_args(&cli.review).unwrap();
         assert_eq!(config.output_format, OutputFormat::Json);
+        std::env::remove_var("DEEPSEEK_API_KEY");
+    }
+
+    #[test]
+    fn test_normalize_diff_base_empty_and_whitespace() {
+        assert_eq!(normalize_diff_base(""), None);
+        assert_eq!(normalize_diff_base("   "), None);
+        assert_eq!(normalize_diff_base("\t\n"), None);
+        assert_eq!(normalize_diff_base(" main "), Some("main".into()));
+        assert_eq!(
+            normalize_diff_base("origin/main"),
+            Some("origin/main".into())
+        );
+    }
+
+    #[test]
+    fn test_apply_args_empty_base_unsets_diff_base() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        std::env::set_var("DEEPSEEK_API_KEY", "test-key");
+        let mut config = Config::from_env(None).unwrap();
+        config.diff_base = Some("main".into());
+        use clap::Parser;
+        let cli = crate::cli::Cli::parse_from(["rs-guard", "--base", ""]);
+        config.apply_args(&cli.review).unwrap();
+        assert_eq!(config.diff_base, None);
         std::env::remove_var("DEEPSEEK_API_KEY");
     }
 }

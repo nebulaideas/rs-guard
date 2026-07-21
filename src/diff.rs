@@ -558,6 +558,69 @@ pub fn fetch_local_diff(limits: DiffLimits) -> Result<DiffResult, RsGuardError> 
     build_local_diff_result(content, limits)
 }
 
+/// Fetches a three-dot range diff via `git diff <base>...HEAD`.
+///
+/// Three-dot syntax is merge-base aware and closer to GitHub PR diffs than
+/// two-dot `base..HEAD`. Used for local branch reviews when `--base` /
+/// `RS_GUARD_BASE` / `diff_base` is set.
+///
+/// # Errors
+///
+/// Returns [`RsGuardError::Io`] if the git command fails to spawn,
+/// [`RsGuardError::Config`] if git exits non-zero (e.g. unknown ref),
+/// or the same validation errors as [`build_local_diff_result`].
+pub fn fetch_range_diff(base: &str) -> Result<DiffResult, RsGuardError> {
+    // Trim accidental leading/trailing whitespace from env/TOML/CLI values.
+    let base = base.trim();
+    if base.is_empty() {
+        return Err(RsGuardError::Config(
+            "diff base ref must not be empty".to_string(),
+        ));
+    }
+
+    // Reject characters / shapes that could break the range argument or be
+    // interpreted as git options (defense in depth).
+    if base.starts_with('-') {
+        return Err(RsGuardError::Config(format!(
+            "invalid diff base ref '{}': must not start with '-' (looks like a git option)",
+            base
+        )));
+    }
+    if base.contains("..") {
+        return Err(RsGuardError::Config(format!(
+            "invalid diff base ref '{}': must not contain '..' (ambiguous range syntax)",
+            base
+        )));
+    }
+    if base.chars().any(|c| c.is_whitespace() || c == ' ') {
+        return Err(RsGuardError::Config(format!(
+            "invalid diff base ref '{}': whitespace or null bytes are not allowed",
+            base
+        )));
+    }
+
+    // Three-dot range as a single argv element. Leading '-' already rejected so
+    // git will not treat the range as an option. Trailing `--` ends option parsing
+    // before any accidental pathspecs.
+    let range = format!("{}...HEAD", base);
+    let output = std::process::Command::new("git")
+        .args(["diff", &range, "--"])
+        .output()
+        .map_err(RsGuardError::Io)?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(RsGuardError::Config(format!(
+            "git diff {} failed: {}",
+            range, stderr
+        )));
+    }
+
+    let content = String::from_utf8_lossy(&output.stdout).to_string();
+    // User size limits applied later via apply_path_filters; use raw-fetch ceiling here.
+    build_local_diff_result(content, DiffLimits::raw_fetch())
+}
+
 /// Builds a [`DiffResult`] from already-validated local diff content.
 ///
 /// Extracted from [`fetch_local_diff`] to enable unit testing of content
@@ -1305,5 +1368,98 @@ diff --git a/README.md b/README.md\n--- a/README.md\n+++ b/README.md\n@@ -1 +1,2
         .expect("excluding lockfile should leave a reviewable src diff");
         assert!(filtered.content.contains("src/main.rs"));
         assert!(!filtered.content.contains("Cargo.lock"));
+    }
+
+    #[test]
+    fn test_fetch_range_diff_rejects_empty_base() {
+        let err = fetch_range_diff("").unwrap_err();
+        assert!(err.to_string().contains("empty"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn test_fetch_range_diff_rejects_whitespace_base() {
+        let err = fetch_range_diff("main branch").unwrap_err();
+        assert!(
+            err.to_string().contains("invalid"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn test_fetch_range_diff_rejects_leading_dash() {
+        let err = fetch_range_diff("-p").unwrap_err();
+        assert!(
+            err.to_string().contains("must not start with '-'"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn test_fetch_range_diff_rejects_double_dot() {
+        let err = fetch_range_diff("origin/main..").unwrap_err();
+        assert!(
+            err.to_string().contains("must not contain '..'"),
+            "unexpected error: {err}"
+        );
+        let err = fetch_range_diff("a..b").unwrap_err();
+        assert!(
+            err.to_string().contains("must not contain '..'"),
+            "unexpected error: {err}"
+        );
+    }
+
+    /// Builds a linear two-commit repo: branch `base` at first commit, HEAD at second.
+    fn setup_two_commit_repo() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        let run = |args: &[&str]| {
+            let out = std::process::Command::new("git")
+                .args(args)
+                .current_dir(dir.path())
+                .env("GIT_AUTHOR_NAME", "rs-guard-test")
+                .env("GIT_AUTHOR_EMAIL", "test@example.com")
+                .env("GIT_COMMITTER_NAME", "rs-guard-test")
+                .env("GIT_COMMITTER_EMAIL", "test@example.com")
+                .output()
+                .expect("spawn git");
+            assert!(
+                out.status.success(),
+                "git {:?} failed: {}",
+                args,
+                String::from_utf8_lossy(&out.stderr)
+            );
+        };
+        run(&["init"]);
+        run(&["config", "user.email", "test@example.com"]);
+        run(&["config", "user.name", "rs-guard-test"]);
+        // Avoid depending on default branch name (master vs main).
+        run(&["checkout", "-B", "main"]);
+        std::fs::write(dir.path().join("file.txt"), "version-one\n").unwrap();
+        run(&["add", "file.txt"]);
+        run(&["commit", "-m", "first"]);
+        run(&["branch", "base"]);
+        std::fs::write(dir.path().join("file.txt"), "version-two\n").unwrap();
+        run(&["add", "file.txt"]);
+        run(&["commit", "-m", "second"]);
+        dir
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn test_fetch_range_diff_returns_commits_since_base() {
+        let dir = setup_two_commit_repo();
+        let original = std::env::current_dir().unwrap();
+        std::env::set_current_dir(dir.path()).unwrap();
+
+        let result = fetch_range_diff("base");
+        let _ = std::env::set_current_dir(&original);
+
+        let diff = result.expect("range diff should succeed");
+        assert!(
+            diff.content.contains("version-two") || diff.content.contains("+version-two"),
+            "expected second-commit content, got: {}",
+            diff.content
+        );
+        assert!(diff.line_count > 0);
+        assert!(diff.size_bytes > 0);
     }
 }
