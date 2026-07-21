@@ -85,6 +85,27 @@ graph LR
 
 ## Key Modules
 
+### Module inventory
+
+| Module | Role |
+|--------|------|
+| `cli` / `main` | Clap args + process exit mapping |
+| `config` | CLI → env → TOML → defaults |
+| `diff` | PR / local / file diffs + chunking |
+| `pipeline` | End-to-end orchestration |
+| `llm/` | `LlmProvider` trait, factory, `ProviderMeta`, generic client |
+| `verdict` | Metadata parse + review state |
+| `github` | Review submit + dismiss previous blockers |
+| `cache` | SHA-256 keyed LLM response cache |
+| `retry` | Backoff + optional circuit breaker |
+| `redact` | Secret redaction for logs/artifacts (and outbound diffs when enabled) |
+| `rules` | Project rules file detection/loading (`AGENTS.md`, etc.) |
+| `scaffold` | `init` / `generate-prompt` / `generate-workflow` / `validate-config` |
+| `repo` | Git working-tree root helpers |
+| `output` | Artifacts, metrics, colored summary |
+| `http` | Shared clients + SSRF URL validation |
+| `error` | `RsGuardError` |
+
 ### `pipeline.rs` — Orchestration
 
 The single entry point for all review logic. `run_pipeline()` accepts a `Config` and optional diff file path, drives the full workflow, and returns a `PipelineResult` enum instead of calling `process::exit()`. This keeps the library testable without subprocess spawning.
@@ -114,20 +135,29 @@ pub trait LlmProvider: Send + Sync + std::fmt::Debug {
 }
 ```
 
-The `factory.rs` module maps a provider name string to a `Box<dyn LlmProvider>`. Adding a new provider requires:
+The factory maps a provider name string to a `Box<dyn LlmProvider>` via a single
+data-driven path: [`GenericOpenAiCompatibleClient`](../src/llm/generic_client.rs)
+parameterized by [`ProviderMeta`](../src/llm/providers.rs).
 
-1. A new module in `src/llm/` implementing the trait
-2. An entry in `providers.rs` (metadata: name, env var, default model, base URL)
-3. A match arm in `factory.rs`
+Adding a new OpenAI-compatible provider requires:
 
-See [docs/API.md](API.md) for a complete step-by-step guide.
+1. A `ProviderMeta` entry in `src/llm/providers.rs` (name, env var, default model, base URL, optional `result_format` / headers / variants)
+2. SSRF allowlist update in `http.rs` if the host is new
+3. Docs (`PROVIDERS.md`) and tests (`known_provider_names`, factory smoke tests)
+
+No new client module is needed for standard OpenAI-compatible APIs. See [docs/API.md](API.md) for the full guide.
 
 ### `cache.rs` — Response Caching
 
-Cache entries are keyed by a SHA-256 hash of all LLM call parameters:
+Cache entries are keyed by a SHA-256 hash of all LLM call parameters that affect
+the outgoing request (see also [PERFORMANCE.md](PERFORMANCE.md)):
 
 ```
-key = SHA-256(diff_content | prompt | provider | model | temperature)
+key = SHA-256(
+  diff_content | prompt | project_rules |
+  provider | model | variant | temperature |
+  base_url | max_tokens | result_format
+)
 ```
 
 Each `.cache` file stores:
@@ -172,17 +202,32 @@ The LLM is instructed to append a structured block at the end of its response:
 ```
 [RS_GUARD_VERDICT_METADATA]
 Verdict: POSITIVE
-CriticalBugs: 0
+CriticalIssues: 0
 SecurityIssues: 0
+ImportantIssues: 0
+Suggestions: 0
 ```
 
-The parser extracts this block using regex, strips it from the display text, and applies the review state logic:
+The parser extracts this block via substring scanning (with tag-counting fallback if the
+block is missing) and applies the review state logic in `determine_review_state`:
 
 ```
-NEGATIVE or security_issues > 0 or critical_bugs > 2  →  REQUEST_CHANGES
-critical_bugs == 0 and security_issues == 0            →  APPROVE
-otherwise                                              →  COMMENT
+NEGATIVE
+  or security_issues > 0
+  or critical_issues > 0
+  or (important_threshold > 0 and important_issues >= important_threshold)
+    →  REQUEST_CHANGES
+
+important_issues > 0 (but below threshold)
+    →  COMMENT
+
+otherwise (POSITIVE and all blocking counts zero)
+    →  APPROVE
 ```
+
+`important_threshold` defaults to `3` and is configurable via CLI/env/TOML.
+The legacy metadata field `CriticalBugs:` is still accepted as an alias for
+`CriticalIssues:` for older prompt files.
 
 ### `github.rs` — Review Submission
 
@@ -256,7 +301,9 @@ cargo bench --bench verdict
 
 ### Adding a New LLM Provider
 
-See [docs/API.md](API.md#adding-a-new-provider).
+Add a `ProviderMeta` entry in `src/llm/providers.rs` (and allowlist/docs/tests).
+Do **not** add a new per-provider client module — all OpenAI-compatible providers
+share `GenericOpenAiCompatibleClient`. See [docs/API.md](API.md#adding-a-new-provider).
 
 ### Adding a New Diff Source
 
