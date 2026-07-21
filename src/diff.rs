@@ -567,8 +567,10 @@ pub fn fetch_local_diff(limits: DiffLimits) -> Result<DiffResult, RsGuardError> 
 /// # Errors
 ///
 /// Returns [`RsGuardError::Io`] if the git command fails to spawn,
-/// [`RsGuardError::Config`] if git exits non-zero (e.g. unknown ref),
-/// or the same validation errors as [`build_local_diff_result`].
+/// [`RsGuardError::Config`] if git exits non-zero (e.g. unknown ref) or the
+/// base ref is invalid, [`RsGuardError::EmptyDiff`] if the range is empty,
+/// [`RsGuardError::InvalidDiffContent`] if the output does not look like a
+/// diff, or [`RsGuardError::DiffTooLarge`] if the diff exceeds size limits.
 pub fn fetch_range_diff(base: &str) -> Result<DiffResult, RsGuardError> {
     // Trim accidental leading/trailing whitespace from env/TOML/CLI values.
     let base = base.trim();
