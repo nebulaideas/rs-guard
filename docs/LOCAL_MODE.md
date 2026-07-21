@@ -217,6 +217,13 @@ export RS_GUARD_BASE=main
 rs-guard
 ```
 
+Or set a project default in `.reviewer.toml`:
+
+```toml
+# Review the full branch against origin/main instead of staged changes
+diff_base = "origin/main"
+```
+
 This runs `git diff <base>...HEAD` (three-dot, merge-base aware). The base ref
 is trimmed; blank/`--base ""` is treated as unset (staged diff). Non-empty values must not contain `..`, internal whitespace/NUL, or start with `-` (rejected to avoid
 git option injection). Precedence:

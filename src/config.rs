@@ -807,6 +807,11 @@ fn normalize_diff_base(raw: &str) -> Option<String> {
 ///
 /// Env: `RS_GUARD_BASE`. TOML: `diff_base`. Values are trimmed; blank strings
 /// (including accidental whitespace) are treated as unset.
+///
+/// Note: clap also binds `RS_GUARD_BASE` to `--base`. That is intentional —
+/// `from_env` must resolve env/TOML before CLI merge, and `apply_args` then
+/// applies the clap value (flag or env) so CLI always wins. Reading the env
+/// in both places is idempotent because both paths use [`normalize_diff_base`].
 fn resolve_diff_base_from_env_and_toml(toml: Option<&TomlConfig>) -> Option<String> {
     std::env::var("RS_GUARD_BASE")
         .ok()
