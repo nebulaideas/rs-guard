@@ -677,7 +677,7 @@ pub async fn run_pipeline(
         estimated_tokens_out,
         latency,
         estimated_cost_cents,
-        secrets_redacted_count as u32,
+        u32::try_from(secrets_redacted_count).unwrap_or(u32::MAX),
     )?;
 
     if config.is_ci {

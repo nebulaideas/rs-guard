@@ -136,7 +136,10 @@ mod tests {
         assert!(!out.contains("ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij"));
         assert!(!out.contains("sk-1234567890abcdefghij"));
         assert!(!out.contains("super_secret_123"));
-        assert!(count >= 2, "expected multiple redactions, got {count}");
+        assert_eq!(
+            count, 3,
+            "expected exactly three secret redactions, got {count}"
+        );
     }
 
     #[test]
