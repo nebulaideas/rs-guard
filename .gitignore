@@ -26,3 +26,9 @@ rs-guard.sha256
 .rs-guard/cache
 .kiro/
 .DS_Store
+
+# AI code intelligence artifacts
+.codegraph/
+graphify-out/
+repomix-output.xml
+repomix-output.md

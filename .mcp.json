@@ -1,0 +1,18 @@
+{
+  "mcpServers": {
+    "codegraph": {
+      "command": "codegraph",
+      "args": [
+        "serve",
+        "--mcp"
+      ]
+    },
+    "graphify": {
+      "command": "graphify-mcp",
+      "args": [
+        "--graph",
+        "graphify-out/graph.json"
+      ]
+    }
+  }
+}
