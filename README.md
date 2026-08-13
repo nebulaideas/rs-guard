@@ -1,8 +1,12 @@
-# rs-guard
+# rs-guard — Rust AI Code Review CLI
 
 ![rs-guard logo](https://github.com/user-attachments/assets/afa87cb3-5046-4543-9a32-0e3f228a2e0b)
 
-**AI-powered code review CLI for GitHub Pull Requests.** Multi-provider LLM support, response caching, exponential backoff retry, and local pre-commit execution — all in a single Rust binary.
+> **A memory-safe Rust CLI for multi-provider AI code review of GitHub Pull Requests — 242 `rs-guard` crate downloads.**
+
+**AI-powered code review CLI for GitHub Pull Requests.** Multi-provider LLM support (DeepSeek, Kimi, Qwen, OpenRouter, OpenAI, Grok, GLM), response caching, exponential backoff retry, and local pre-commit execution — all in a single Rust binary.
+
+Built by [Ismael Marín](https://ismaelmarin.dev) / [@igmarin](https://github.com/igmarin).
 
 [![CI](https://github.com/nebulaideas/rs-guard/actions/workflows/ci.yml/badge.svg)](https://github.com/nebulaideas/rs-guard/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
