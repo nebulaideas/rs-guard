@@ -287,6 +287,7 @@ async fn obtain_llm_response_with_composed_prompt(
         base_url,
         config.provider_config.max_tokens,
         config.provider_config.result_format.as_deref(),
+        config.findings,
     ) {
         log::info!("Cache hit — using cached LLM response");
         return Ok((cached, false));
@@ -350,6 +351,7 @@ fn cache_response(
         effective_base_url(config),
         config.provider_config.max_tokens,
         config.provider_config.result_format.as_deref(),
+        config.findings,
         llm_response,
     ) {
         log::warn!("Failed to cache LLM response: {}", e);

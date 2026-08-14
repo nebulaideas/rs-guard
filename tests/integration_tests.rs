@@ -791,6 +791,7 @@ async fn test_full_pipeline_empty_content_not_cached_on_failure() {
         config.provider_config.base_url.as_deref().unwrap_or(""),
         config.provider_config.max_tokens,
         config.provider_config.result_format.as_deref(),
+        false,
     );
     assert!(
         cached.is_none(),
