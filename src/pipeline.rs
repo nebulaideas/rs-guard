@@ -11,7 +11,10 @@ use crate::diff::{
     fetch_range_diff, DiffLimits, DiffResult,
 };
 use crate::error::RsGuardError;
-use crate::github::{dismiss_previous_reviews, submit_review};
+use crate::github::{
+    build_diff_position_map, dismiss_previous_reviews, format_inline_comment,
+    format_unmappable_findings, submit_review,
+};
 use crate::llm::factory::create_provider;
 use crate::output::{
     print_colored_summary, write_artifact, write_json_result, write_metrics, ReviewConfig,
@@ -19,7 +22,7 @@ use crate::output::{
 };
 use crate::redact::{log_redacted, redact_secrets};
 use crate::retry::with_retry;
-use crate::verdict::{parse_metadata_block, parse_verdict, ReviewState};
+use crate::verdict::{parse_metadata_block, parse_verdict, strip_findings_json, ReviewState};
 use anyhow::Context;
 use std::path::PathBuf;
 
@@ -532,17 +535,93 @@ async fn handle_ci_output(
     estimated_cost_cents: Option<f64>,
 ) -> anyhow::Result<PipelineResult> {
     let sanitized_response = redact_secrets(llm_response);
+
+    // Strip findings JSON from the review body — GitHub review body is prose only
+    let prose_body = strip_findings_json(&sanitized_response);
+
     let review_body = if was_chunked {
         format!(
             "⚠️ **Diff was truncated**: {} middle lines were omitted to fit the model context window.\n\n---\n\n{}",
             removed_lines,
-            sanitized_response
+            prose_body
         )
     } else {
-        sanitized_response.clone()
+        prose_body.to_string()
     };
 
-    submit_ci_review(config, state, &review_body).await?;
+    // Submit inline comments if enabled and findings are available
+    if config.inline_comments && verdict.has_findings() {
+        let diff_pos_map = build_diff_position_map(&diff.content);
+        let mut inline_comments = Vec::new();
+        let mut unmappable = Vec::new();
+
+        for finding in &verdict.findings {
+            if let Some(pos) = diff_pos_map.get(&finding.path, finding.line) {
+                inline_comments.push((pos, finding.path.clone(), format_inline_comment(finding)));
+            } else {
+                unmappable.push(finding.clone());
+            }
+        }
+
+        // Append unmappable findings to the review body
+        let mut body_with_unmappable = review_body;
+        if !unmappable.is_empty() {
+            body_with_unmappable.push_str(&format_unmappable_findings(&unmappable));
+        }
+
+        if !inline_comments.is_empty() {
+            let ci_config = config
+                .validate_for_ci()
+                .context("CI configuration validation failed")?;
+
+            if config.dry_run {
+                println!(
+                    "🔍 DRY RUN — would submit {} inline comment(s)",
+                    inline_comments.len()
+                );
+                log::info!("Dry-run mode: skipping inline review submission");
+            } else {
+                crate::github::submit_inline_review(
+                    &ci_config.github_base_url,
+                    &ci_config.repo_owner,
+                    &ci_config.repo_name,
+                    ci_config.pr_number,
+                    state.clone(),
+                    &body_with_unmappable,
+                    &inline_comments,
+                    &ci_config.github_token,
+                )
+                .await
+                .context("Failed to submit inline review")?;
+
+                log::info!(
+                    "Inline review submitted with {} comment(s)",
+                    inline_comments.len()
+                );
+
+                if *state != ReviewState::RequestChanges {
+                    log::info!("Dismissing previous blocker reviews...");
+                    if let Err(e) = dismiss_previous_reviews(
+                        &ci_config.github_base_url,
+                        &ci_config.repo_owner,
+                        &ci_config.repo_name,
+                        ci_config.pr_number,
+                        &ci_config.github_token,
+                    )
+                    .await
+                    {
+                        log::warn!("Failed to dismiss previous reviews: {}", e);
+                    }
+                }
+            }
+        } else {
+            // No inline comments mapped — fall back to regular review
+            submit_ci_review(config, state, &body_with_unmappable).await?;
+        }
+    } else {
+        submit_ci_review(config, state, &review_body).await?;
+    }
+
     if config.output_format == OutputFormat::Text {
         print_ci_summary(
             config,
@@ -578,9 +657,10 @@ fn handle_local_output(
     }
 
     let sanitized_response = redact_secrets(llm_response);
+    let prose_response = strip_findings_json(&sanitized_response);
     if config.output_format == OutputFormat::Text {
         print_colored_summary(
-            &sanitized_response,
+            prose_response,
             verdict,
             state,
             review_config,

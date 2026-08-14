@@ -416,6 +416,111 @@ pub fn format_inline_comment(finding: &Finding) -> String {
     body
 }
 
+/// Submits a GitHub review with inline comments on specific diff positions.
+///
+/// Falls back to a non-inline review if the inline submission fails
+/// (e.g. 422 invalid position after force-push).
+#[allow(clippy::too_many_arguments)]
+pub async fn submit_inline_review(
+    base_url: &str,
+    owner: &str,
+    repo: &str,
+    pr_number: u64,
+    state: ReviewState,
+    body: &str,
+    inline_comments: &[(u32, String, String)],
+    token: &str,
+) -> Result<(), RsGuardError> {
+    validate_github_base_url(base_url)?;
+
+    let client = build_github_http_client(REQUEST_TIMEOUT)?;
+    let url = format!(
+        "{}/repos/{}/{}/pulls/{}/reviews",
+        base_url.trim_end_matches('/'),
+        owner,
+        repo,
+        pr_number
+    );
+    let headers = github_headers(token)?;
+
+    let comments: Vec<serde_json::Value> = inline_comments
+        .iter()
+        .take(MAX_INLINE_COMMENTS)
+        .map(|(pos, path, comment_body)| {
+            json!({
+                "path": path,
+                "position": pos,
+                "body": comment_body,
+            })
+        })
+        .collect();
+
+    let full_body = format!("{}\n\n{}", body, BOT_SIGNATURE);
+    let review_body = json!({
+        "body": full_body,
+        "event": state.as_github_state(),
+        "comments": comments,
+    });
+
+    let result = with_retry_simple(|| async {
+        let resp = client
+            .post(&url)
+            .headers(headers.clone())
+            .json(&review_body)
+            .send()
+            .await
+            .map_err(|e| {
+                let status = e.status().map(|s| s.as_u16()).unwrap_or(0);
+                RsGuardError::GitHubApi {
+                    status,
+                    message: e.to_string(),
+                }
+            })?;
+
+        let status = resp.status();
+        if !status.is_success() {
+            let body_text = resp
+                .text()
+                .await
+                .unwrap_or_else(|e| format!("[failed to read response body: {}]", e));
+            return Err(RsGuardError::GitHubApi {
+                status: status.as_u16(),
+                message: body_text,
+            });
+        }
+        Ok(())
+    })
+    .await;
+
+    match result {
+        Ok(()) => Ok(()),
+        Err(err) if err.is_permission_denied() && state != ReviewState::Comment => {
+            log::warn!(
+                "Permission denied for inline review {}. Falling back to COMMENT...",
+                state
+            );
+            let fallback_msg = format!("[Bot fallback from {}]\n\n{}", state, body);
+            submit_review(
+                base_url,
+                owner,
+                repo,
+                pr_number,
+                ReviewState::Comment,
+                &fallback_msg,
+                token,
+            )
+            .await
+        }
+        Err(err) => {
+            log::warn!(
+                "Inline review failed ({}). Falling back to non-inline review.",
+                err
+            );
+            submit_review(base_url, owner, repo, pr_number, state, body, token).await
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
