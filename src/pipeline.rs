@@ -673,8 +673,12 @@ pub async fn run_pipeline(
 
     // Compose the final prompt with project rules layering (before token estimation)
     let rules_path = config.project_rules_file.as_deref();
-    let composed_prompt =
-        compose_prompt(&config.prompt, config.project_rules.as_deref(), rules_path);
+    let composed_prompt = compose_prompt(
+        &config.prompt,
+        config.project_rules.as_deref(),
+        rules_path,
+        config.findings,
+    );
 
     let start = std::time::Instant::now();
     let estimated_tokens_in = estimate_tokens(&composed_prompt) + estimate_tokens(&diff_content);
@@ -907,21 +911,47 @@ fn default_pricing(provider: &str) -> Option<(f64, f64)> {
 /// * `project_rules` — Optional project rules content from `AGENTS.md`, `CLAUDE.md`, etc.
 /// * `rules_file_path` — Optional path of the rules file (for display in the section header).
 ///
+/// Instructions appended to the review prompt when the caller has
+/// requested structured findings (`--findings` / `RS_GUARD_FINDINGS`).
+///
+/// Tells the LLM to emit a `[RS_GUARD_VERDICT_FINDINGS]` JSON block with
+/// per-file, per-line findings. The JSON is parsed in
+/// [`crate::verdict::parse_findings`] and the parsed findings drive the
+/// max-rule merge in [`crate::verdict::Verdict::merge_with_findings`].
+const FINDINGS_INSTRUCTIONS: &str = "\n\n---\n\n## Structured Findings\n\nIn addition to the standard metadata block, include a JSON array at the\nend of your response inside a `[RS_GUARD_VERDICT_FINDINGS]` marker. Each\nelement must have this exact shape:\n\n```json\n{\n  \"path\": \"src/example.rs\",\n  \"line\": 42,\n  \"severity\": \"Critical\",\n  \"message\": \"Concise actionable description\",\n  \"suggestion\": \"Optional fix or follow-up\"\n}\n```\n\nThe `severity` field must be exactly one of these values:\n- `\"Critical\"`  — blocks merge unconditionally\n- `\"Security\"`  — blocks merge unconditionally\n- `\"Important\"` — blocks merge when count >= threshold\n- `\"Suggestion\"` — advisory, never blocks\n\nThe `path` is relative to the repository root. The `line` is 1-based\nand must point to a line actually present in the diff. Emit findings for\nevery real issue you identify; do not omit items to keep the list short.\n";
+
 /// # Returns
 ///
 /// The composed prompt string.
+///
+/// # Arguments
+///
+/// * `base_prompt` — The core review prompt.
+/// * `project_rules` — Optional project-specific rules content to append.
+/// * `rules_file_path` — Optional path label for the rules source (shown in
+///   the "Project Conventions" header). Ignored when `project_rules` is `None`.
+/// * `findings_requested` — When `true`, appends `[RS_GUARD_VERDICT_FINDINGS]`
+///   format instructions to the prompt so the LLM emits a structured findings
+///   JSON block. This changes the prompt content and therefore the cache key.
 #[must_use]
 pub fn compose_prompt(
     base_prompt: &str,
     project_rules: Option<&str>,
     rules_file_path: Option<&str>,
+    findings_requested: bool,
 ) -> String {
+    let mut prompt = base_prompt.to_string();
+
+    if findings_requested {
+        prompt.push_str(FINDINGS_INSTRUCTIONS);
+    }
+
     let Some(rules) = project_rules else {
-        return base_prompt.to_string();
+        return prompt;
     };
 
     if rules.is_empty() {
-        return base_prompt.to_string();
+        return prompt;
     }
 
     let header = match rules_file_path {
@@ -934,7 +964,7 @@ pub fn compose_prompt(
          The following project-specific rules MUST be enforced during this review. \
          When a rule conflicts with the general review guidance above, the project rules take precedence.\n\n\
          {}",
-        base_prompt, header, rules
+        prompt, header, rules
     )
 }
 
@@ -1307,5 +1337,106 @@ mod tests {
             }
             DiffFetchOutcome::Complete(r) => panic!("expected Diff, got Complete({r:?})"),
         }
+    }
+
+    // ── compose_prompt tests ─────────────────────────────────────────────
+
+    #[test]
+    fn test_compose_prompt_no_rules_no_findings() {
+        let out = compose_prompt("base prompt", None, None, false);
+        assert_eq!(out, "base prompt");
+    }
+
+    #[test]
+    fn test_compose_prompt_with_rules_no_findings() {
+        let out = compose_prompt("base prompt", Some("# rules"), Some("AGENTS.md"), false);
+        assert!(out.contains("base prompt"));
+        assert!(out.contains("Project Conventions"));
+        assert!(out.contains("(from AGENTS.md)"));
+        assert!(out.contains("# rules"));
+        assert!(!out.contains("[RS_GUARD_VERDICT_FINDINGS]"));
+    }
+
+    #[test]
+    fn test_compose_prompt_findings_requested_adds_marker_instructions() {
+        let out = compose_prompt("base prompt", None, None, true);
+        assert!(out.contains("base prompt"));
+        assert!(out.contains("[RS_GUARD_VERDICT_FINDINGS]"));
+        assert!(out.contains("Structured Findings"));
+        assert!(out.contains("\"severity\""));
+    }
+
+    #[test]
+    fn test_compose_prompt_findings_and_rules_compose_in_order() {
+        let out = compose_prompt("base prompt", Some("# rules"), Some("AGENTS.md"), true);
+        let findings_pos = out
+            .find("[RS_GUARD_VERDICT_FINDINGS]")
+            .expect("marker present");
+        let rules_pos = out.find("Project Conventions").expect("rules present");
+        // Findings instructions come before the rules block so the LLM
+        // sees the JSON format request right after the base prompt,
+        // then the project-specific conventions last.
+        assert!(
+            findings_pos < rules_pos,
+            "findings instructions should come before project conventions"
+        );
+    }
+
+    #[test]
+    fn test_compose_prompt_findings_off_does_not_add_block_even_with_rules() {
+        let out = compose_prompt("base prompt", Some("# rules"), None, false);
+        assert!(!out.contains("[RS_GUARD_VERDICT_FINDINGS]"));
+        assert!(!out.contains("Structured Findings"));
+    }
+
+    /// End-to-end contract test: a response that follows the
+    /// `FINDINGS_INSTRUCTIONS` format (concrete severity value, not the
+    /// pipe-delimited enum list) must parse successfully through
+    /// `parse_verdict` and produce the expected counts. This catches
+    /// drift between the prompt's advertised JSON shape and the parser.
+    #[test]
+    fn test_findings_instructions_prompt_contract_parses_through_verdict() {
+        // Simulate an LLM response that conforms to the prompt's format.
+        let response = "\
+[RS_GUARD_VERDICT_METADATA]
+Verdict: POSITIVE
+CriticalIssues: 0
+SecurityIssues: 0
+ImportantIssues: 0
+Suggestions: 0
+
+Some review text.
+
+[RS_GUARD_VERDICT_FINDINGS]
+[
+  {
+    \"path\": \"src/example.rs\",
+    \"line\": 42,
+    \"severity\": \"Critical\",
+    \"message\": \"This is a critical issue\",
+    \"suggestion\": \"Fix it like this\"
+  },
+  {
+    \"path\": \"src/other.rs\",
+    \"line\": 10,
+    \"severity\": \"Suggestion\",
+    \"message\": \"Consider a cleaner approach\"
+  }
+]
+";
+        let (verdict, state) = parse_verdict(response, 3)
+            .expect("response conforming to FINDINGS_INSTRUCTIONS must parse");
+        // Findings override metadata counts via max-rule merge.
+        assert_eq!(verdict.critical_issues, 1);
+        assert_eq!(verdict.suggestions, 1);
+        assert_eq!(verdict.findings.len(), 2);
+        // Critical finding must force NEGATIVE + RequestChanges.
+        assert_eq!(verdict.verdict, "NEGATIVE");
+        assert_eq!(state, ReviewState::RequestChanges);
+        // The suggestion field must round-trip.
+        assert_eq!(
+            verdict.findings[0].suggestion.as_deref(),
+            Some("Fix it like this")
+        );
     }
 }

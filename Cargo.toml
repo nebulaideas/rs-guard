@@ -11,7 +11,7 @@ documentation = "https://docs.rs/rs-guard"
 readme = "README.md"
 keywords = ["ai", "code-review", "github", "llm", "cli"]
 categories = ["development-tools", "command-line-utilities"]
-rust-version = "1.82"
+rust-version = "1.88"
 
 [dependencies]
 anyhow = "1.0"

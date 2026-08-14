@@ -239,9 +239,10 @@ pub struct ReviewArgs {
 
     /// Submit inline review comments on the GitHub PR diff.
     ///
-    /// When set, structured findings are mapped to diff positions and submitted
-    /// as inline review comments. Unmappable findings are appended to the review
-    /// body as bullet points. Implies `--findings`.
+    /// When set, rs-guard requests structured findings (implying `--findings`)
+    /// and maps them to diff positions for inline review comments. Unmappable
+    /// findings are appended to the review body as bullet points. Implies
+    /// `--findings`.
     #[arg(
         long,
         env = "RS_GUARD_INLINE_COMMENTS",
@@ -542,8 +543,13 @@ mod tests {
             cli.review.inline_comments,
             "--inline-comments should set inline_comments to true"
         );
-        // Note: the --inline-comments implies --findings logic is in Config::apply_args,
-        // not in clap itself. CLI only sets the flags.
+        // The --inline-comments implies --findings logic lives in
+        // Config::apply_args, not in clap itself. At the clap layer the two
+        // flags are independent, so findings must NOT be set here.
+        assert!(
+            !cli.review.findings,
+            "clap must not set findings from --inline-comments; the implication is enforced in Config::apply_args"
+        );
     }
 
     #[test]
