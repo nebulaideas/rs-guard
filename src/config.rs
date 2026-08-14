@@ -996,6 +996,17 @@ pub struct Config {
     /// When set (and not CI / not `--diff-file`), local mode uses
     /// [`crate::diff::fetch_range_diff`] instead of staged changes.
     pub diff_base: Option<String>,
+    /// Request structured findings from the LLM.
+    ///
+    /// When `true`, the review prompt asks the LLM to include a
+    /// `[RS_GUARD_VERDICT_FINDINGS]` JSON block. Findings override metadata
+    /// counts when present.
+    pub findings: bool,
+    /// Submit inline review comments on the GitHub PR diff.
+    ///
+    /// When `true`, findings are mapped to diff positions and submitted as
+    /// inline comments. Implies `findings`.
+    pub inline_comments: bool,
 }
 
 impl Config {
@@ -1047,6 +1058,8 @@ impl Config {
             project_rules_file: None,
             rules_file: None,
             diff_base: None,
+            findings: false,
+            inline_comments: false,
         }
     }
 
@@ -1168,6 +1181,8 @@ impl Config {
             project_rules_file: None,
             rules_file,
             diff_base,
+            findings: false,
+            inline_comments: false,
         })
     }
 
@@ -1305,6 +1320,14 @@ impl Config {
             return Err(RsGuardError::Config(
                 "--rules-file and --no-project-rules are mutually exclusive".to_string(),
             ));
+        }
+
+        // --inline-comments implies --findings
+        if args.inline_comments {
+            self.inline_comments = true;
+            self.findings = true;
+        } else if args.findings {
+            self.findings = true;
         }
 
         Ok(())

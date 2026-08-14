@@ -103,6 +103,8 @@ struct CacheKey {
     max_tokens: Option<u32>,
     /// Optional `result_format` override (changes the request body shape).
     result_format: Option<String>,
+    /// Whether structured findings were requested (changes the prompt).
+    findings: bool,
 }
 
 impl CacheKey {
@@ -124,6 +126,7 @@ impl CacheKey {
         base_url: &str,
         max_tokens: Option<u32>,
         result_format: Option<&str>,
+        findings: bool,
     ) -> Self {
         let diff_hash = hash_content(diff_content);
         let prompt_hash = hash_content(prompt);
@@ -139,6 +142,7 @@ impl CacheKey {
             base_url: base_url.to_string(),
             max_tokens,
             result_format: result_format.map(|s| s.to_lowercase()),
+            findings,
         }
     }
 
@@ -192,6 +196,8 @@ impl CacheKey {
             }
             None => hasher.update([0]),
         }
+        // Findings flag — changes the prompt, so must be in the key.
+        hasher.update([u8::from(self.findings)]);
         hex::encode(hasher.finalize())
     }
 }
@@ -327,6 +333,7 @@ impl DiffCache {
         base_url: &str,
         max_tokens: Option<u32>,
         result_format: Option<&str>,
+        findings: bool,
     ) -> Option<String> {
         self.get_with_project_rules(
             diff_content,
@@ -339,6 +346,7 @@ impl DiffCache {
             base_url,
             max_tokens,
             result_format,
+            findings,
         )
     }
 
@@ -356,6 +364,7 @@ impl DiffCache {
         base_url: &str,
         max_tokens: Option<u32>,
         result_format: Option<&str>,
+        findings: bool,
     ) -> Option<String> {
         if !self.config.enabled {
             return None;
@@ -372,6 +381,7 @@ impl DiffCache {
             base_url,
             max_tokens,
             result_format,
+            findings,
         );
         let key_str = key.as_string();
         let path = self.cache_path(&key_str);
@@ -429,6 +439,7 @@ impl DiffCache {
         base_url: &str,
         max_tokens: Option<u32>,
         result_format: Option<&str>,
+        findings: bool,
         response: &str,
     ) -> Result<(), RsGuardError> {
         self.set_with_project_rules(
@@ -442,6 +453,7 @@ impl DiffCache {
             base_url,
             max_tokens,
             result_format,
+            findings,
             response,
         )
     }
@@ -460,6 +472,7 @@ impl DiffCache {
         base_url: &str,
         max_tokens: Option<u32>,
         result_format: Option<&str>,
+        findings: bool,
         response: &str,
     ) -> Result<(), RsGuardError> {
         if !self.config.enabled {
@@ -477,6 +490,7 @@ impl DiffCache {
             base_url,
             max_tokens,
             result_format,
+            findings,
         );
         let key_str = key.as_string();
         let path = self.cache_path(&key_str);
@@ -819,6 +833,7 @@ mod tests {
             base_url,
             max_tokens,
             result_format,
+            false,
         )
     }
 
@@ -1073,6 +1088,7 @@ mod tests {
             "https://default.example.com",
             None,
             None,
+            false,
         );
         let with_rules_b = CacheKey::new(
             "diff",
@@ -1085,6 +1101,7 @@ mod tests {
             "https://default.example.com",
             None,
             None,
+            false,
         );
 
         assert_ne!(
@@ -1355,6 +1372,7 @@ mod tests {
                 "https://default.example.com",
                 None,
                 None,
+                false,
                 "cached response",
             )
             .unwrap();
@@ -1369,6 +1387,7 @@ mod tests {
                 "https://default.example.com",
                 None,
                 None,
+                false,
             )
             .is_none());
     }
@@ -1396,6 +1415,7 @@ mod tests {
                 "https://default.example.com",
                 None,
                 None,
+                false,
                 "llm response",
             )
             .unwrap();
@@ -1409,6 +1429,7 @@ mod tests {
             "https://default.example.com",
             None,
             None,
+            false,
         );
         assert_eq!(result, Some("llm response".to_string()));
     }
@@ -1436,6 +1457,7 @@ mod tests {
                 "https://default.example.com",
                 None,
                 None,
+                false,
             )
             .is_none());
     }
@@ -1463,6 +1485,7 @@ mod tests {
                 "https://default.example.com",
                 None,
                 None,
+                false,
                 "will expire",
             )
             .unwrap();
@@ -1478,6 +1501,7 @@ mod tests {
             "https://default.example.com",
             None,
             None,
+            false,
         );
         assert!(result.is_none());
 
@@ -1536,6 +1560,7 @@ mod tests {
                 "https://default.example.com",
                 None,
                 None,
+                false,
                 "version 1",
             )
             .unwrap();
@@ -1550,6 +1575,7 @@ mod tests {
                 "https://default.example.com",
                 None,
                 None,
+                false,
                 "version 2",
             )
             .unwrap();
@@ -1565,6 +1591,7 @@ mod tests {
                 "https://default.example.com",
                 None,
                 None,
+                false,
             ),
             Some("version 2".to_string())
         );
@@ -1595,6 +1622,7 @@ mod tests {
                     "https://default.example.com",
                     None,
                     None,
+                    false,
                     &format!("response {}", i),
                 )
                 .unwrap();
@@ -1628,6 +1656,7 @@ mod tests {
                 "https://default.example.com",
                 None,
                 None,
+                false,
                 "value1",
             )
             .unwrap();
@@ -1642,6 +1671,7 @@ mod tests {
                 "https://default.example.com",
                 None,
                 None,
+                false,
                 "value2",
             )
             .unwrap();
@@ -1678,6 +1708,7 @@ mod tests {
                 "https://default.example.com",
                 None,
                 None,
+                false,
                 "value1",
             )
             .unwrap();
@@ -1692,6 +1723,7 @@ mod tests {
                 "https://default.example.com",
                 None,
                 None,
+                false,
                 "value2",
             )
             .unwrap();
@@ -1726,6 +1758,7 @@ mod tests {
                 "https://default.example.com",
                 None,
                 None,
+                false,
                 multiline,
             )
             .unwrap();
@@ -1741,6 +1774,7 @@ mod tests {
                 "https://default.example.com",
                 None,
                 None,
+                false,
             ),
             Some(multiline.to_string())
         );
@@ -1770,6 +1804,7 @@ mod tests {
                 "https://default.example.com",
                 None,
                 None,
+                false,
                 "response",
             )
             .unwrap();
@@ -1802,6 +1837,7 @@ mod tests {
                 "https://default.example.com",
                 None,
                 None,
+                false,
             )
             .is_none());
     }
@@ -1830,6 +1866,7 @@ mod tests {
                 "https://default.example.com",
                 None,
                 None,
+                false,
                 "response",
             )
             .unwrap();
@@ -1862,6 +1899,7 @@ mod tests {
                 "https://default.example.com",
                 None,
                 None,
+                false,
             )
             .is_none());
     }
@@ -1890,6 +1928,7 @@ mod tests {
                 "https://default.example.com",
                 None,
                 None,
+                false,
                 "response",
             )
             .unwrap();
@@ -1922,6 +1961,7 @@ mod tests {
                 "https://default.example.com",
                 None,
                 None,
+                false,
             )
             .is_none());
     }
@@ -1950,6 +1990,7 @@ mod tests {
                 "https://default.example.com",
                 None,
                 None,
+                false,
                 "response",
             )
             .unwrap();
@@ -1982,6 +2023,7 @@ mod tests {
                 "https://default.example.com",
                 None,
                 None,
+                false,
             )
             .is_none());
     }
@@ -2035,6 +2077,7 @@ mod tests {
                 "https://default.example.com",
                 None,
                 None,
+                false,
                 "value",
             )
             .unwrap();
@@ -2048,6 +2091,7 @@ mod tests {
             "https://default.example.com",
             None,
             None,
+            false,
         );
         assert_eq!(result, Some("value".to_string()));
     }
