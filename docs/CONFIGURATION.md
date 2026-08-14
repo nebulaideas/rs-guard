@@ -213,6 +213,36 @@ still surface as `COMMENT`, but will never trigger `REQUEST_CHANGES`.
 
 ---
 
+## Structured Findings & Inline Comments
+
+rs-guard can ask the LLM for a structured `[RS_GUARD_VERDICT_FINDINGS]` JSON block at the end of
+its response, enabling per-file, per-line issue tracking. Two flags control this behavior:
+
+| Flag / Env | Description |
+| ---------- | ----------- |
+| `--findings` / `RS_GUARD_FINDINGS` | Appends findings-format instructions to the review prompt. The LLM is asked to emit a `[RS_GUARD_VERDICT_FINDINGS]` JSON array. When findings are present, severity counts are derived from them (overriding metadata-block counts) using a **max-rule** merge: findings can add evidence but never suppress a blocking preliminary verdict or down-count a blocking severity. |
+| `--inline-comments` / `RS_GUARD_INLINE_COMMENTS` | Maps structured findings to diff positions and submits them as inline GitHub review comments. Unmappable findings are appended to the review body as bullet points. **Implies `--findings`.** |
+
+### Implication rule
+
+`--inline-comments` implies `--findings`. The implication is enforced in `Config::apply_args`
+after CLI/env resolution, so setting `--inline-comments` (or `RS_GUARD_INLINE_COMMENTS`) always
+turns on `findings` as well. The reverse is not true: `--findings` alone does not enable inline
+comments.
+
+### Cache interaction
+
+The `findings` flag changes the review prompt, so it is part of the cache key. A response cached
+with `findings=false` is never returned when `findings=true` is requested (and vice versa).
+`--inline-comments` only affects post-LLM submission, so it is **not** part of the cache key.
+
+### TOML
+
+These flags are CLI/env only; they are **not** available in `.reviewer.toml`. Setting `findings`
+or `inline_comments` as top-level TOML keys is rejected as an unknown key.
+
+---
+
 ## CLI Flags
 
 These flags are available at the top level for the default review command:
@@ -231,6 +261,8 @@ These flags are available at the top level for the default review command:
 | `--no-cache`    |       | Off                        | Bypass response cache.               |
 | `--dry-run`     |       | Off                        | Run without submitting or blocking.  |
 | `--base`        |       | (none)                     | Local mode: review `git diff <base>...HEAD` instead of staged changes. |
+| `--findings`    |       | Off                        | Request a `[RS_GUARD_VERDICT_FINDINGS]` JSON block from the LLM. Findings override metadata-block severity counts when present. Also set via `RS_GUARD_FINDINGS`. |
+| `--inline-comments` | | Off                     | Submit inline review comments on the PR diff mapped from structured findings. Implies `--findings`. Also set via `RS_GUARD_INLINE_COMMENTS`. |
 | `--help`        | `-h`  |                            | Display help.                        |
 | `--version`     | `-V`  |                            | Display version.                     |
 
@@ -277,6 +309,8 @@ Run `rs-guard <subcommand> --help` for details on each subcommand.
 | `RS_GUARD_METRICS_PATH` | Optional            | Path for the metrics JSON artifact.      |
 | `RS_GUARD_NO_PROJECT_RULES` | Optional        | Disables project rules auto-detection when set to **any non-empty value** (including `"false"` or `"0"`). To keep rules enabled, leave this variable unset. This matches the pattern used by `RS_GUARD_NO_CACHE`. |
 | `RS_GUARD_RULES_FILE`   | Optional            | Path to an explicit project rules file. Overrides auto-detection. Mutually exclusive with `RS_GUARD_NO_PROJECT_RULES` / `--no-project-rules`. |
+| `RS_GUARD_FINDINGS`     | Optional            | Request structured findings from the LLM (CLI `--findings` equivalent). |
+| `RS_GUARD_INLINE_COMMENTS` | Optional         | Submit inline review comments on the PR diff (CLI `--inline-comments` equivalent). Implies `RS_GUARD_FINDINGS`. |
 
 ---
 

@@ -6,8 +6,9 @@
 use crate::error::RsGuardError;
 use crate::http::{build_github_http_client, github_headers, validate_github_base_url};
 use crate::retry::with_retry_simple;
-use crate::verdict::ReviewState;
+use crate::verdict::{Finding, FindingSeverity, ReviewState};
 use serde_json::json;
+use std::collections::HashMap;
 
 /// HTTP request timeout for GitHub API calls.
 const REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
@@ -287,11 +288,7 @@ pub async fn dismiss_previous_reviews(
     Ok(())
 }
 
-use crate::verdict::{Finding, FindingSeverity};
-use std::collections::HashMap;
-
 /// Maximum number of inline comments per review (GitHub API limit).
-#[allow(dead_code)]
 const MAX_INLINE_COMMENTS: usize = 50;
 
 /// Maps (file_path, line_number) to GitHub diff position for inline comments.
@@ -320,25 +317,39 @@ impl DiffPositionMap {
 /// Builds a diff position map from a unified diff string.
 ///
 /// Parses the unified diff to map each `(file_path, line_number)` pair to
-/// the 1-based GitHub diff position index.
+/// the 1-based GitHub diff position index. Per GitHub API docs: "The
+/// position value equals the number of lines down from the first `@@`
+/// hunk header in the file. The line just below the `@@` line is
+/// position 1." Position resets to 0 at the start of each new file.
 pub fn build_diff_position_map(diff: &str) -> DiffPositionMap {
     let mut positions = HashMap::new();
     let mut current_file: Option<String> = None;
     let mut diff_position: u32 = 0;
     let mut new_line: u32 = 0;
+    let mut in_hunk = false;
 
     for line in diff.lines() {
-        diff_position += 1;
-
+        // File header — reset per-file state
         if let Some(path) = line.strip_prefix("+++ b/") {
             current_file = Some(path.to_string());
+            diff_position = 0;
+            new_line = 0;
+            in_hunk = false;
             continue;
         }
         if line.starts_with("--- a/") || line.starts_with("--- /dev/null") {
             continue;
         }
+        if line.starts_with("diff --git") || line.starts_with("index ") {
+            in_hunk = false;
+            continue;
+        }
 
+        // Hunk header — parse new-file start line, mark in-hunk.
+        // Position does NOT reset here — per GitHub docs, it continues
+        // across additional hunks until a new file begins.
         if line.starts_with("@@") {
+            in_hunk = true;
             if let Some(at_pos) = line.find(" +") {
                 let after_plus = &line[at_pos + 2..];
                 if let Some(comma_pos) = after_plus.find(',') {
@@ -354,10 +365,23 @@ pub fn build_diff_position_map(diff: &str) -> DiffPositionMap {
             continue;
         }
 
+        // Skip lines before the first hunk header (file prelude)
+        if !in_hunk {
+            continue;
+        }
+
+        // "\ No newline at end of file" — not a content line, skip
+        if line.starts_with("\\ ") {
+            continue;
+        }
+
         let file = match &current_file {
             Some(f) => f.clone(),
             None => continue,
         };
+
+        // Position increments for every line after the @@ header
+        diff_position += 1;
 
         if line.starts_with('+') {
             positions.insert((file, new_line), diff_position);
@@ -1035,10 +1059,15 @@ diff --git a/src/main.rs b/src/main.rs
  }
 ";
         let map = build_diff_position_map(diff);
-        // diff header (1), --- (2), +++ (3), @@ (4), context (5), added (6), context (7), } (8)
-        assert_eq!(map.get("src/main.rs", 2), Some(6)); // added line
-        assert_eq!(map.get("src/main.rs", 1), Some(5)); // context
-        assert_eq!(map.get("src/main.rs", 3), Some(7)); // context
+        // Per GitHub: position 1 = first line after @@ header.
+        // Line 1 (context "fn main()") -> position 1
+        // Line 2 (added "println!") -> position 2
+        // Line 3 (context "let x") -> position 3
+        // Line 4 (context "}") -> position 4
+        assert_eq!(map.get("src/main.rs", 1), Some(1)); // context
+        assert_eq!(map.get("src/main.rs", 2), Some(2)); // added line
+        assert_eq!(map.get("src/main.rs", 3), Some(3)); // context
+        assert_eq!(map.get("src/main.rs", 4), Some(4)); // context
     }
 
     #[test]
@@ -1060,10 +1089,13 @@ diff --git a/b.rs b/b.rs
  }
 ";
         let map = build_diff_position_map(diff);
-        // First file: diff(1) ---(2) +++(3) @@(4) +use(5) context(6) }(7)
-        // Second file: diff(8) ---(9) +++(10) @@(11) +use(12) context(13) }(14)
-        assert_eq!(map.get("a.rs", 1), Some(5));
-        assert_eq!(map.get("b.rs", 1), Some(12));
+        // Each file resets position to 1 after its @@ header.
+        // a.rs: +use(1) context(2) }(3)
+        // b.rs: +use(1) context(2) }(3)
+        assert_eq!(map.get("a.rs", 1), Some(1));
+        assert_eq!(map.get("a.rs", 2), Some(2));
+        assert_eq!(map.get("b.rs", 1), Some(1));
+        assert_eq!(map.get("b.rs", 2), Some(2));
         // Non-existent file
         assert_eq!(map.get("c.rs", 1), None);
     }
@@ -1086,6 +1118,108 @@ diff --git a/a.rs b/a.rs
  ";
         let map = build_diff_position_map(diff);
         assert_eq!(map.get("a.rs", 999), None);
+    }
+
+    #[test]
+    fn test_build_diff_position_map_new_file() {
+        // New file: --- /dev/null, +++ b/new.rs
+        let diff = "\
+diff --git a/new.rs b/new.rs
+new file mode 100644
+--- /dev/null
++++ b/new.rs
+@@ -0,0 +1,3 @@
++fn main() {
++    println!(\"hi\");
++}
+";
+        let map = build_diff_position_map(diff);
+        // All 3 lines are additions starting at line 1
+        assert_eq!(map.get("new.rs", 1), Some(1));
+        assert_eq!(map.get("new.rs", 2), Some(2));
+        assert_eq!(map.get("new.rs", 3), Some(3));
+    }
+
+    #[test]
+    fn test_build_diff_position_map_deleted_file() {
+        // Deleted file: --- a/old.rs, +++ /dev/null — no new-file lines to map
+        let diff = "\
+diff --git a/old.rs b/old.rs
+deleted file mode 100644
+--- a/old.rs
++++ /dev/null
+@@ -1,2 +0,0 @@
+-fn main() {
+-}
+";
+        let map = build_diff_position_map(diff);
+        // No +++ b/ path, so current_file stays None — no mappings
+        assert!(map.is_empty());
+    }
+
+    #[test]
+    fn test_build_diff_position_map_multiple_hunks_same_file() {
+        // Two hunks in the same file — position continues across hunks
+        let diff = "\
+diff --git a/lib.rs b/lib.rs
+--- a/lib.rs
++++ b/lib.rs
+@@ -1,2 +1,3 @@
+ fn a() {
++    let x = 1;
+ }
+@@ -10,2 +11,3 @@
+ fn b() {
++    let y = 2;
+ }
+";
+        let map = build_diff_position_map(diff);
+        // First hunk: fn a()(1) +let x(2) }(3) — position 1-3
+        // Second hunk: fn b()(4) +let y(5) }(6) — position continues
+        assert_eq!(map.get("lib.rs", 1), Some(1)); // fn a()
+        assert_eq!(map.get("lib.rs", 2), Some(2)); // added let x
+        assert_eq!(map.get("lib.rs", 3), Some(3)); // }
+        assert_eq!(map.get("lib.rs", 11), Some(4)); // fn b()
+        assert_eq!(map.get("lib.rs", 12), Some(5)); // added let y
+        assert_eq!(map.get("lib.rs", 13), Some(6)); // }
+    }
+
+    #[test]
+    fn test_build_diff_position_map_no_newline_marker() {
+        let diff = "\
+diff --git a/a.rs b/a.rs
+--- a/a.rs
++++ b/a.rs
+@@ -1,2 +1,3 @@
++added
+ existing
+\\ No newline at end of file
+";
+        let map = build_diff_position_map(diff);
+        // Position: +added(1) existing(2) — \ marker is skipped, not position 3
+        assert_eq!(map.get("a.rs", 1), Some(1));
+        assert_eq!(map.get("a.rs", 2), Some(2));
+        // No phantom mapping for the \ marker
+        assert_eq!(map.len(), 2);
+    }
+
+    #[test]
+    fn test_build_diff_position_map_malformed_hunk_header() {
+        // Hunk header with unparseable new-file start — new_line stays at
+        // its reset value (0), so mappings would be for line 0 if any
+        // content follows. We verify no crash and no valid mappings.
+        let diff = "\
+diff --git a/a.rs b/a.rs
+--- a/a.rs
++++ b/a.rs
+@@ garbage @@
++added
+";
+        let map = build_diff_position_map(diff);
+        // Malformed header: new_line not parsed, stays 0.
+        // The +added line maps to (a.rs, 0) at position 1.
+        assert_eq!(map.get("a.rs", 0), Some(1));
+        assert_eq!(map.get("a.rs", 1), None);
     }
 
     // ── Format tests ────────────────────────────────────────────────────
