@@ -368,6 +368,7 @@ mod tests {
             security_issues: 0,
             important_issues: 0,
             suggestions: 0,
+            findings: Vec::new(),
         };
         let state = ReviewState::Approve;
         let config = ReviewConfig {
@@ -404,6 +405,7 @@ mod tests {
                 security_issues: 0,
                 important_issues: 0,
                 suggestions: 0,
+                findings: Vec::new(),
             },
             &ReviewState::Comment,
             &ReviewConfig {
@@ -428,6 +430,7 @@ mod tests {
             security_issues: 0,
             important_issues: 0,
             suggestions: 0,
+            findings: Vec::new(),
         };
         let mut buf = Vec::new();
         print_colored_report("all good", &verdict, &ReviewState::Approve, &mut buf).unwrap();
@@ -444,6 +447,7 @@ mod tests {
             security_issues: 1,
             important_issues: 0,
             suggestions: 0,
+            findings: Vec::new(),
         };
         let mut buf = Vec::new();
         print_colored_report(
@@ -468,6 +472,7 @@ mod tests {
             security_issues: 0,
             important_issues: 0,
             suggestions: 0,
+            findings: Vec::new(),
         };
         let config = ReviewConfig {
             provider: "openai".to_string(),
@@ -507,6 +512,7 @@ mod tests {
             security_issues: 0,
             important_issues: 2,
             suggestions: 5,
+            findings: Vec::new(),
         };
         let config = ReviewConfig {
             provider: "openai".to_string(),
@@ -539,6 +545,7 @@ mod tests {
             security_issues: 0,
             important_issues: 2,
             suggestions: 4,
+            findings: Vec::new(),
         };
         let mut buf = Vec::new();
         print_colored_report("ok", &verdict, &ReviewState::Comment, &mut buf).unwrap();
@@ -581,6 +588,7 @@ mod tests {
             security_issues: 0,
             important_issues: 0,
             suggestions: 0,
+            findings: Vec::new(),
         };
         let config = ReviewConfig {
             provider: "deepseek".to_string(),
@@ -606,6 +614,7 @@ mod tests {
             security_issues: 0,
             important_issues: 0,
             suggestions: 0,
+            findings: Vec::new(),
         };
         let config = ReviewConfig {
             provider: "kimi".to_string(),

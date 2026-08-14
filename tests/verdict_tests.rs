@@ -117,6 +117,7 @@ fn test_determine_review_state_negative_always_requests_changes() {
         security_issues: 0,
         important_issues: 0,
         suggestions: 0,
+        findings: Vec::new(),
     };
     assert_eq!(
         determine_review_state(&verdict, 3),
@@ -132,6 +133,7 @@ fn test_determine_review_state_positive_with_zero_counts_approves() {
         security_issues: 0,
         important_issues: 0,
         suggestions: 0,
+        findings: Vec::new(),
     };
     assert_eq!(determine_review_state(&verdict, 3), ReviewState::Approve);
 }
@@ -145,6 +147,7 @@ fn test_determine_review_state_asymmetric_safety() {
         security_issues: 0,
         important_issues: 0,
         suggestions: 0,
+        findings: Vec::new(),
     };
     assert_eq!(
         determine_review_state(&verdict, 3),
@@ -158,6 +161,7 @@ fn test_determine_review_state_asymmetric_safety() {
         security_issues: 0,
         important_issues: 0,
         suggestions: 0,
+        findings: Vec::new(),
     };
     assert_eq!(
         determine_review_state(&verdict, 3),
@@ -221,6 +225,7 @@ fn test_verdict_struct_has_important_issues_field() {
         security_issues: 0,
         important_issues: 2,
         suggestions: 3,
+        findings: Vec::new(),
     };
     // Assert: new fields are accessible and hold correct values
     assert_eq!(verdict.important_issues, 2);
@@ -259,6 +264,7 @@ fn test_determine_review_state_important_issues_lt_3_yields_comment() {
         security_issues: 0,
         important_issues: 2,
         suggestions: 0,
+        findings: Vec::new(),
     };
     // Act / Assert
     assert_eq!(determine_review_state(&verdict, 3), ReviewState::Comment);
@@ -273,6 +279,7 @@ fn test_determine_review_state_important_issues_eq_3_yields_request_changes() {
         security_issues: 0,
         important_issues: 3,
         suggestions: 0,
+        findings: Vec::new(),
     };
     // Act / Assert
     assert_eq!(
@@ -290,6 +297,7 @@ fn test_determine_review_state_important_issues_gt_3_yields_request_changes() {
         security_issues: 0,
         important_issues: 5,
         suggestions: 10,
+        findings: Vec::new(),
     };
     // Act / Assert
     assert_eq!(
@@ -307,6 +315,7 @@ fn test_determine_review_state_suggestions_alone_do_not_block() {
         security_issues: 0,
         important_issues: 0,
         suggestions: 99,
+        findings: Vec::new(),
     };
     // Act / Assert
     assert_eq!(determine_review_state(&verdict, 3), ReviewState::Approve);
@@ -451,6 +460,7 @@ fn test_determine_review_state_respects_threshold() {
         security_issues: 0,
         important_issues: 2,
         suggestions: 0,
+        findings: Vec::new(),
     };
     assert_eq!(determine_review_state(&verdict, 3), ReviewState::Comment);
     assert_eq!(
@@ -466,6 +476,7 @@ fn test_determine_review_state_respects_threshold() {
         security_issues: 0,
         important_issues: 0,
         suggestions: 0,
+        findings: Vec::new(),
     };
     assert_eq!(determine_review_state(&clean, 0), ReviewState::Approve);
 }
@@ -500,6 +511,7 @@ fn test_verdict_display_includes_all_four_fields() {
         security_issues: 0,
         important_issues: 2,
         suggestions: 3,
+        findings: Vec::new(),
     };
     // Act
     let display = verdict.to_string();

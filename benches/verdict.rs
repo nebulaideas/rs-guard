@@ -41,6 +41,7 @@ fn bench_determine_review_state(c: &mut Criterion) {
         security_issues: 0,
         important_issues: 0,
         suggestions: 0,
+        findings: Vec::new(),
     };
 
     c.bench_function("determine_review_state", |b| {
