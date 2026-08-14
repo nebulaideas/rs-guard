@@ -287,6 +287,135 @@ pub async fn dismiss_previous_reviews(
     Ok(())
 }
 
+use crate::verdict::{Finding, FindingSeverity};
+use std::collections::HashMap;
+
+/// Maximum number of inline comments per review (GitHub API limit).
+#[allow(dead_code)]
+const MAX_INLINE_COMMENTS: usize = 50;
+
+/// Maps (file_path, line_number) to GitHub diff position for inline comments.
+#[derive(Debug, Clone, Default)]
+pub struct DiffPositionMap {
+    positions: HashMap<(String, u32), u32>,
+}
+
+impl DiffPositionMap {
+    /// Returns the diff position for a given file path and line number.
+    pub fn get(&self, path: &str, line: u32) -> Option<u32> {
+        self.positions.get(&(path.to_string(), line)).copied()
+    }
+
+    /// Returns the number of mappings.
+    pub fn len(&self) -> usize {
+        self.positions.len()
+    }
+
+    /// Returns `true` if the map is empty.
+    pub fn is_empty(&self) -> bool {
+        self.positions.is_empty()
+    }
+}
+
+/// Builds a diff position map from a unified diff string.
+///
+/// Parses the unified diff to map each `(file_path, line_number)` pair to
+/// the 1-based GitHub diff position index.
+pub fn build_diff_position_map(diff: &str) -> DiffPositionMap {
+    let mut positions = HashMap::new();
+    let mut current_file: Option<String> = None;
+    let mut diff_position: u32 = 0;
+    let mut new_line: u32 = 0;
+
+    for line in diff.lines() {
+        diff_position += 1;
+
+        if let Some(path) = line.strip_prefix("+++ b/") {
+            current_file = Some(path.to_string());
+            continue;
+        }
+        if line.starts_with("--- a/") || line.starts_with("--- /dev/null") {
+            continue;
+        }
+
+        if line.starts_with("@@") {
+            if let Some(at_pos) = line.find(" +") {
+                let after_plus = &line[at_pos + 2..];
+                if let Some(comma_pos) = after_plus.find(',') {
+                    if let Ok(n) = after_plus[..comma_pos].parse::<u32>() {
+                        new_line = n;
+                    }
+                } else if let Some(space_pos) = after_plus.find(' ') {
+                    if let Ok(n) = after_plus[..space_pos].parse::<u32>() {
+                        new_line = n;
+                    }
+                }
+            }
+            continue;
+        }
+
+        let file = match &current_file {
+            Some(f) => f.clone(),
+            None => continue,
+        };
+
+        if line.starts_with('+') {
+            positions.insert((file, new_line), diff_position);
+            new_line += 1;
+        } else if line.starts_with('-') {
+            // Removed lines don't advance new-file line counter
+        } else {
+            // Context line
+            positions.insert((file, new_line), diff_position);
+            new_line += 1;
+        }
+    }
+
+    DiffPositionMap { positions }
+}
+
+/// Formats unmappable findings as bullet points for the review body.
+///
+/// Findings that cannot be mapped to a diff position are appended as prose
+/// bullets so no finding is silently dropped.
+pub fn format_unmappable_findings(findings: &[Finding]) -> String {
+    if findings.is_empty() {
+        return String::new();
+    }
+    let mut out = String::from("\n\n### Additional findings (not in diff)\n\n");
+    for f in findings {
+        out.push_str(&format!(
+            "- **[{}] {}:{}** — {}",
+            f.severity, f.path, f.line, f.message
+        ));
+        if let Some(ref s) = f.suggestion {
+            out.push_str(&format!(" _(suggestion: {})_", s));
+        }
+        out.push('\n');
+    }
+    out
+}
+
+/// Severity to emoji for inline comment headers.
+fn severity_emoji(severity: &FindingSeverity) -> &'static str {
+    match severity {
+        FindingSeverity::Critical => "🔴",
+        FindingSeverity::Security => "🛡️",
+        FindingSeverity::Important => "🟡",
+        FindingSeverity::Suggestion => "💡",
+    }
+}
+
+/// Formats a finding as an inline review comment body.
+pub fn format_inline_comment(finding: &Finding) -> String {
+    let emoji = severity_emoji(&finding.severity);
+    let mut body = format!("{} **[{}]** {}", emoji, finding.severity, finding.message);
+    if let Some(ref s) = finding.suggestion {
+        body.push_str(&format!("\n\n> 💡 Suggestion: {}", s));
+    }
+    body
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -784,5 +913,127 @@ mod tests {
 
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("500"));
+    }
+
+    // ── Diff position map tests ─────────────────────────────────────────
+
+    #[test]
+    fn test_build_diff_position_map_basic() {
+        let diff = "\
+diff --git a/src/main.rs b/src/main.rs
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -1,3 +1,4 @@
+ fn main() {
++    println!(\"hello\");
+     let x = 1;
+ }
+";
+        let map = build_diff_position_map(diff);
+        // diff header (1), --- (2), +++ (3), @@ (4), context (5), added (6), context (7), } (8)
+        assert_eq!(map.get("src/main.rs", 2), Some(6)); // added line
+        assert_eq!(map.get("src/main.rs", 1), Some(5)); // context
+        assert_eq!(map.get("src/main.rs", 3), Some(7)); // context
+    }
+
+    #[test]
+    fn test_build_diff_position_map_multiple_files() {
+        let diff = "\
+diff --git a/a.rs b/a.rs
+--- a/a.rs
++++ b/a.rs
+@@ -1,2 +1,3 @@
++use std::io;
+ fn main() {
+ }
+diff --git a/b.rs b/b.rs
+--- a/b.rs
++++ b/b.rs
+@@ -1,2 +1,3 @@
++use std::fs;
+ fn helper() {
+ }
+";
+        let map = build_diff_position_map(diff);
+        // First file: diff(1) ---(2) +++(3) @@(4) +use(5) context(6) }(7)
+        // Second file: diff(8) ---(9) +++(10) @@(11) +use(12) context(13) }(14)
+        assert_eq!(map.get("a.rs", 1), Some(5));
+        assert_eq!(map.get("b.rs", 1), Some(12));
+        // Non-existent file
+        assert_eq!(map.get("c.rs", 1), None);
+    }
+
+    #[test]
+    fn test_build_diff_position_map_empty_diff() {
+        let map = build_diff_position_map("");
+        assert!(map.is_empty());
+    }
+
+    #[test]
+    fn test_diff_position_map_nonexistent_line() {
+        let diff = "\
+diff --git a/a.rs b/a.rs
+--- a/a.rs
++++ b/a.rs
+@@ -1,2 +1,3 @@
++added
+ existing
+ ";
+        let map = build_diff_position_map(diff);
+        assert_eq!(map.get("a.rs", 999), None);
+    }
+
+    // ── Format tests ────────────────────────────────────────────────────
+
+    #[test]
+    fn test_format_unmappable_findings_empty() {
+        assert_eq!(format_unmappable_findings(&[]), "");
+    }
+
+    #[test]
+    fn test_format_unmappable_findings_with_entries() {
+        let findings = vec![Finding {
+            path: "src/main.rs".into(),
+            line: 42,
+            severity: FindingSeverity::Critical,
+            message: "Null deref".into(),
+            suggestion: Some("Add null check".into()),
+        }];
+        let result = format_unmappable_findings(&findings);
+        assert!(result.contains("Additional findings"));
+        assert!(result.contains("[Critical]"));
+        assert!(result.contains("src/main.rs:42"));
+        assert!(result.contains("Null deref"));
+        assert!(result.contains("Add null check"));
+    }
+
+    #[test]
+    fn test_format_inline_comment_critical() {
+        let finding = Finding {
+            path: "a.rs".into(),
+            line: 1,
+            severity: FindingSeverity::Critical,
+            message: "Buffer overflow".into(),
+            suggestion: None,
+        };
+        let comment = format_inline_comment(&finding);
+        assert!(comment.contains("🔴"));
+        assert!(comment.contains("[Critical]"));
+        assert!(comment.contains("Buffer overflow"));
+        assert!(!comment.contains("Suggestion"));
+    }
+
+    #[test]
+    fn test_format_inline_comment_with_suggestion() {
+        let finding = Finding {
+            path: "a.rs".into(),
+            line: 1,
+            severity: FindingSeverity::Suggestion,
+            message: "Use const".into(),
+            suggestion: Some("Extract to MAGIC_NUMBER".into()),
+        };
+        let comment = format_inline_comment(&finding);
+        assert!(comment.contains("💡"));
+        assert!(comment.contains("Extract to MAGIC_NUMBER"));
     }
 }
