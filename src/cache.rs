@@ -103,6 +103,8 @@ struct CacheKey {
     max_tokens: Option<u32>,
     /// Optional `result_format` override (changes the request body shape).
     result_format: Option<String>,
+    /// Whether structured findings were requested (changes the prompt).
+    findings: bool,
 }
 
 impl CacheKey {
@@ -124,6 +126,7 @@ impl CacheKey {
         base_url: &str,
         max_tokens: Option<u32>,
         result_format: Option<&str>,
+        findings: bool,
     ) -> Self {
         let diff_hash = hash_content(diff_content);
         let prompt_hash = hash_content(prompt);
@@ -139,6 +142,7 @@ impl CacheKey {
             base_url: base_url.to_string(),
             max_tokens,
             result_format: result_format.map(|s| s.to_lowercase()),
+            findings,
         }
     }
 
@@ -192,6 +196,8 @@ impl CacheKey {
             }
             None => hasher.update([0]),
         }
+        // Findings flag — changes the prompt, so must be in the key.
+        hasher.update([u8::from(self.findings)]);
         hex::encode(hasher.finalize())
     }
 }
@@ -327,6 +333,7 @@ impl DiffCache {
         base_url: &str,
         max_tokens: Option<u32>,
         result_format: Option<&str>,
+        findings: bool,
     ) -> Option<String> {
         self.get_with_project_rules(
             diff_content,
@@ -339,6 +346,7 @@ impl DiffCache {
             base_url,
             max_tokens,
             result_format,
+            findings,
         )
     }
 
@@ -356,6 +364,7 @@ impl DiffCache {
         base_url: &str,
         max_tokens: Option<u32>,
         result_format: Option<&str>,
+        findings: bool,
     ) -> Option<String> {
         if !self.config.enabled {
             return None;
@@ -372,6 +381,7 @@ impl DiffCache {
             base_url,
             max_tokens,
             result_format,
+            findings,
         );
         let key_str = key.as_string();
         let path = self.cache_path(&key_str);
@@ -429,6 +439,7 @@ impl DiffCache {
         base_url: &str,
         max_tokens: Option<u32>,
         result_format: Option<&str>,
+        findings: bool,
         response: &str,
     ) -> Result<(), RsGuardError> {
         self.set_with_project_rules(
@@ -442,6 +453,7 @@ impl DiffCache {
             base_url,
             max_tokens,
             result_format,
+            findings,
             response,
         )
     }
@@ -460,6 +472,7 @@ impl DiffCache {
         base_url: &str,
         max_tokens: Option<u32>,
         result_format: Option<&str>,
+        findings: bool,
         response: &str,
     ) -> Result<(), RsGuardError> {
         if !self.config.enabled {
@@ -477,6 +490,7 @@ impl DiffCache {
             base_url,
             max_tokens,
             result_format,
+            findings,
         );
         let key_str = key.as_string();
         let path = self.cache_path(&key_str);
@@ -819,6 +833,38 @@ mod tests {
             base_url,
             max_tokens,
             result_format,
+            false,
+        )
+    }
+
+    /// Like `new_without_project_rules` but with an explicit `findings`
+    /// flag, so tests can verify cache-key isolation between findings
+    /// modes.
+    #[allow(clippy::too_many_arguments)]
+    fn new_with_findings(
+        diff_content: &str,
+        prompt: &str,
+        provider: &str,
+        model: &str,
+        variant: Option<&str>,
+        temperature: f32,
+        base_url: &str,
+        max_tokens: Option<u32>,
+        result_format: Option<&str>,
+        findings: bool,
+    ) -> CacheKey {
+        CacheKey::new(
+            diff_content,
+            prompt,
+            None,
+            provider,
+            model,
+            variant,
+            temperature,
+            base_url,
+            max_tokens,
+            result_format,
+            findings,
         )
     }
 
@@ -1048,6 +1094,125 @@ mod tests {
     }
 
     #[test]
+    fn test_cache_key_isolates_findings_flag() {
+        // Regression: the `findings` flag changes the prompt (we now
+        // append findings instructions), so the cache key must
+        // distinguish findings=true from findings=false. Otherwise a
+        // cached response for the standard prompt could be returned
+        // when the user requested structured findings — the response
+        // would be missing the [RS_GUARD_VERDICT_FINDINGS] block.
+        let off = new_with_findings(
+            "diff",
+            "prompt",
+            "deepseek",
+            "deepseek-v4-flash",
+            None,
+            0.1,
+            "https://api.deepseek.com/v1",
+            None,
+            None,
+            false,
+        );
+        let on = new_with_findings(
+            "diff",
+            "prompt",
+            "deepseek",
+            "deepseek-v4-flash",
+            None,
+            0.1,
+            "https://api.deepseek.com/v1",
+            None,
+            None,
+            true,
+        );
+        assert_ne!(
+            off.as_string(),
+            on.as_string(),
+            "findings=true must produce a different cache key from findings=false"
+        );
+    }
+
+    #[test]
+    fn test_cache_set_get_isolation_with_findings_flag() {
+        // Verify a cached response written under findings=true is not
+        // returned when the next request asks for findings=false, and
+        // vice versa. Otherwise a stale response could leak across
+        // modes.
+        let dir = tempdir().unwrap();
+        let cache_dir = dir.path().join("cache");
+        let config = CacheConfig {
+            cache_dir: cache_dir.clone(),
+            ttl: Duration::from_secs(3600),
+            enabled: true,
+            max_size_bytes: 1024 * 1024,
+            auto_gitignore: false,
+        };
+        let cache = DiffCache::new(config).unwrap();
+
+        // Write distinct responses for the two modes.
+        cache
+            .set(
+                "diff",
+                "prompt",
+                "deepseek",
+                "deepseek-v4-flash",
+                None,
+                0.1,
+                "https://api.deepseek.com/v1",
+                None,
+                None,
+                false,
+                "RESPONSE_NO_FINDINGS",
+            )
+            .unwrap();
+        cache
+            .set(
+                "diff",
+                "prompt",
+                "deepseek",
+                "deepseek-v4-flash",
+                None,
+                0.1,
+                "https://api.deepseek.com/v1",
+                None,
+                None,
+                true,
+                "RESPONSE_WITH_FINDINGS",
+            )
+            .unwrap();
+
+        let no_findings = cache.get(
+            "diff",
+            "prompt",
+            "deepseek",
+            "deepseek-v4-flash",
+            None,
+            0.1,
+            "https://api.deepseek.com/v1",
+            None,
+            None,
+            false,
+        );
+        let with_findings = cache.get(
+            "diff",
+            "prompt",
+            "deepseek",
+            "deepseek-v4-flash",
+            None,
+            0.1,
+            "https://api.deepseek.com/v1",
+            None,
+            None,
+            true,
+        );
+
+        assert_eq!(no_findings.as_deref(), Some("RESPONSE_NO_FINDINGS"));
+        assert_eq!(with_findings.as_deref(), Some("RESPONSE_WITH_FINDINGS"));
+        // Crucially: no_findings must NOT return the findings-mode response.
+        assert_ne!(no_findings, with_findings);
+    }
+
+    #[test]
     fn test_cache_key_isolates_project_rules() {
         // Regression: different project rules content must produce different
         // cache keys to ensure cache invalidation when rules change.
@@ -1073,6 +1238,7 @@ mod tests {
             "https://default.example.com",
             None,
             None,
+            false,
         );
         let with_rules_b = CacheKey::new(
             "diff",
@@ -1085,6 +1251,7 @@ mod tests {
             "https://default.example.com",
             None,
             None,
+            false,
         );
 
         assert_ne!(
@@ -1355,6 +1522,7 @@ mod tests {
                 "https://default.example.com",
                 None,
                 None,
+                false,
                 "cached response",
             )
             .unwrap();
@@ -1369,6 +1537,7 @@ mod tests {
                 "https://default.example.com",
                 None,
                 None,
+                false,
             )
             .is_none());
     }
@@ -1396,6 +1565,7 @@ mod tests {
                 "https://default.example.com",
                 None,
                 None,
+                false,
                 "llm response",
             )
             .unwrap();
@@ -1409,6 +1579,7 @@ mod tests {
             "https://default.example.com",
             None,
             None,
+            false,
         );
         assert_eq!(result, Some("llm response".to_string()));
     }
@@ -1436,6 +1607,7 @@ mod tests {
                 "https://default.example.com",
                 None,
                 None,
+                false,
             )
             .is_none());
     }
@@ -1463,6 +1635,7 @@ mod tests {
                 "https://default.example.com",
                 None,
                 None,
+                false,
                 "will expire",
             )
             .unwrap();
@@ -1478,6 +1651,7 @@ mod tests {
             "https://default.example.com",
             None,
             None,
+            false,
         );
         assert!(result.is_none());
 
@@ -1536,6 +1710,7 @@ mod tests {
                 "https://default.example.com",
                 None,
                 None,
+                false,
                 "version 1",
             )
             .unwrap();
@@ -1550,6 +1725,7 @@ mod tests {
                 "https://default.example.com",
                 None,
                 None,
+                false,
                 "version 2",
             )
             .unwrap();
@@ -1565,6 +1741,7 @@ mod tests {
                 "https://default.example.com",
                 None,
                 None,
+                false,
             ),
             Some("version 2".to_string())
         );
@@ -1595,6 +1772,7 @@ mod tests {
                     "https://default.example.com",
                     None,
                     None,
+                    false,
                     &format!("response {}", i),
                 )
                 .unwrap();
@@ -1628,6 +1806,7 @@ mod tests {
                 "https://default.example.com",
                 None,
                 None,
+                false,
                 "value1",
             )
             .unwrap();
@@ -1642,6 +1821,7 @@ mod tests {
                 "https://default.example.com",
                 None,
                 None,
+                false,
                 "value2",
             )
             .unwrap();
@@ -1678,6 +1858,7 @@ mod tests {
                 "https://default.example.com",
                 None,
                 None,
+                false,
                 "value1",
             )
             .unwrap();
@@ -1692,6 +1873,7 @@ mod tests {
                 "https://default.example.com",
                 None,
                 None,
+                false,
                 "value2",
             )
             .unwrap();
@@ -1726,6 +1908,7 @@ mod tests {
                 "https://default.example.com",
                 None,
                 None,
+                false,
                 multiline,
             )
             .unwrap();
@@ -1741,6 +1924,7 @@ mod tests {
                 "https://default.example.com",
                 None,
                 None,
+                false,
             ),
             Some(multiline.to_string())
         );
@@ -1770,6 +1954,7 @@ mod tests {
                 "https://default.example.com",
                 None,
                 None,
+                false,
                 "response",
             )
             .unwrap();
@@ -1802,6 +1987,7 @@ mod tests {
                 "https://default.example.com",
                 None,
                 None,
+                false,
             )
             .is_none());
     }
@@ -1830,6 +2016,7 @@ mod tests {
                 "https://default.example.com",
                 None,
                 None,
+                false,
                 "response",
             )
             .unwrap();
@@ -1862,6 +2049,7 @@ mod tests {
                 "https://default.example.com",
                 None,
                 None,
+                false,
             )
             .is_none());
     }
@@ -1890,6 +2078,7 @@ mod tests {
                 "https://default.example.com",
                 None,
                 None,
+                false,
                 "response",
             )
             .unwrap();
@@ -1922,6 +2111,7 @@ mod tests {
                 "https://default.example.com",
                 None,
                 None,
+                false,
             )
             .is_none());
     }
@@ -1950,6 +2140,7 @@ mod tests {
                 "https://default.example.com",
                 None,
                 None,
+                false,
                 "response",
             )
             .unwrap();
@@ -1982,6 +2173,7 @@ mod tests {
                 "https://default.example.com",
                 None,
                 None,
+                false,
             )
             .is_none());
     }
@@ -2035,6 +2227,7 @@ mod tests {
                 "https://default.example.com",
                 None,
                 None,
+                false,
                 "value",
             )
             .unwrap();
@@ -2048,6 +2241,7 @@ mod tests {
             "https://default.example.com",
             None,
             None,
+            false,
         );
         assert_eq!(result, Some("value".to_string()));
     }

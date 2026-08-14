@@ -223,6 +223,32 @@ pub struct ReviewArgs {
         help = "Path to explicit project rules file (overrides auto-detection)"
     )]
     pub rules_file: Option<PathBuf>,
+
+    /// Request structured findings from the LLM.
+    ///
+    /// When set, rs-guard asks the LLM to include a `[RS_GUARD_VERDICT_FINDINGS]`
+    /// JSON block at the end of its response. This enables per-file, per-line
+    /// issue tracking. Findings are used to derive severity counts, overriding
+    /// metadata block counts when present.
+    #[arg(
+        long,
+        env = "RS_GUARD_FINDINGS",
+        help = "Request structured findings from the LLM"
+    )]
+    pub findings: bool,
+
+    /// Submit inline review comments on the GitHub PR diff.
+    ///
+    /// When set, rs-guard requests structured findings (implying `--findings`)
+    /// and maps them to diff positions for inline review comments. Unmappable
+    /// findings are appended to the review body as bullet points. Implies
+    /// `--findings`.
+    #[arg(
+        long,
+        env = "RS_GUARD_INLINE_COMMENTS",
+        help = "Submit inline review comments on the PR diff (implies --findings)"
+    )]
+    pub inline_comments: bool,
 }
 
 /// Project type used by `rs-guard init` to select appropriate templates.
@@ -495,5 +521,41 @@ mod tests {
             }
             _ => panic!("expected ValidateConfig subcommand"),
         }
+    }
+
+    #[test]
+    fn test_findings_flag_parsing() {
+        let cli = Cli::parse_from(["rs-guard", "--findings"]);
+        assert!(
+            cli.review.findings,
+            "--findings should set findings to true"
+        );
+        assert!(
+            !cli.review.inline_comments,
+            "--findings alone should not set inline_comments"
+        );
+    }
+
+    #[test]
+    fn test_inline_comments_flag_parsing() {
+        let cli = Cli::parse_from(["rs-guard", "--inline-comments"]);
+        assert!(
+            cli.review.inline_comments,
+            "--inline-comments should set inline_comments to true"
+        );
+        // The --inline-comments implies --findings logic lives in
+        // Config::apply_args, not in clap itself. At the clap layer the two
+        // flags are independent, so findings must NOT be set here.
+        assert!(
+            !cli.review.findings,
+            "clap must not set findings from --inline-comments; the implication is enforced in Config::apply_args"
+        );
+    }
+
+    #[test]
+    fn test_findings_and_inline_comments_both_false_by_default() {
+        let cli = Cli::parse_from(["rs-guard"]);
+        assert!(!cli.review.findings);
+        assert!(!cli.review.inline_comments);
     }
 }
