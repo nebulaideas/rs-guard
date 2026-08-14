@@ -144,7 +144,7 @@ impl std::fmt::Display for FindingSeverity {
 /// Each finding pinpoints a specific issue in the reviewed code with file path,
 /// line number, severity, and an actionable message. Findings are parsed from
 /// the `[RS_GUARD_VERDICT_FINDINGS]` JSON block at the end of an LLM response.
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct Finding {
     /// File path relative to the repository root (e.g. `"src/main.rs"`).
     pub path: String,
@@ -187,6 +187,50 @@ pub struct Verdict {
     pub important_issues: u32,
     /// Count of `[Suggestion]` items. Advisory only — never blocks merge.
     pub suggestions: u32,
+    /// Structured findings parsed from `[RS_GUARD_VERDICT_FINDINGS]`.
+    ///
+    /// When non-empty, the counts above are derived from these findings.
+    /// When empty, counts come from the metadata block or tag counting fallback.
+    pub findings: Vec<Finding>,
+}
+
+impl Verdict {
+    /// Creates a `Verdict` with counts derived from the given findings.
+    ///
+    /// The `verdict` string is set to `"NEGATIVE"` when any `Critical` or
+    /// `Security` findings are present, `"POSITIVE"` otherwise.
+    pub fn from_findings(verdict: &str, findings: Vec<Finding>) -> Self {
+        let critical_issues = findings
+            .iter()
+            .filter(|f| f.severity == FindingSeverity::Critical)
+            .count() as u32;
+        let security_issues = findings
+            .iter()
+            .filter(|f| f.severity == FindingSeverity::Security)
+            .count() as u32;
+        let important_issues = findings
+            .iter()
+            .filter(|f| f.severity == FindingSeverity::Important)
+            .count() as u32;
+        let suggestions = findings
+            .iter()
+            .filter(|f| f.severity == FindingSeverity::Suggestion)
+            .count() as u32;
+
+        Verdict {
+            verdict: verdict.to_string(),
+            critical_issues,
+            security_issues,
+            important_issues,
+            suggestions,
+            findings,
+        }
+    }
+
+    /// Returns `true` when structured findings are available.
+    pub fn has_findings(&self) -> bool {
+        !self.findings.is_empty()
+    }
 }
 
 impl std::fmt::Display for Verdict {
@@ -273,6 +317,7 @@ pub fn parse_metadata_block(response: &str) -> Option<Verdict> {
         security_issues,
         important_issues,
         suggestions,
+        findings: Vec::new(),
     })
 }
 
@@ -297,6 +342,7 @@ pub fn evaluate_by_tags(response: &str) -> Verdict {
         security_issues,
         important_issues,
         suggestions,
+        findings: Vec::new(),
     }
 }
 
@@ -323,9 +369,14 @@ pub fn determine_review_state(verdict: &Verdict, important_threshold: u32) -> Re
 
 /// Parses an LLM response into a verdict and corresponding review state.
 ///
-/// First validates the response is not empty or whitespace-only, then attempts
-/// structured metadata extraction, falls back to tag counting, validates the
-/// verdict value, and computes the review state.
+/// First validates the response is not empty or whitespace-only, then:
+/// 1. Attempts to parse structured findings from `[RS_GUARD_VERDICT_FINDINGS]`
+/// 2. Falls back to metadata block extraction, then tag counting
+/// 3. Validates the verdict value and computes the review state
+///
+/// When structured findings are present, issue counts are derived from them
+/// (overriding any metadata block counts). This ensures the counts always
+/// match the detailed findings.
 ///
 /// # Errors
 ///
@@ -343,7 +394,15 @@ pub fn parse_verdict(
         ));
     }
 
-    let verdict = parse_metadata_block(response).unwrap_or_else(|| evaluate_by_tags(response));
+    // Try metadata block first to get the verdict string
+    let mut verdict = parse_metadata_block(response).unwrap_or_else(|| evaluate_by_tags(response));
+
+    // If structured findings are present, override counts from findings
+    if let Some(findings) = parse_findings(response) {
+        if !findings.is_empty() {
+            verdict = Verdict::from_findings(&verdict.verdict, findings);
+        }
+    }
 
     if verdict.verdict != "POSITIVE" && verdict.verdict != "NEGATIVE" {
         return Err(RsGuardError::VerdictParse(format!(
@@ -798,5 +857,98 @@ mod tests {
         let response = "[RS_GUARD_VERDICT_FINDINGS]\n  \n  [{\"path\":\"a.rs\",\"line\":1,\"severity\":\"Suggestion\",\"message\":\"ok\"}]";
         let findings = parse_findings(response).expect("should parse with whitespace");
         assert_eq!(findings.len(), 1);
+    }
+
+    // ── Verdict findings integration tests ────────────────────────────────
+
+    #[test]
+    fn test_verdict_from_findings_derives_counts() {
+        let findings = vec![
+            Finding {
+                path: "a.rs".into(),
+                line: 1,
+                severity: FindingSeverity::Critical,
+                message: "crit".into(),
+                suggestion: None,
+            },
+            Finding {
+                path: "b.rs".into(),
+                line: 2,
+                severity: FindingSeverity::Security,
+                message: "sec".into(),
+                suggestion: None,
+            },
+            Finding {
+                path: "c.rs".into(),
+                line: 3,
+                severity: FindingSeverity::Important,
+                message: "imp".into(),
+                suggestion: None,
+            },
+            Finding {
+                path: "d.rs".into(),
+                line: 4,
+                severity: FindingSeverity::Suggestion,
+                message: "sug".into(),
+                suggestion: None,
+            },
+        ];
+        let verdict = Verdict::from_findings("POSITIVE", findings);
+        assert_eq!(verdict.critical_issues, 1);
+        assert_eq!(verdict.security_issues, 1);
+        assert_eq!(verdict.important_issues, 1);
+        assert_eq!(verdict.suggestions, 1);
+        assert!(verdict.has_findings());
+    }
+
+    #[test]
+    fn test_verdict_from_findings_empty() {
+        let verdict = Verdict::from_findings("POSITIVE", vec![]);
+        assert_eq!(verdict.critical_issues, 0);
+        assert!(!verdict.has_findings());
+    }
+
+    #[test]
+    fn test_parse_verdict_with_findings_overrides_metadata_counts() {
+        // Metadata says 0 critical, but findings say 2 critical
+        let response = "[RS_GUARD_VERDICT_METADATA]\nVerdict: POSITIVE\nCriticalIssues: 0\nSecurityIssues: 0\nImportantIssues: 0\nSuggestions: 0\n\n[RS_GUARD_VERDICT_FINDINGS]\n[{\"path\":\"a.rs\",\"line\":1,\"severity\":\"Critical\",\"message\":\"c1\"},{\"path\":\"b.rs\",\"line\":2,\"severity\":\"Critical\",\"message\":\"c2\"}]";
+        let (verdict, state) = parse_verdict(response, 3).unwrap();
+        assert_eq!(verdict.critical_issues, 2);
+        assert_eq!(verdict.findings.len(), 2);
+        assert_eq!(state, ReviewState::RequestChanges);
+    }
+
+    #[test]
+    fn test_parse_verdict_with_findings_positive_to_request_changes() {
+        // Metadata says POSITIVE with 0 issues, but findings have Security
+        let response = "[RS_GUARD_VERDICT_METADATA]\nVerdict: POSITIVE\nCriticalIssues: 0\nSecurityIssues: 0\nImportantIssues: 0\nSuggestions: 0\n\n[RS_GUARD_VERDICT_FINDINGS]\n[{\"path\":\"a.rs\",\"line\":10,\"severity\":\"Security\",\"message\":\"SQL injection\",\"suggestion\":\"Use parameterized queries\"}]";
+        let (verdict, state) = parse_verdict(response, 3).unwrap();
+        assert_eq!(verdict.security_issues, 1);
+        assert_eq!(verdict.findings.len(), 1);
+        assert_eq!(
+            verdict.findings[0].suggestion.as_deref(),
+            Some("Use parameterized queries")
+        );
+        assert_eq!(state, ReviewState::RequestChanges);
+    }
+
+    #[test]
+    fn test_parse_verdict_without_findings_uses_metadata() {
+        // No findings marker — should use metadata counts as before
+        let response = "[RS_GUARD_VERDICT_METADATA]\nVerdict: POSITIVE\nCriticalIssues: 0\nSecurityIssues: 0\nImportantIssues: 0\nSuggestions: 0";
+        let (verdict, state) = parse_verdict(response, 3).unwrap();
+        assert!(verdict.findings.is_empty());
+        assert!(!verdict.has_findings());
+        assert_eq!(state, ReviewState::Approve);
+    }
+
+    #[test]
+    fn test_parse_verdict_empty_findings_array_uses_metadata() {
+        // Empty findings array should not override metadata
+        let response = "[RS_GUARD_VERDICT_METADATA]\nVerdict: POSITIVE\nCriticalIssues: 1\nSecurityIssues: 0\nImportantIssues: 0\nSuggestions: 0\n\n[RS_GUARD_VERDICT_FINDINGS]\n[]";
+        let (verdict, _) = parse_verdict(response, 3).unwrap();
+        // Empty findings array means we keep metadata counts
+        assert_eq!(verdict.critical_issues, 1);
+        assert!(verdict.findings.is_empty());
     }
 }
