@@ -194,6 +194,33 @@ pub struct Verdict {
     pub findings: Vec<Finding>,
 }
 
+/// Counts findings by severity, returning a tuple
+/// `(critical, security, important, suggestion)`.
+///
+/// Single-pass tally shared by [`Verdict::from_findings`] and
+/// [`Verdict::merge_with_findings`] so the per-severity counting logic
+/// lives in exactly one place.
+fn count_findings(findings: &[Finding]) -> (u32, u32, u32, u32) {
+    let mut critical_issues = 0u32;
+    let mut security_issues = 0u32;
+    let mut important_issues = 0u32;
+    let mut suggestions = 0u32;
+    for finding in findings {
+        match finding.severity {
+            FindingSeverity::Critical => critical_issues += 1,
+            FindingSeverity::Security => security_issues += 1,
+            FindingSeverity::Important => important_issues += 1,
+            FindingSeverity::Suggestion => suggestions += 1,
+        }
+    }
+    (
+        critical_issues,
+        security_issues,
+        important_issues,
+        suggestions,
+    )
+}
+
 impl Verdict {
     /// Creates a `Verdict` from findings alone, without a preliminary
     /// verdict. Prefer [`Verdict::merge_with_findings`] when a preliminary
@@ -209,18 +236,8 @@ impl Verdict {
         findings: Vec<Finding>,
         important_threshold: u32,
     ) -> Self {
-        let mut critical_issues = 0u32;
-        let mut security_issues = 0u32;
-        let mut important_issues = 0u32;
-        let mut suggestions = 0u32;
-        for finding in &findings {
-            match finding.severity {
-                FindingSeverity::Critical => critical_issues += 1,
-                FindingSeverity::Security => security_issues += 1,
-                FindingSeverity::Important => important_issues += 1,
-                FindingSeverity::Suggestion => suggestions += 1,
-            }
-        }
+        let (critical_issues, security_issues, important_issues, suggestions) =
+            count_findings(&findings);
 
         let would_block = critical_issues > 0
             || security_issues > 0
@@ -263,18 +280,8 @@ impl Verdict {
         findings: Vec<Finding>,
         important_threshold: u32,
     ) -> Self {
-        let mut findings_critical = 0u32;
-        let mut findings_security = 0u32;
-        let mut findings_important = 0u32;
-        let mut findings_suggestions = 0u32;
-        for finding in &findings {
-            match finding.severity {
-                FindingSeverity::Critical => findings_critical += 1,
-                FindingSeverity::Security => findings_security += 1,
-                FindingSeverity::Important => findings_important += 1,
-                FindingSeverity::Suggestion => findings_suggestions += 1,
-            }
-        }
+        let (findings_critical, findings_security, findings_important, findings_suggestions) =
+            count_findings(&findings);
 
         let critical_issues = preliminary.critical_issues.max(findings_critical);
         let security_issues = preliminary.security_issues.max(findings_security);
@@ -518,7 +525,7 @@ pub fn parse_verdict(
                     e
                 );
                 let mut v = preliminary;
-                if preliminary_blocks && v.verdict == "POSITIVE" {
+                if v.verdict == "POSITIVE" {
                     v.verdict = "NEGATIVE".to_string();
                 }
                 v
