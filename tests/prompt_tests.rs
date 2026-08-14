@@ -6,7 +6,8 @@ fn test_compose_prompt_with_project_rules_includes_conventions_section() {
     let project_rules: Option<&str> = Some("# Project Rules\nUse Rust patterns.");
     let rules_file_path: Option<&str> = Some("AGENTS.md");
 
-    let composed = rs_guard::pipeline::compose_prompt(base_prompt, project_rules, rules_file_path);
+    let composed =
+        rs_guard::pipeline::compose_prompt(base_prompt, project_rules, rules_file_path, false);
 
     assert!(
         composed.contains("Project Conventions"),
@@ -32,7 +33,8 @@ fn test_compose_prompt_without_project_rules_unchanged() {
     let project_rules: Option<&str> = None;
     let rules_file_path: Option<&str> = None;
 
-    let composed = rs_guard::pipeline::compose_prompt(base_prompt, project_rules, rules_file_path);
+    let composed =
+        rs_guard::pipeline::compose_prompt(base_prompt, project_rules, rules_file_path, false);
 
     assert_eq!(
         composed, base_prompt,
@@ -50,7 +52,8 @@ fn test_compose_prompt_with_empty_file_path_omits_header() {
     let project_rules: Option<&str> = Some("# Project Rules\nUse Rust patterns.");
     let rules_file_path: Option<&str> = Some("");
 
-    let composed = rs_guard::pipeline::compose_prompt(base_prompt, project_rules, rules_file_path);
+    let composed =
+        rs_guard::pipeline::compose_prompt(base_prompt, project_rules, rules_file_path, false);
 
     assert!(
         composed.contains("Project Conventions"),
@@ -72,7 +75,8 @@ fn test_compose_prompt_with_empty_rules_content_returns_base_prompt() {
     let project_rules: Option<&str> = Some("");
     let rules_file_path: Option<&str> = Some("AGENTS.md");
 
-    let composed = rs_guard::pipeline::compose_prompt(base_prompt, project_rules, rules_file_path);
+    let composed =
+        rs_guard::pipeline::compose_prompt(base_prompt, project_rules, rules_file_path, false);
 
     assert_eq!(
         composed, base_prompt,
@@ -90,7 +94,8 @@ fn test_compose_prompt_with_none_file_path_omits_header() {
     let project_rules: Option<&str> = Some("# Project Rules\nUse Rust patterns.");
     let rules_file_path: Option<&str> = None;
 
-    let composed = rs_guard::pipeline::compose_prompt(base_prompt, project_rules, rules_file_path);
+    let composed =
+        rs_guard::pipeline::compose_prompt(base_prompt, project_rules, rules_file_path, false);
 
     assert!(
         composed.contains("Project Conventions"),
@@ -115,7 +120,7 @@ fn test_compose_prompt_with_custom_prompt_file_and_no_rules_is_backwards_compati
     let rules_file_path: Option<&str> = None;
 
     let composed =
-        rs_guard::pipeline::compose_prompt(custom_prompt, project_rules, rules_file_path);
+        rs_guard::pipeline::compose_prompt(custom_prompt, project_rules, rules_file_path, false);
 
     assert_eq!(
         composed, custom_prompt,
@@ -136,7 +141,7 @@ fn test_compose_prompt_layers_rules_on_top_of_custom_prompt() {
     let rules_file_path: Option<&str> = Some("AGENTS.md");
 
     let composed =
-        rs_guard::pipeline::compose_prompt(custom_prompt, project_rules, rules_file_path);
+        rs_guard::pipeline::compose_prompt(custom_prompt, project_rules, rules_file_path, false);
 
     assert!(
         composed.starts_with(custom_prompt),
