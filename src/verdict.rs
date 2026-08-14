@@ -197,28 +197,33 @@ pub struct Verdict {
 impl Verdict {
     /// Creates a `Verdict` with counts derived from the given findings.
     ///
-    /// The `verdict` string is set to `"NEGATIVE"` when any `Critical` or
-    /// `Security` findings are present, `"POSITIVE"` otherwise.
-    pub fn from_findings(verdict: &str, findings: Vec<Finding>) -> Self {
-        let critical_issues = findings
-            .iter()
-            .filter(|f| f.severity == FindingSeverity::Critical)
-            .count() as u32;
-        let security_issues = findings
-            .iter()
-            .filter(|f| f.severity == FindingSeverity::Security)
-            .count() as u32;
-        let important_issues = findings
-            .iter()
-            .filter(|f| f.severity == FindingSeverity::Important)
-            .count() as u32;
-        let suggestions = findings
-            .iter()
-            .filter(|f| f.severity == FindingSeverity::Suggestion)
-            .count() as u32;
+    /// The `fallback_verdict` string is preserved when no blocking findings are
+    /// present (i.e. no `Critical` or `Security`). When any blocking findings
+    /// are present, the verdict string is forced to `"NEGATIVE"` to guarantee
+    /// internal consistency with the derived counts and prevent callers from
+    /// observing a `"POSITIVE"` verdict alongside blocking findings.
+    pub fn from_findings(fallback_verdict: &str, findings: Vec<Finding>) -> Self {
+        let mut critical_issues = 0u32;
+        let mut security_issues = 0u32;
+        let mut important_issues = 0u32;
+        let mut suggestions = 0u32;
+        for finding in &findings {
+            match finding.severity {
+                FindingSeverity::Critical => critical_issues += 1,
+                FindingSeverity::Security => security_issues += 1,
+                FindingSeverity::Important => important_issues += 1,
+                FindingSeverity::Suggestion => suggestions += 1,
+            }
+        }
+
+        let verdict = if critical_issues > 0 || security_issues > 0 {
+            "NEGATIVE".to_string()
+        } else {
+            fallback_verdict.to_string()
+        };
 
         Verdict {
-            verdict: verdict.to_string(),
+            verdict,
             critical_issues,
             security_issues,
             important_issues,
@@ -370,9 +375,13 @@ pub fn determine_review_state(verdict: &Verdict, important_threshold: u32) -> Re
 /// Parses an LLM response into a verdict and corresponding review state.
 ///
 /// First validates the response is not empty or whitespace-only, then:
-/// 1. Attempts to parse structured findings from `[RS_GUARD_VERDICT_FINDINGS]`
-/// 2. Falls back to metadata block extraction, then tag counting
-/// 3. Validates the verdict value and computes the review state
+/// 1. Extracts the metadata block to get the verdict string and counts.
+///    Falls back to tag counting if no metadata block is present.
+/// 2. If a `[RS_GUARD_VERDICT_FINDINGS]` marker is present, parses the
+///    findings JSON and overrides the counts derived from the findings.
+///    A malformed findings block is treated as a `VerdictParse` error so
+///    silently dropping attempted findings is not possible.
+/// 3. Validates the verdict value and computes the review state.
 ///
 /// When structured findings are present, issue counts are derived from them
 /// (overriding any metadata block counts). This ensures the counts always
@@ -383,6 +392,7 @@ pub fn determine_review_state(verdict: &Verdict, important_threshold: u32) -> Re
 /// Returns [`RsGuardError::VerdictParse`] if:
 /// - The response is empty or whitespace-only
 /// - The verdict value is neither `"POSITIVE"` nor `"NEGATIVE"`
+/// - A `[RS_GUARD_VERDICT_FINDINGS]` marker is present but the JSON is malformed
 pub fn parse_verdict(
     response: &str,
     important_threshold: u32,
@@ -394,11 +404,12 @@ pub fn parse_verdict(
         ));
     }
 
-    // Try metadata block first to get the verdict string
+    // Step 1: extract the metadata block to get the verdict string and counts.
     let mut verdict = parse_metadata_block(response).unwrap_or_else(|| evaluate_by_tags(response));
 
-    // If structured findings are present, override counts from findings
-    if let Some(findings) = parse_findings(response) {
+    // Step 2: if a findings block is present, override counts from findings.
+    // Marker absent → Ok(None) → no override. Marker present but malformed → Err.
+    if let Some(findings) = parse_findings(response)? {
         if !findings.is_empty() {
             verdict = Verdict::from_findings(&verdict.verdict, findings);
         }
@@ -419,22 +430,40 @@ pub fn parse_verdict(
 ///
 /// Looks for the `[RS_GUARD_VERDICT_FINDINGS]` marker at the end of the LLM
 /// response. If found, extracts and deserializes the JSON array that follows it.
-/// Returns `None` if the marker is absent or the JSON is malformed.
+///
+/// Returns `Ok(None)` if the marker is absent. Returns `Err(VerdictParse)`
+/// if the marker is present but the JSON is malformed, since silently dropping
+/// explicitly-attempted findings is a security-sensitive failure mode.
 ///
 /// # Arguments
 ///
 /// * `response` — The full LLM response text.
-pub fn parse_findings(response: &str) -> Option<Vec<Finding>> {
-    let marker_pos = response.find(FINDINGS_MARKER)?;
+pub fn parse_findings(response: &str) -> Result<Option<Vec<Finding>>, RsGuardError> {
+    let Some(marker_pos) = response.find(FINDINGS_MARKER) else {
+        return Ok(None);
+    };
     let json_start = marker_pos + FINDINGS_MARKER.len();
     let json_text = response[json_start..].trim();
 
     // The JSON must start with '[' to be a valid findings array.
     if !json_text.starts_with('[') {
-        return None;
+        return Err(RsGuardError::VerdictParse(format!(
+            "Found '{}' marker but the following content is not a JSON array. \
+             Expected a JSON array of Finding objects.",
+            FINDINGS_MARKER
+        )));
     }
 
-    serde_json::from_str::<Vec<Finding>>(json_text).ok()
+    serde_json::from_str::<Vec<Finding>>(json_text)
+        .map(Some)
+        .map_err(|e| {
+            RsGuardError::VerdictParse(format!(
+                "Found '{}' marker but the JSON is malformed: {}. \
+             A malformed findings block is treated as an error to prevent \
+             silent approval when the model attempted to report findings.",
+                FINDINGS_MARKER, e
+            ))
+        })
 }
 
 /// Strips the `[RS_GUARD_VERDICT_FINDINGS]` JSON block from the response.
@@ -723,7 +752,9 @@ mod tests {
 
 [RS_GUARD_VERDICT_FINDINGS]
 [{"path":"src/main.rs","line":42,"severity":"Critical","message":"Null pointer dereference"}]"#;
-        let findings = parse_findings(response).expect("should parse");
+        let findings = parse_findings(response)
+            .expect("should parse")
+            .expect("should be Some");
         assert_eq!(findings.len(), 1);
         assert_eq!(findings[0].path, "src/main.rs");
         assert_eq!(findings[0].line, 42);
@@ -742,7 +773,9 @@ mod tests {
   {"path":"src/handler.rs","line":55,"severity":"Important","message":"Missing error handling"},
   {"path":"src/util.rs","line":3,"severity":"Suggestion","message":"Consider using a constant","suggestion":"Extract to a const"}
 ]"#;
-        let findings = parse_findings(response).expect("should parse");
+        let findings = parse_findings(response)
+            .expect("should parse")
+            .expect("should be Some");
         assert_eq!(findings.len(), 3);
         assert_eq!(findings[0].severity, FindingSeverity::Security);
         assert_eq!(
@@ -761,34 +794,59 @@ mod tests {
     #[test]
     fn test_parse_findings_no_marker_returns_none() {
         let response = "Review complete. No issues found.";
-        assert!(parse_findings(response).is_none());
+        assert!(parse_findings(response).unwrap().is_none());
     }
 
     #[test]
-    fn test_parse_findings_invalid_json_returns_none() {
-        let response = "[RS_GUARD_VERDICT_FINDINGS]\nnot valid json";
-        assert!(parse_findings(response).is_none());
+    fn test_parse_findings_invalid_json_returns_err() {
+        // Marker is present and content starts with '[' but is malformed JSON
+        // → must be an error, not a silent drop (security-sensitive).
+        let response = "[RS_GUARD_VERDICT_FINDINGS]\n[{\"path\":\"a.rs\"}]";
+        let result = parse_findings(response);
+        assert!(result.is_err());
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            msg.contains("malformed"),
+            "error should explain JSON is malformed: {msg}"
+        );
+    }
+
+    #[test]
+    fn test_parse_findings_non_array_after_marker_returns_err() {
+        // Marker is present but content is not a JSON array → must error.
+        let response = "[RS_GUARD_VERDICT_FINDINGS]\n{\"foo\":\"bar\"}";
+        let result = parse_findings(response);
+        assert!(result.is_err());
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            msg.contains("not a JSON array"),
+            "error should explain non-array content: {msg}"
+        );
     }
 
     #[test]
     fn test_parse_findings_empty_array() {
         let response = "[RS_GUARD_VERDICT_FINDINGS]\n[]";
-        let findings = parse_findings(response).expect("should parse empty array");
+        let findings = parse_findings(response)
+            .expect("should parse empty array")
+            .expect("should be Some");
         assert!(findings.is_empty());
     }
 
     #[test]
-    fn test_parse_findings_missing_required_field_returns_none() {
+    fn test_parse_findings_missing_required_field_returns_err() {
         let response = r#"[RS_GUARD_VERDICT_FINDINGS]
 [{"path":"src/main.rs","severity":"Critical","message":"Missing line field"}]"#;
-        assert!(parse_findings(response).is_none());
+        let result = parse_findings(response);
+        assert!(result.is_err());
     }
 
     #[test]
-    fn test_parse_findings_unknown_severity_returns_none() {
+    fn test_parse_findings_unknown_severity_returns_err() {
         let response = r#"[RS_GUARD_VERDICT_FINDINGS]
 [{"path":"src/main.rs","line":1,"severity":"Unknown","message":"bad severity"}]"#;
-        assert!(parse_findings(response).is_none());
+        let result = parse_findings(response);
+        assert!(result.is_err());
     }
 
     #[test]
@@ -855,7 +913,9 @@ mod tests {
     #[test]
     fn test_parse_findings_marker_with_leading_whitespace_in_json() {
         let response = "[RS_GUARD_VERDICT_FINDINGS]\n  \n  [{\"path\":\"a.rs\",\"line\":1,\"severity\":\"Suggestion\",\"message\":\"ok\"}]";
-        let findings = parse_findings(response).expect("should parse with whitespace");
+        let findings = parse_findings(response)
+            .expect("should parse with whitespace")
+            .expect("should be Some");
         assert_eq!(findings.len(), 1);
     }
 
@@ -893,7 +953,9 @@ mod tests {
                 suggestion: None,
             },
         ];
+        // Caller passes POSITIVE, but blocking findings must force NEGATIVE.
         let verdict = Verdict::from_findings("POSITIVE", findings);
+        assert_eq!(verdict.verdict, "NEGATIVE");
         assert_eq!(verdict.critical_issues, 1);
         assert_eq!(verdict.security_issues, 1);
         assert_eq!(verdict.important_issues, 1);
@@ -903,9 +965,71 @@ mod tests {
 
     #[test]
     fn test_verdict_from_findings_empty() {
+        // Empty findings + fallback verdict is preserved unchanged.
         let verdict = Verdict::from_findings("POSITIVE", vec![]);
+        assert_eq!(verdict.verdict, "POSITIVE");
         assert_eq!(verdict.critical_issues, 0);
         assert!(!verdict.has_findings());
+    }
+
+    #[test]
+    fn test_verdict_from_findings_preserves_fallback_when_no_blocking() {
+        // No Critical/Security findings → fallback verdict string is preserved
+        // even if the caller passed NEGATIVE.
+        let findings = vec![
+            Finding {
+                path: "a.rs".into(),
+                line: 1,
+                severity: FindingSeverity::Important,
+                message: "imp".into(),
+                suggestion: None,
+            },
+            Finding {
+                path: "b.rs".into(),
+                line: 2,
+                severity: FindingSeverity::Suggestion,
+                message: "sug".into(),
+                suggestion: None,
+            },
+        ];
+        let verdict = Verdict::from_findings("NEGATIVE", findings);
+        assert_eq!(verdict.verdict, "NEGATIVE");
+        assert_eq!(verdict.important_issues, 1);
+        assert_eq!(verdict.suggestions, 1);
+        assert_eq!(verdict.critical_issues, 0);
+        assert_eq!(verdict.security_issues, 0);
+    }
+
+    #[test]
+    fn test_verdict_from_findings_forces_negative_on_critical() {
+        // Even with fallback "POSITIVE", a single Critical finding must
+        // produce a NEGATIVE verdict string.
+        let findings = vec![Finding {
+            path: "a.rs".into(),
+            line: 1,
+            severity: FindingSeverity::Critical,
+            message: "crash".into(),
+            suggestion: None,
+        }];
+        let verdict = Verdict::from_findings("POSITIVE", findings);
+        assert_eq!(verdict.verdict, "NEGATIVE");
+        assert_eq!(verdict.critical_issues, 1);
+    }
+
+    #[test]
+    fn test_verdict_from_findings_forces_negative_on_security() {
+        // Even with fallback "POSITIVE", a single Security finding must
+        // produce a NEGATIVE verdict string.
+        let findings = vec![Finding {
+            path: "a.rs".into(),
+            line: 1,
+            severity: FindingSeverity::Security,
+            message: "sqli".into(),
+            suggestion: None,
+        }];
+        let verdict = Verdict::from_findings("POSITIVE", findings);
+        assert_eq!(verdict.verdict, "NEGATIVE");
+        assert_eq!(verdict.security_issues, 1);
     }
 
     #[test]
@@ -915,6 +1039,8 @@ mod tests {
         let (verdict, state) = parse_verdict(response, 3).unwrap();
         assert_eq!(verdict.critical_issues, 2);
         assert_eq!(verdict.findings.len(), 2);
+        // Verdict string must also flip to NEGATIVE for internal consistency.
+        assert_eq!(verdict.verdict, "NEGATIVE");
         assert_eq!(state, ReviewState::RequestChanges);
     }
 
@@ -929,7 +1055,36 @@ mod tests {
             verdict.findings[0].suggestion.as_deref(),
             Some("Use parameterized queries")
         );
+        // Verdict string must flip to NEGATIVE for internal consistency.
+        assert_eq!(verdict.verdict, "NEGATIVE");
         assert_eq!(state, ReviewState::RequestChanges);
+    }
+
+    /// Symmetry: metadata says NEGATIVE but findings contain only
+    /// `Important` / `Suggestion` items. The fallback verdict should be
+    /// preserved (no blocking findings), giving a non-blocking review.
+    #[test]
+    fn test_parse_verdict_negative_metadata_with_non_blocking_findings_preserved() {
+        let response = "[RS_GUARD_VERDICT_METADATA]\nVerdict: NEGATIVE\nCriticalIssues: 0\nSecurityIssues: 0\nImportantIssues: 1\nSuggestions: 0\n\n[RS_GUARD_VERDICT_FINDINGS]\n[{\"path\":\"a.rs\",\"line\":1,\"severity\":\"Important\",\"message\":\"Missing test\"}]";
+        let (verdict, _) = parse_verdict(response, 3).unwrap();
+        // No blocking findings → verdict string kept as the metadata's NEGATIVE.
+        assert_eq!(verdict.verdict, "NEGATIVE");
+        assert_eq!(verdict.critical_issues, 0);
+        assert_eq!(verdict.security_issues, 0);
+        assert_eq!(verdict.important_issues, 1);
+        assert_eq!(verdict.findings.len(), 1);
+    }
+
+    #[test]
+    fn test_parse_verdict_malformed_findings_returns_error() {
+        // Marker present but JSON invalid → must error, not silently approve.
+        let response = "[RS_GUARD_VERDICT_METADATA]\nVerdict: POSITIVE\nCriticalIssues: 0\nSecurityIssues: 0\nImportantIssues: 0\nSuggestions: 0\n\n[RS_GUARD_VERDICT_FINDINGS]\n[{\"path\":\"a.rs\"}]";
+        let result = parse_verdict(response, 3);
+        assert!(result.is_err());
+        assert!(
+            result.unwrap_err().to_string().contains("malformed"),
+            "error should explain JSON is malformed"
+        );
     }
 
     #[test]
