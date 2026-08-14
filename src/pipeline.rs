@@ -918,11 +918,21 @@ fn default_pricing(provider: &str) -> Option<(f64, f64)> {
 /// per-file, per-line findings. The JSON is parsed in
 /// [`crate::verdict::parse_findings`] and the parsed findings drive the
 /// max-rule merge in [`crate::verdict::Verdict::merge_with_findings`].
-const FINDINGS_INSTRUCTIONS: &str = "\n\n---\n\n## Structured Findings\n\nIn addition to the standard metadata block, include a JSON array at the\nend of your response inside a `[RS_GUARD_VERDICT_FINDINGS]` marker. Each\nelement must have this exact shape:\n\n```json\n{\n  \"path\": \"src/example.rs\",\n  \"line\": 42,\n  \"severity\": \"Critical | Security | Important | Suggestion\",\n  \"message\": \"Concise actionable description\",\n  \"suggestion\": \"Optional fix or follow-up\"\n}\n```\n\nThe `path` is relative to the repository root. The `line` is 1-based\nand must point to a line actually present in the diff. Emit findings for\nevery real issue you identify; do not omit items to keep the list short.\n";
+const FINDINGS_INSTRUCTIONS: &str = "\n\n---\n\n## Structured Findings\n\nIn addition to the standard metadata block, include a JSON array at the\nend of your response inside a `[RS_GUARD_VERDICT_FINDINGS]` marker. Each\nelement must have this exact shape:\n\n```json\n{\n  \"path\": \"src/example.rs\",\n  \"line\": 42,\n  \"severity\": \"Critical\",\n  \"message\": \"Concise actionable description\",\n  \"suggestion\": \"Optional fix or follow-up\"\n}\n```\n\nThe `severity` field must be exactly one of these values:\n- `\"Critical\"`  — blocks merge unconditionally\n- `\"Security\"`  — blocks merge unconditionally\n- `\"Important\"` — blocks merge when count >= threshold\n- `\"Suggestion\"` — advisory, never blocks\n\nThe `path` is relative to the repository root. The `line` is 1-based\nand must point to a line actually present in the diff. Emit findings for\nevery real issue you identify; do not omit items to keep the list short.\n";
 
 /// # Returns
 ///
 /// The composed prompt string.
+///
+/// # Arguments
+///
+/// * `base_prompt` — The core review prompt.
+/// * `project_rules` — Optional project-specific rules content to append.
+/// * `rules_file_path` — Optional path label for the rules source (shown in
+///   the "Project Conventions" header). Ignored when `project_rules` is `None`.
+/// * `findings_requested` — When `true`, appends `[RS_GUARD_VERDICT_FINDINGS]`
+///   format instructions to the prompt so the LLM emits a structured findings
+///   JSON block. This changes the prompt content and therefore the cache key.
 #[must_use]
 pub fn compose_prompt(
     base_prompt: &str,
@@ -1377,5 +1387,56 @@ mod tests {
         let out = compose_prompt("base prompt", Some("# rules"), None, false);
         assert!(!out.contains("[RS_GUARD_VERDICT_FINDINGS]"));
         assert!(!out.contains("Structured Findings"));
+    }
+
+    /// End-to-end contract test: a response that follows the
+    /// `FINDINGS_INSTRUCTIONS` format (concrete severity value, not the
+    /// pipe-delimited enum list) must parse successfully through
+    /// `parse_verdict` and produce the expected counts. This catches
+    /// drift between the prompt's advertised JSON shape and the parser.
+    #[test]
+    fn test_findings_instructions_prompt_contract_parses_through_verdict() {
+        // Simulate an LLM response that conforms to the prompt's format.
+        let response = "\
+[RS_GUARD_VERDICT_METADATA]
+Verdict: POSITIVE
+CriticalIssues: 0
+SecurityIssues: 0
+ImportantIssues: 0
+Suggestions: 0
+
+Some review text.
+
+[RS_GUARD_VERDICT_FINDINGS]
+[
+  {
+    \"path\": \"src/example.rs\",
+    \"line\": 42,
+    \"severity\": \"Critical\",
+    \"message\": \"This is a critical issue\",
+    \"suggestion\": \"Fix it like this\"
+  },
+  {
+    \"path\": \"src/other.rs\",
+    \"line\": 10,
+    \"severity\": \"Suggestion\",
+    \"message\": \"Consider a cleaner approach\"
+  }
+]
+";
+        let (verdict, state) = parse_verdict(response, 3)
+            .expect("response conforming to FINDINGS_INSTRUCTIONS must parse");
+        // Findings override metadata counts via max-rule merge.
+        assert_eq!(verdict.critical_issues, 1);
+        assert_eq!(verdict.suggestions, 1);
+        assert_eq!(verdict.findings.len(), 2);
+        // Critical finding must force NEGATIVE + RequestChanges.
+        assert_eq!(verdict.verdict, "NEGATIVE");
+        assert_eq!(state, ReviewState::RequestChanges);
+        // The suggestion field must round-trip.
+        assert_eq!(
+            verdict.findings[0].suggestion.as_deref(),
+            Some("Fix it like this")
+        );
     }
 }

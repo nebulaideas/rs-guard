@@ -2081,3 +2081,37 @@ fn test_apply_args_findings_and_inline_comments_default_off() {
         );
     });
 }
+
+/// `findings` and `inline_comments` are CLI/env only — they must NOT be
+/// accepted as TOML keys. `Config` does not derive `Deserialize`; `TomlConfig`
+/// has no such fields, so `validate_toml_value` rejects them as unknown keys.
+/// This test proves the documented claim in `docs/CONFIGURATION.md`.
+#[test]
+#[serial]
+fn test_toml_rejects_findings_and_inline_comments_keys() {
+    clean_env();
+
+    let file = write_toml(br#"findings = true"#);
+    let result = load_toml_config(file.path());
+    assert!(
+        result.is_err(),
+        "findings should be rejected as an unknown TOML key"
+    );
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.to_lowercase().contains("unknown key"),
+        "error should identify 'findings' as unknown: {err}"
+    );
+
+    let file = write_toml(br#"inline_comments = true"#);
+    let result = load_toml_config(file.path());
+    assert!(
+        result.is_err(),
+        "inline_comments should be rejected as an unknown TOML key"
+    );
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.to_lowercase().contains("unknown key"),
+        "error should identify 'inline_comments' as unknown: {err}"
+    );
+}
