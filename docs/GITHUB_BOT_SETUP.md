@@ -17,6 +17,7 @@ This document covers the two recommended approaches.
 - [Option A — Dedicated Machine-User Account (simplest)](#option-a--dedicated-machine-user-account-simplest)
 - [Option B — GitHub App (recommended for orgs)](#option-b--github-app-recommended-for-orgs)
 - [Token permissions](#token-permissions)
+- [Check Run configuration (v1.7)](#check-run-configuration-v17)
 - [Storing the secret](#storing-the-secret)
 - [Attribution (OpenRouter)](#attribution-openrouter)
 
@@ -44,6 +45,7 @@ or org) with no app-configuration overhead.
    - **Permissions** → Repository permissions:
      - `Pull requests`: **Read and write** (to submit reviews)
      - `Contents`: **Read-only** (to fetch PR diff metadata)
+     - `Checks`: **Read and write** (to create Check Runs; v1.7 opt-in)
    - Set a reasonable expiration (90 days) and rotate.
 4. Store the token as a repository/organization secret named `RS_GUARD_GITHUB_TOKEN`
    (see [Storing the secret](#storing-the-secret)).
@@ -67,6 +69,7 @@ GitHub, scopes permissions precisely, and installs across many repos at once.
    - **Repository permissions** (read-only unless noted):
      - `Pull requests`: **Read and write** (submit reviews)
      - `Contents`: **Read-only** (fetch diff)
+     - `Checks`: **Read and write** (create Check Runs; v1.7 opt-in)
    - **Subscribe to events**: `Pull request` (only if you trigger on webhook;
      for GHA-driven runs this is optional)
    - Note the **App ID** and generate a **private key** (`.pem`).
@@ -117,11 +120,20 @@ workflow-modifying scopes to the review identity.
 
 ### Check Runs (`--check-run`)
 
-Check Runs are optional and opt-in. When enabled, rs-guard publishes a Check
-Run (conclusion derived from the verdict) in addition to the PR review, so
-branch protection can require the check without depending on `APPROVE` /
-`REQUEST_CHANGES` permissions (which `GITHUB_TOKEN` often cannot grant). Add
-`checks: write` to the workflow `permissions:` block:
+Check Runs are optional and opt-in. When enabled, rs-guard creates a GitHub
+Check Run in addition to the PR review. This is especially useful when the
+token cannot `APPROVE` or `REQUEST_CHANGES` — the Check Run can serve as a
+branch protection status check.
+
+**Conclusion mapping:**
+
+| Review State | Check Run Conclusion |
+|---|---|
+| `APPROVE` | `success` |
+| `REQUEST_CHANGES` | `failure` |
+| `COMMENT` | `neutral` |
+
+Add `checks: write` to the workflow `permissions:` block:
 
 ```yaml
 permissions:
@@ -133,6 +145,22 @@ permissions:
 Check Run creation failure is non-fatal (logged as a warning); the review still
 completes. If you rely on the Check Run for a required branch-protection check,
 alert on `Failed to create Check Run` log lines.
+
+Configure in `.reviewer.toml`:
+
+```toml
+check_run = true
+check_run_name = "rs-guard"  # optional, defaults to "rs-guard"
+```
+
+Or via CLI / environment:
+
+```bash
+rs-guard --check-run --check-run-name "AI Review"
+# or
+export RS_GUARD_CHECK_RUN=true
+export RS_GUARD_CHECK_RUN_NAME="AI Review"
+```
 
 ---
 

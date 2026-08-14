@@ -8,6 +8,10 @@ Complete reference for running rs-guard in all modes.
 
 - [CLI Reference](#cli-reference)
 - [Environment Variables](#environment-variables)
+- [JSON output (`--format json`)](#json-output-format-json)
+- [Structured Findings (v1.7)](#structured-findings-v17)
+- [Inline Comments (v1.7)](#inline-comments-v17)
+- [Check Runs (v1.7)](#check-runs-v17)
 - [Exit Codes](#exit-codes)
 - [Review State Logic](#review-state-logic)
 - [GitHub Actions Integration](#github-actions-integration)
@@ -42,6 +46,11 @@ rs-guard [OPTIONS]
 | `--no-project-rules` | — | Off                    | Disable project rules auto-detection.                                            |
 | `--rules-file`  | —     | _(none)_                   | Path to an explicit project rules file. Overrides auto-detection.                  |
 | `--no-cache`    | —     | Off                        | Bypass the response cache and force a fresh LLM API call.                          |
+| `--format`      |       | `text`                     | Output format: `text` (human-readable) or `json` (machine-readable).               |
+| `--findings`    | —     | Off                        | Enable structured JSON findings from the LLM (opt-in). See [Structured Findings](#structured-findings-v17). |
+| `--inline-comments` | — | Off                        | Post inline review comments on the diff (implies `--findings`). See [Inline Comments](#inline-comments-v17). |
+| `--check-run`   | —     | Off                        | Publish a GitHub Check Run in addition to the PR review. See [Check Runs](#check-runs-v17). |
+| `--check-run-name` | —  | `rs-guard`                 | Custom name for the GitHub Check Run.                                               |
 | `--dry-run`     | —     | Off                        | Run the full pipeline without submitting reviews or blocking commits.              |
 | `--help`        | `-h`  |                            | Display usage information and exit.                                                |
 | `--version`     | `-V`  |                            | Display version and exit.                                                          |
@@ -154,6 +163,10 @@ rs-guard --dry-run
 | `RS_GUARD_METRICS_PATH` | Optional      | Custom path for `rs-guard-metrics.json` artifact                                        |
 | `RS_GUARD_NO_PROJECT_RULES` | Optional | Set to `true` to disable project rules auto-detection. Alias for `--no-project-rules`. |
 | `RS_GUARD_RULES_FILE` | Optional      | Path to an explicit project rules file. Alias for `--rules-file`.                       |
+| `RS_GUARD_FINDINGS` | Optional      | Set to `true` to enable structured findings mode. Alias for `--findings`.              |
+| `RS_GUARD_INLINE_COMMENTS` | Optional | Set to `true` to enable inline review comments. Implies `--findings`. Alias for `--inline-comments`. |
+| `RS_GUARD_CHECK_RUN` | Optional     | Set to `true` to publish a GitHub Check Run. Alias for `--check-run`.                  |
+| `RS_GUARD_CHECK_RUN_NAME` | Optional | Custom name for the GitHub Check Run. Alias for `--check-run-name`.                    |
 | `GITHUB_API_URL`        | Optional      | Custom GitHub API base URL (e.g. GitHub Enterprise); default: `https://api.github.com`  |
 
 ---
@@ -169,6 +182,78 @@ export RS_GUARD_FORMAT=json
 ```
 
 Fields include `verdict`, severity counts, `state`, `provider`, `model`, token/latency/cost estimates, `diff_lines`, `project_rules_file`, and `dry_run`. Default remains `text`.
+
+---
+
+## Structured Findings (v1.7)
+
+When `--findings` is enabled, rs-guard asks the LLM to emit a structured JSON array of findings instead of (or in addition to) free-form prose. Each finding includes the file path, line number, severity, and a human-readable message.
+
+**Enable via:**
+
+| Source | Value |
+|--------|-------|
+| CLI | `--findings` |
+| Environment | `RS_GUARD_FINDINGS=true` |
+| TOML | _(not available — CLI/env only)_ |
+
+When findings are present, rs-guard derives `critical`, `security`, `important`, and `suggestion` counts using a **max-rule** merge: `max(metadata_count, findings_count)` per severity. This means findings can add evidence but never suppress a blocking preliminary verdict or down-count a blocking severity. When no findings block is present, the existing metadata tag counting is used. Findings that cannot be mapped to a diff position are appended to the overview body — they are never silently dropped.
+
+**JSON output integration:** When `--format json` is also enabled, the `ReviewResultJson` object includes a `findings` array alongside the existing severity counts.
+
+---
+
+## Inline Comments (v1.7)
+
+When `--inline-comments` is enabled, rs-guard posts each structured finding as an inline review comment on the specific file and line in the PR diff. A prose overview comment is posted as the review body.
+
+**Enable via:**
+
+| Source | Value |
+|--------|-------|
+| CLI | `--inline-comments` |
+| Environment | `RS_GUARD_INLINE_COMMENTS=true` |
+| TOML | _(not available — CLI/env only)_ |
+
+`--inline-comments` implies `--findings` — you do not need to pass both.
+
+Findings that cannot be mapped to a diff position (e.g., the file or line is not in the diff) are appended to the review body as a bulleted list, prefixed with the file path.
+
+---
+
+## Check Runs (v1.7)
+
+When `--check-run` is enabled, rs-guard creates a GitHub Check Run **in addition to** the PR review. This is useful when your GitHub token cannot `APPROVE` or `REQUEST_CHANGES` (e.g., the default `GITHUB_TOKEN` in many workflows), because Check Runs can be used as branch protection status checks without requiring review permissions.
+
+**Enable via:**
+
+| Source | Value |
+|--------|-------|
+| CLI | `--check-run` |
+| Environment | `RS_GUARD_CHECK_RUN=true` |
+| TOML | `check_run = true` |
+
+**Custom Check Run name:**
+
+| Source | Value |
+|--------|-------|
+| CLI | `--check-run-name "My Review"` |
+| Environment | `RS_GUARD_CHECK_RUN_NAME="My Review"` |
+| TOML | `check_run_name = "My Review"` |
+
+**Conclusion mapping:**
+
+| Review State | Check Run Conclusion |
+|---|---|
+| `APPROVE` | `success` |
+| `REQUEST_CHANGES` | `failure` |
+| `COMMENT` | `neutral` |
+
+A Check Run creation failure is logged as a warning but does **not** fail the pipeline — the PR review is still submitted normally.
+
+**Permissions:** Check Runs require the `checks: write` permission on the GitHub token. See [docs/GITHUB_BOT_SETUP.md](GITHUB_BOT_SETUP.md) for the full permission matrix.
+
+---
 
 ## Exit Codes
 
