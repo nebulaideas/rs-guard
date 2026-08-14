@@ -2018,3 +2018,66 @@ fn test_load_project_rules_explicit_file_soft_cap() {
         "truncated content should fit within the cap"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Findings / inline-comments implication (apply_args)
+// ---------------------------------------------------------------------------
+
+/// `--inline-comments` must imply `--findings`: setting the former through
+/// `Config::apply_args` must turn on both flags, regardless of their prior
+/// state. This is the documented invariant and is enforced in `apply_args`,
+/// not in clap.
+#[test]
+#[serial]
+fn test_apply_args_inline_comments_implies_findings() {
+    clean_env();
+    with_env(&[("DEEPSEEK_API_KEY", "test-deepseek-key")], || {
+        let mut config = Config::empty();
+        let cli = rs_guard::cli::Cli::parse_from(["rs-guard", "--inline-comments"]);
+        config.apply_args(&cli.review).unwrap();
+        assert!(
+            config.inline_comments,
+            "--inline-comments should set inline_comments on Config"
+        );
+        assert!(
+            config.findings,
+            "--inline-comments must imply findings on Config"
+        );
+    });
+}
+
+/// `--findings` alone must set `findings` and leave `inline_comments` off.
+/// The implication is one-directional: findings does not pull in inline
+/// comments.
+#[test]
+#[serial]
+fn test_apply_args_findings_alone_does_not_set_inline_comments() {
+    clean_env();
+    with_env(&[("DEEPSEEK_API_KEY", "test-deepseek-key")], || {
+        let mut config = Config::empty();
+        let cli = rs_guard::cli::Cli::parse_from(["rs-guard", "--findings"]);
+        config.apply_args(&cli.review).unwrap();
+        assert!(config.findings, "--findings should set findings on Config");
+        assert!(
+            !config.inline_comments,
+            "--findings alone must not set inline_comments"
+        );
+    });
+}
+
+/// With neither flag set, both must remain at their default of `false`.
+#[test]
+#[serial]
+fn test_apply_args_findings_and_inline_comments_default_off() {
+    clean_env();
+    with_env(&[("DEEPSEEK_API_KEY", "test-deepseek-key")], || {
+        let mut config = Config::empty();
+        let cli = rs_guard::cli::Cli::parse_from(["rs-guard"]);
+        config.apply_args(&cli.review).unwrap();
+        assert!(!config.findings, "findings should default to false");
+        assert!(
+            !config.inline_comments,
+            "inline_comments should default to false"
+        );
+    });
+}
