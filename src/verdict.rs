@@ -10,6 +10,7 @@
 
 use crate::error::RsGuardError;
 use regex::Regex;
+use serde::Deserialize;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::LazyLock;
 
@@ -21,6 +22,12 @@ const METADATA_SCAN_WINDOW: usize = 4096;
 
 /// Marker string that identifies the verdict metadata block.
 const METADATA_MARKER: &str = "[RS_GUARD_VERDICT_METADATA]";
+
+/// Marker string that identifies the structured findings JSON block.
+///
+/// When present at the end of an LLM response, the JSON array following this
+/// marker is parsed into [`Finding`] values with file-level precision.
+const FINDINGS_MARKER: &str = "[RS_GUARD_VERDICT_FINDINGS]";
 
 /// Ensures the CriticalBugs deprecation warning is emitted at most once per process.
 static CRITICAL_BUGS_WARNED: AtomicBool = AtomicBool::new(false);
@@ -94,6 +101,75 @@ impl ReviewState {
             ReviewState::RequestChanges => "REQUEST_CHANGES",
             ReviewState::Comment => "COMMENT",
         }
+    }
+}
+
+/// Severity level for a structured finding.
+///
+/// Maps to the existing tag names used in the metadata block and tag-counting
+/// fallback. Variants are ordered from most to least severe.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub enum FindingSeverity {
+    /// Critical issue — blocks merge unconditionally.
+    Critical,
+    /// Security issue — blocks merge unconditionally.
+    Security,
+    /// Important issue — blocks merge when count ≥ threshold.
+    Important,
+    /// Suggestion — advisory only, never blocks merge.
+    Suggestion,
+}
+
+impl FindingSeverity {
+    /// Returns the string representation used in display and serialization.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            FindingSeverity::Critical => "Critical",
+            FindingSeverity::Security => "Security",
+            FindingSeverity::Important => "Important",
+            FindingSeverity::Suggestion => "Suggestion",
+        }
+    }
+}
+
+impl std::fmt::Display for FindingSeverity {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
+/// A structured finding from an LLM review response.
+///
+/// Each finding pinpoints a specific issue in the reviewed code with file path,
+/// line number, severity, and an actionable message. Findings are parsed from
+/// the `[RS_GUARD_VERDICT_FINDINGS]` JSON block at the end of an LLM response.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct Finding {
+    /// File path relative to the repository root (e.g. `"src/main.rs"`).
+    pub path: String,
+    /// 1-based line number in the file where the issue occurs.
+    pub line: u32,
+    /// Severity classification of this finding.
+    pub severity: FindingSeverity,
+    /// Human-readable description of the issue.
+    pub message: String,
+    /// Optional actionable suggestion for fixing the issue.
+    #[serde(default)]
+    pub suggestion: Option<String>,
+}
+
+impl std::fmt::Display for Finding {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "[{}] {}:{} — {}",
+            self.severity, self.path, self.line, self.message
+        )?;
+        if let Some(ref s) = self.suggestion {
+            write!(f, " (suggestion: {})", s)?;
+        }
+        Ok(())
     }
 }
 
@@ -278,6 +354,46 @@ pub fn parse_verdict(
 
     let state = determine_review_state(&verdict, important_threshold);
     Ok((verdict, state))
+}
+
+/// Parses structured findings from a `[RS_GUARD_VERDICT_FINDINGS]` JSON block.
+///
+/// Looks for the `[RS_GUARD_VERDICT_FINDINGS]` marker at the end of the LLM
+/// response. If found, extracts and deserializes the JSON array that follows it.
+/// Returns `None` if the marker is absent or the JSON is malformed.
+///
+/// # Arguments
+///
+/// * `response` — The full LLM response text.
+pub fn parse_findings(response: &str) -> Option<Vec<Finding>> {
+    let marker_pos = response.find(FINDINGS_MARKER)?;
+    let json_start = marker_pos + FINDINGS_MARKER.len();
+    let json_text = response[json_start..].trim();
+
+    // The JSON must start with '[' to be a valid findings array.
+    if !json_text.starts_with('[') {
+        return None;
+    }
+
+    serde_json::from_str::<Vec<Finding>>(json_text).ok()
+}
+
+/// Strips the `[RS_GUARD_VERDICT_FINDINGS]` JSON block from the response.
+///
+/// Returns the response text with the findings marker and its trailing JSON
+/// removed. This is used to produce a clean prose body for the GitHub review
+/// comment. If the marker is not present, the original response is returned
+/// unchanged.
+///
+/// # Arguments
+///
+/// * `response` — The full LLM response text.
+pub fn strip_findings_json(response: &str) -> &str {
+    if let Some(marker_pos) = response.find(FINDINGS_MARKER) {
+        response[..marker_pos].trim_end()
+    } else {
+        response
+    }
 }
 
 #[cfg(test)]
@@ -538,5 +654,149 @@ mod tests {
         assert_eq!(verdict.suggestions, 2);
         assert_eq!(verdict.verdict, "POSITIVE");
         assert_eq!(determine_review_state(&verdict, 3), ReviewState::Approve);
+    }
+
+    // ── Finding schema tests ──────────────────────────────────────────────
+
+    #[test]
+    fn test_parse_findings_valid_single() {
+        let response = r#"Review complete.
+
+[RS_GUARD_VERDICT_FINDINGS]
+[{"path":"src/main.rs","line":42,"severity":"Critical","message":"Null pointer dereference"}]"#;
+        let findings = parse_findings(response).expect("should parse");
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].path, "src/main.rs");
+        assert_eq!(findings[0].line, 42);
+        assert_eq!(findings[0].severity, FindingSeverity::Critical);
+        assert_eq!(findings[0].message, "Null pointer dereference");
+        assert_eq!(findings[0].suggestion, None);
+    }
+
+    #[test]
+    fn test_parse_findings_multiple_with_suggestion() {
+        let response = r#"Some prose here.
+
+[RS_GUARD_VERDICT_FINDINGS]
+[
+  {"path":"src/lib.rs","line":10,"severity":"Security","message":"SQL injection risk","suggestion":"Use parameterized queries"},
+  {"path":"src/handler.rs","line":55,"severity":"Important","message":"Missing error handling"},
+  {"path":"src/util.rs","line":3,"severity":"Suggestion","message":"Consider using a constant","suggestion":"Extract to a const"}
+]"#;
+        let findings = parse_findings(response).expect("should parse");
+        assert_eq!(findings.len(), 3);
+        assert_eq!(findings[0].severity, FindingSeverity::Security);
+        assert_eq!(
+            findings[0].suggestion.as_deref(),
+            Some("Use parameterized queries")
+        );
+        assert_eq!(findings[1].severity, FindingSeverity::Important);
+        assert_eq!(findings[1].suggestion, None);
+        assert_eq!(findings[2].severity, FindingSeverity::Suggestion);
+        assert_eq!(
+            findings[2].suggestion.as_deref(),
+            Some("Extract to a const")
+        );
+    }
+
+    #[test]
+    fn test_parse_findings_no_marker_returns_none() {
+        let response = "Review complete. No issues found.";
+        assert!(parse_findings(response).is_none());
+    }
+
+    #[test]
+    fn test_parse_findings_invalid_json_returns_none() {
+        let response = "[RS_GUARD_VERDICT_FINDINGS]\nnot valid json";
+        assert!(parse_findings(response).is_none());
+    }
+
+    #[test]
+    fn test_parse_findings_empty_array() {
+        let response = "[RS_GUARD_VERDICT_FINDINGS]\n[]";
+        let findings = parse_findings(response).expect("should parse empty array");
+        assert!(findings.is_empty());
+    }
+
+    #[test]
+    fn test_parse_findings_missing_required_field_returns_none() {
+        let response = r#"[RS_GUARD_VERDICT_FINDINGS]
+[{"path":"src/main.rs","severity":"Critical","message":"Missing line field"}]"#;
+        assert!(parse_findings(response).is_none());
+    }
+
+    #[test]
+    fn test_parse_findings_unknown_severity_returns_none() {
+        let response = r#"[RS_GUARD_VERDICT_FINDINGS]
+[{"path":"src/main.rs","line":1,"severity":"Unknown","message":"bad severity"}]"#;
+        assert!(parse_findings(response).is_none());
+    }
+
+    #[test]
+    fn test_strip_findings_json_removes_block() {
+        let response = "Here is the review prose.\n\nMore details.\n\n[RS_GUARD_VERDICT_FINDINGS]\n[{\"path\":\"a.rs\",\"line\":1,\"severity\":\"Critical\",\"message\":\"test\"}]";
+        let stripped = strip_findings_json(response);
+        assert!(!stripped.contains("[RS_GUARD_VERDICT_FINDINGS]"));
+        assert!(!stripped.contains("\"path\""));
+        assert!(stripped.contains("Here is the review prose."));
+    }
+
+    #[test]
+    fn test_strip_findings_json_no_marker_returns_original() {
+        let response = "Just a normal review response.";
+        assert_eq!(strip_findings_json(response), response);
+    }
+
+    #[test]
+    fn test_finding_display_without_suggestion() {
+        let finding = Finding {
+            path: "src/main.rs".to_string(),
+            line: 42,
+            severity: FindingSeverity::Critical,
+            message: "Null pointer".to_string(),
+            suggestion: None,
+        };
+        assert_eq!(
+            format!("{finding}"),
+            "[Critical] src/main.rs:42 — Null pointer"
+        );
+    }
+
+    #[test]
+    fn test_finding_display_with_suggestion() {
+        let finding = Finding {
+            path: "src/lib.rs".to_string(),
+            line: 10,
+            severity: FindingSeverity::Suggestion,
+            message: "Use a constant".to_string(),
+            suggestion: Some("Extract to MAGIC_NUMBER".to_string()),
+        };
+        assert_eq!(
+            format!("{finding}"),
+            "[Suggestion] src/lib.rs:10 — Use a constant (suggestion: Extract to MAGIC_NUMBER)"
+        );
+    }
+
+    #[test]
+    fn test_finding_severity_display() {
+        assert_eq!(format!("{}", FindingSeverity::Critical), "Critical");
+        assert_eq!(format!("{}", FindingSeverity::Security), "Security");
+        assert_eq!(format!("{}", FindingSeverity::Important), "Important");
+        assert_eq!(format!("{}", FindingSeverity::Suggestion), "Suggestion");
+    }
+
+    #[test]
+    fn test_finding_severity_as_str() {
+        assert_eq!(FindingSeverity::Critical.as_str(), "Critical");
+        assert_eq!(FindingSeverity::Security.as_str(), "Security");
+        assert_eq!(FindingSeverity::Important.as_str(), "Important");
+        assert_eq!(FindingSeverity::Suggestion.as_str(), "Suggestion");
+    }
+
+    #[test]
+    fn test_parse_findings_marker_with_leading_whitespace_in_json() {
+        let response = "[RS_GUARD_VERDICT_FINDINGS]\n  \n  [{\"path\":\"a.rs\",\"line\":1,\"severity\":\"Suggestion\",\"message\":\"ok\"}]";
+        let findings = parse_findings(response).expect("should parse with whitespace");
+        assert_eq!(findings.len(), 1);
     }
 }
