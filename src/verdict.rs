@@ -197,12 +197,22 @@ pub struct Verdict {
 impl Verdict {
     /// Creates a `Verdict` with counts derived from the given findings.
     ///
-    /// The `fallback_verdict` string is preserved when no blocking findings are
-    /// present (i.e. no `Critical` or `Security`). When any blocking findings
-    /// are present, the verdict string is forced to `"NEGATIVE"` to guarantee
-    /// internal consistency with the derived counts and prevent callers from
-    /// observing a `"POSITIVE"` verdict alongside blocking findings.
-    pub fn from_findings(fallback_verdict: &str, findings: Vec<Finding>) -> Self {
+    /// The `fallback_verdict` string is preserved when the findings would
+    /// produce a non-blocking review. The verdict string is forced to
+    /// `"NEGATIVE"` when the findings would produce a `RequestChanges` under
+    /// any threshold (i.e. any `Critical`/`Security` findings, or
+    /// `important_issues >= important_threshold`). This guarantees that
+    /// `verdict.verdict` is consistent with `determine_review_state()` and
+    /// that callers cannot observe a `"POSITIVE"` verdict alongside a
+    /// blocking review state.
+    ///
+    /// `important_threshold` is the same parameter passed to
+    /// [`determine_review_state`].
+    pub fn from_findings(
+        fallback_verdict: &str,
+        findings: Vec<Finding>,
+        important_threshold: u32,
+    ) -> Self {
         let mut critical_issues = 0u32;
         let mut security_issues = 0u32;
         let mut important_issues = 0u32;
@@ -216,7 +226,10 @@ impl Verdict {
             }
         }
 
-        let verdict = if critical_issues > 0 || security_issues > 0 {
+        let would_block = critical_issues > 0
+            || security_issues > 0
+            || (important_threshold > 0 && important_issues >= important_threshold);
+        let verdict = if would_block {
             "NEGATIVE".to_string()
         } else {
             fallback_verdict.to_string()
@@ -379,8 +392,11 @@ pub fn determine_review_state(verdict: &Verdict, important_threshold: u32) -> Re
 ///    Falls back to tag counting if no metadata block is present.
 /// 2. If a `[RS_GUARD_VERDICT_FINDINGS]` marker is present, parses the
 ///    findings JSON and overrides the counts derived from the findings.
-///    A malformed findings block is treated as a `VerdictParse` error so
-///    silently dropping attempted findings is not possible.
+///    A malformed findings block is treated as a `VerdictParse` error
+///    **only when the preliminary verdict is not already blocking** —
+///    otherwise the malformed JSON is logged as a warning and the
+///    fallback blocking verdict is preserved (so we never suppress a
+///    valid `REQUEST_CHANGES` review because of bad findings JSON).
 /// 3. Validates the verdict value and computes the review state.
 ///
 /// When structured findings are present, issue counts are derived from them
@@ -392,7 +408,8 @@ pub fn determine_review_state(verdict: &Verdict, important_threshold: u32) -> Re
 /// Returns [`RsGuardError::VerdictParse`] if:
 /// - The response is empty or whitespace-only
 /// - The verdict value is neither `"POSITIVE"` nor `"NEGATIVE"`
-/// - A `[RS_GUARD_VERDICT_FINDINGS]` marker is present but the JSON is malformed
+/// - A `[RS_GUARD_VERDICT_FINDINGS]` marker is present but the JSON is
+///   malformed **and** the preliminary verdict would not otherwise block
 pub fn parse_verdict(
     response: &str,
     important_threshold: u32,
@@ -408,10 +425,30 @@ pub fn parse_verdict(
     let mut verdict = parse_metadata_block(response).unwrap_or_else(|| evaluate_by_tags(response));
 
     // Step 2: if a findings block is present, override counts from findings.
-    // Marker absent → Ok(None) → no override. Marker present but malformed → Err.
-    if let Some(findings) = parse_findings(response)? {
-        if !findings.is_empty() {
-            verdict = Verdict::from_findings(&verdict.verdict, findings);
+    // Marker absent → Ok(None) → no override.
+    // Marker present but malformed → only propagate the error when the
+    // preliminary verdict would not block. If the preliminary verdict is
+    // already blocking, log a warning and keep it (a malformed findings
+    // block should not suppress a valid REQUEST_CHANGES review).
+    match parse_findings(response) {
+        Ok(Some(findings)) if !findings.is_empty() => {
+            verdict = Verdict::from_findings(&verdict.verdict, findings, important_threshold);
+        }
+        Ok(_) => {} // marker absent or empty array
+        Err(e) => {
+            let preliminary_blocks = verdict.verdict == "NEGATIVE"
+                || verdict.critical_issues > 0
+                || verdict.security_issues > 0
+                || (important_threshold > 0 && verdict.important_issues >= important_threshold);
+            if preliminary_blocks {
+                log::warn!(
+                    "Ignoring malformed [RS_GUARD_VERDICT_FINDINGS] block: {}. \
+                     Preliminary verdict is already blocking; keeping it.",
+                    e
+                );
+            } else {
+                return Err(e);
+            }
         }
     }
 
@@ -954,7 +991,7 @@ mod tests {
             },
         ];
         // Caller passes POSITIVE, but blocking findings must force NEGATIVE.
-        let verdict = Verdict::from_findings("POSITIVE", findings);
+        let verdict = Verdict::from_findings("POSITIVE", findings, 3);
         assert_eq!(verdict.verdict, "NEGATIVE");
         assert_eq!(verdict.critical_issues, 1);
         assert_eq!(verdict.security_issues, 1);
@@ -966,7 +1003,7 @@ mod tests {
     #[test]
     fn test_verdict_from_findings_empty() {
         // Empty findings + fallback verdict is preserved unchanged.
-        let verdict = Verdict::from_findings("POSITIVE", vec![]);
+        let verdict = Verdict::from_findings("POSITIVE", vec![], 3);
         assert_eq!(verdict.verdict, "POSITIVE");
         assert_eq!(verdict.critical_issues, 0);
         assert!(!verdict.has_findings());
@@ -974,8 +1011,8 @@ mod tests {
 
     #[test]
     fn test_verdict_from_findings_preserves_fallback_when_no_blocking() {
-        // No Critical/Security findings → fallback verdict string is preserved
-        // even if the caller passed NEGATIVE.
+        // No Critical/Security findings and important_issues < threshold →
+        // fallback verdict string is preserved even if the caller passed NEGATIVE.
         let findings = vec![
             Finding {
                 path: "a.rs".into(),
@@ -992,7 +1029,7 @@ mod tests {
                 suggestion: None,
             },
         ];
-        let verdict = Verdict::from_findings("NEGATIVE", findings);
+        let verdict = Verdict::from_findings("NEGATIVE", findings, 3);
         assert_eq!(verdict.verdict, "NEGATIVE");
         assert_eq!(verdict.important_issues, 1);
         assert_eq!(verdict.suggestions, 1);
@@ -1011,7 +1048,7 @@ mod tests {
             message: "crash".into(),
             suggestion: None,
         }];
-        let verdict = Verdict::from_findings("POSITIVE", findings);
+        let verdict = Verdict::from_findings("POSITIVE", findings, 3);
         assert_eq!(verdict.verdict, "NEGATIVE");
         assert_eq!(verdict.critical_issues, 1);
     }
@@ -1027,9 +1064,70 @@ mod tests {
             message: "sqli".into(),
             suggestion: None,
         }];
-        let verdict = Verdict::from_findings("POSITIVE", findings);
+        let verdict = Verdict::from_findings("POSITIVE", findings, 3);
         assert_eq!(verdict.verdict, "NEGATIVE");
         assert_eq!(verdict.security_issues, 1);
+    }
+
+    /// Regression: when `important_issues >= important_threshold`, the verdict
+    /// string must be `"NEGATIVE"` to match the `RequestChanges` review state.
+    /// Previously this produced a `"POSITIVE"` verdict string with a blocking
+    /// review state.
+    #[test]
+    fn test_verdict_from_findings_forces_negative_when_important_meets_threshold() {
+        let findings = vec![
+            Finding {
+                path: "a.rs".into(),
+                line: 1,
+                severity: FindingSeverity::Important,
+                message: "imp1".into(),
+                suggestion: None,
+            },
+            Finding {
+                path: "b.rs".into(),
+                line: 2,
+                severity: FindingSeverity::Important,
+                message: "imp2".into(),
+                suggestion: None,
+            },
+            Finding {
+                path: "c.rs".into(),
+                line: 3,
+                severity: FindingSeverity::Important,
+                message: "imp3".into(),
+                suggestion: None,
+            },
+        ];
+        // 3 important findings, threshold 3 → must be NEGATIVE.
+        let verdict = Verdict::from_findings("POSITIVE", findings, 3);
+        assert_eq!(verdict.verdict, "NEGATIVE");
+        assert_eq!(verdict.important_issues, 3);
+    }
+
+    /// `important_issues < threshold` and no critical/security → preserve
+    /// the fallback verdict (will become `Comment` in `determine_review_state`).
+    #[test]
+    fn test_verdict_from_findings_below_threshold_preserves_fallback() {
+        let findings = vec![
+            Finding {
+                path: "a.rs".into(),
+                line: 1,
+                severity: FindingSeverity::Important,
+                message: "imp1".into(),
+                suggestion: None,
+            },
+            Finding {
+                path: "b.rs".into(),
+                line: 2,
+                severity: FindingSeverity::Important,
+                message: "imp2".into(),
+                suggestion: None,
+            },
+        ];
+        // 2 important findings, threshold 3 → below threshold.
+        let verdict = Verdict::from_findings("POSITIVE", findings, 3);
+        assert_eq!(verdict.verdict, "POSITIVE");
+        assert_eq!(verdict.important_issues, 2);
     }
 
     #[test]
@@ -1076,8 +1174,9 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_verdict_malformed_findings_returns_error() {
-        // Marker present but JSON invalid → must error, not silently approve.
+    fn test_parse_verdict_malformed_findings_with_non_blocking_preliminary_errors() {
+        // Marker present but JSON invalid AND preliminary verdict is not
+        // blocking → must error, not silently approve.
         let response = "[RS_GUARD_VERDICT_METADATA]\nVerdict: POSITIVE\nCriticalIssues: 0\nSecurityIssues: 0\nImportantIssues: 0\nSuggestions: 0\n\n[RS_GUARD_VERDICT_FINDINGS]\n[{\"path\":\"a.rs\"}]";
         let result = parse_verdict(response, 3);
         assert!(result.is_err());
@@ -1085,6 +1184,29 @@ mod tests {
             result.unwrap_err().to_string().contains("malformed"),
             "error should explain JSON is malformed"
         );
+    }
+
+    /// Regression: when the preliminary verdict is already blocking (NEGATIVE
+    /// metadata), a malformed findings block must NOT turn the review into
+    /// an error — the valid REQUEST_CHANGES review should still go through.
+    #[test]
+    fn test_parse_verdict_malformed_findings_with_blocking_preliminary_keeps_block() {
+        let response = "[RS_GUARD_VERDICT_METADATA]\nVerdict: NEGATIVE\nCriticalIssues: 0\nSecurityIssues: 0\nImportantIssues: 0\nSuggestions: 0\n\n[RS_GUARD_VERDICT_FINDINGS]\n[{\"path\":\"a.rs\"}]";
+        let (verdict, state) = parse_verdict(response, 3)
+            .expect("malformed findings must not suppress a blocking preliminary verdict");
+        assert_eq!(verdict.verdict, "NEGATIVE");
+        assert_eq!(state, ReviewState::RequestChanges);
+    }
+
+    /// Regression: preliminary POSITIVE metadata with `CriticalIssues: 1`
+    /// (already blocking) plus malformed findings → must keep the block.
+    #[test]
+    fn test_parse_verdict_malformed_findings_with_critical_in_preliminary_keeps_block() {
+        let response = "[RS_GUARD_VERDICT_METADATA]\nVerdict: POSITIVE\nCriticalIssues: 1\nSecurityIssues: 0\nImportantIssues: 0\nSuggestions: 0\n\n[RS_GUARD_VERDICT_FINDINGS]\n[{\"path\":\"a.rs\"}]";
+        let (verdict, state) = parse_verdict(response, 3)
+            .expect("malformed findings must not suppress a critical preliminary verdict");
+        assert_eq!(verdict.critical_issues, 1);
+        assert_eq!(state, ReviewState::RequestChanges);
     }
 
     #[test]
