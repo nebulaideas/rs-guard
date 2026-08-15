@@ -5,21 +5,24 @@
 
 use crate::cache::{CacheConfig, DiffCache};
 use crate::cli::OutputFormat;
-use crate::config::{CiConfig, Config};
+use crate::config::{CiConfig, Config, THINKING_MIN_MAX_TOKENS};
 use crate::diff::{
     apply_path_filters, chunk_diff_with_params, fetch_file_diff, fetch_local_diff, fetch_pr_diff,
     fetch_range_diff, DiffLimits, DiffResult,
 };
 use crate::error::RsGuardError;
-use crate::github::{dismiss_previous_reviews, submit_review};
+use crate::github::{
+    build_diff_position_map, dismiss_previous_reviews, format_inline_comment,
+    format_unmappable_findings, submit_review,
+};
 use crate::llm::factory::create_provider;
 use crate::output::{
     print_colored_summary, write_artifact, write_json_result, write_metrics, ReviewConfig,
     ReviewMetrics, ReviewResultJson, ARTIFACT_FILENAME, METRICS_FILENAME,
 };
 use crate::redact::{log_redacted, redact_secrets};
-use crate::retry::with_retry;
-use crate::verdict::{parse_metadata_block, parse_verdict, ReviewState};
+use crate::retry::with_retry_predicated;
+use crate::verdict::{parse_metadata_block, parse_verdict, strip_findings_json, ReviewState};
 use anyhow::Context;
 use std::path::PathBuf;
 
@@ -301,19 +304,9 @@ async fn obtain_llm_response_with_composed_prompt(
             println!("{}", msg);
         }
     }
-    let provider = create_provider(&config.provider, &config.api_key, &config.provider_config)
-        .context("Failed to create LLM provider")?;
-
-    let response = with_retry(
-        || async {
-            provider
-                .chat_completion(composed_prompt, diff_content, config.temperature)
-                .await
-        },
-        config.circuit_breaker.as_ref(),
-    )
-    .await
-    .context("LLM API call failed")?;
+    let response = call_llm_with_budget_escalation(config, composed_prompt, diff_content)
+        .await
+        .context("LLM API call failed")?;
 
     if !config.is_ci {
         let msg = format!("✅ Response received ({} chars)", response.len());
@@ -325,6 +318,89 @@ async fn obtain_llm_response_with_composed_prompt(
     }
 
     Ok((response, !config.no_cache))
+}
+
+/// Upper bound for automatic `max_tokens` escalation when a thinking model
+/// exhausts the output budget on chain-of-thought reasoning.
+const MAX_TOKENS_ESCALATION_CAP: u32 = 65_536;
+
+/// Computes the next `max_tokens` value for budget-exhaustion escalation.
+///
+/// Doubles the current value — defaulting to (and never dropping below) the
+/// [`THINKING_MIN_MAX_TOKENS`] floor when unset or set lower — up to
+/// [`MAX_TOKENS_ESCALATION_CAP`]. Returns `None` when no further escalation
+/// is possible.
+fn next_escalated_max_tokens(current: Option<u32>) -> Option<u32> {
+    let base = current
+        .unwrap_or(THINKING_MIN_MAX_TOKENS)
+        .max(THINKING_MIN_MAX_TOKENS);
+    let next = base.saturating_mul(2);
+    (next <= MAX_TOKENS_ESCALATION_CAP).then_some(next)
+}
+
+/// Calls the LLM, escalating `max_tokens` when a thinking model exhausts the
+/// output budget on chain-of-thought before producing final content.
+///
+/// Empty-content responses **with** `reasoning_content` are deterministic
+/// budget failures: blindly retrying the identical request cannot succeed.
+/// Instead, the request is re-sent with a doubled `max_tokens`
+/// (capped at [`MAX_TOKENS_ESCALATION_CAP`]) and a fresh provider instance.
+///
+/// All other transient errors keep the standard [`with_retry_predicated`]
+/// behaviour (up to 3 retries with exponential backoff). Empty content
+/// **without** reasoning is treated as a plain transient failure and retried.
+///
+/// The response cache is keyed on the *configured* `max_tokens`, so a
+/// successful escalated response is cached under the original configuration
+/// and reused on the next run without repeating the escalation.
+async fn call_llm_with_budget_escalation(
+    config: &Config,
+    composed_prompt: &str,
+    diff_content: &str,
+) -> anyhow::Result<String> {
+    let mut attempt_max_tokens = config.provider_config.max_tokens;
+
+    loop {
+        let mut provider_config = config.provider_config.clone();
+        provider_config.max_tokens = attempt_max_tokens;
+        let provider = create_provider(&config.provider, &config.api_key, &provider_config)
+            .context("Failed to create LLM provider")?;
+
+        let result = with_retry_predicated(
+            || async {
+                provider
+                    .chat_completion(composed_prompt, diff_content, config.temperature)
+                    .await
+            },
+            config.circuit_breaker.as_ref(),
+            |err| !err.is_reasoning_budget_exhausted(),
+        )
+        .await;
+
+        match result {
+            Ok(response) => return Ok(response),
+            Err(err) => {
+                if !err.is_reasoning_budget_exhausted() {
+                    return Err(err.into());
+                }
+
+                match next_escalated_max_tokens(attempt_max_tokens) {
+                    Some(next) => {
+                        log::warn!(
+                            "[{}] Reasoning exhausted the output budget — retrying with \
+                             max_tokens {} (was {:?}, cap {})",
+                            config.provider,
+                            next,
+                            attempt_max_tokens,
+                            MAX_TOKENS_ESCALATION_CAP
+                        );
+                        attempt_max_tokens = Some(next);
+                    }
+                    None => return Err(err.into()),
+                }
+            }
+        }
+    }
 }
 
 /// Caches an LLM response when caching is enabled.
@@ -532,17 +608,93 @@ async fn handle_ci_output(
     estimated_cost_cents: Option<f64>,
 ) -> anyhow::Result<PipelineResult> {
     let sanitized_response = redact_secrets(llm_response);
+
+    // Strip findings JSON from the review body — GitHub review body is prose only
+    let prose_body = strip_findings_json(&sanitized_response);
+
     let review_body = if was_chunked {
         format!(
             "⚠️ **Diff was truncated**: {} middle lines were omitted to fit the model context window.\n\n---\n\n{}",
             removed_lines,
-            sanitized_response
+            prose_body
         )
     } else {
-        sanitized_response.clone()
+        prose_body.to_string()
     };
 
-    submit_ci_review(config, state, &review_body).await?;
+    // Submit inline comments if enabled and findings are available
+    if config.inline_comments && verdict.has_findings() {
+        let diff_pos_map = build_diff_position_map(&diff.content);
+        let mut inline_comments = Vec::new();
+        let mut unmappable = Vec::new();
+
+        for finding in &verdict.findings {
+            if let Some(pos) = diff_pos_map.get(&finding.path, finding.line) {
+                inline_comments.push((pos, finding.path.clone(), format_inline_comment(finding)));
+            } else {
+                unmappable.push(finding.clone());
+            }
+        }
+
+        // Append unmappable findings to the review body
+        let mut body_with_unmappable = review_body;
+        if !unmappable.is_empty() {
+            body_with_unmappable.push_str(&format_unmappable_findings(&unmappable));
+        }
+
+        if !inline_comments.is_empty() {
+            let ci_config = config
+                .validate_for_ci()
+                .context("CI configuration validation failed")?;
+
+            if config.dry_run {
+                println!(
+                    "🔍 DRY RUN — would submit {} inline comment(s)",
+                    inline_comments.len()
+                );
+                log::info!("Dry-run mode: skipping inline review submission");
+            } else {
+                crate::github::submit_inline_review(
+                    &ci_config.github_base_url,
+                    &ci_config.repo_owner,
+                    &ci_config.repo_name,
+                    ci_config.pr_number,
+                    state.clone(),
+                    &body_with_unmappable,
+                    &inline_comments,
+                    &ci_config.github_token,
+                )
+                .await
+                .context("Failed to submit inline review")?;
+
+                log::info!(
+                    "Inline review submitted with {} comment(s)",
+                    inline_comments.len()
+                );
+
+                if *state != ReviewState::RequestChanges {
+                    log::info!("Dismissing previous blocker reviews...");
+                    if let Err(e) = dismiss_previous_reviews(
+                        &ci_config.github_base_url,
+                        &ci_config.repo_owner,
+                        &ci_config.repo_name,
+                        ci_config.pr_number,
+                        &ci_config.github_token,
+                    )
+                    .await
+                    {
+                        log::warn!("Failed to dismiss previous reviews: {}", e);
+                    }
+                }
+            }
+        } else {
+            // No inline comments mapped — fall back to regular review
+            submit_ci_review(config, state, &body_with_unmappable).await?;
+        }
+    } else {
+        submit_ci_review(config, state, &review_body).await?;
+    }
+
     if config.output_format == OutputFormat::Text {
         print_ci_summary(
             config,
@@ -578,9 +730,10 @@ fn handle_local_output(
     }
 
     let sanitized_response = redact_secrets(llm_response);
+    let prose_response = strip_findings_json(&sanitized_response);
     if config.output_format == OutputFormat::Text {
         print_colored_summary(
-            &sanitized_response,
+            prose_response,
             verdict,
             state,
             review_config,
@@ -918,7 +1071,7 @@ fn default_pricing(provider: &str) -> Option<(f64, f64)> {
 /// per-file, per-line findings. The JSON is parsed in
 /// [`crate::verdict::parse_findings`] and the parsed findings drive the
 /// max-rule merge in [`crate::verdict::Verdict::merge_with_findings`].
-const FINDINGS_INSTRUCTIONS: &str = "\n\n---\n\n## Structured Findings\n\nIn addition to the standard metadata block, include a JSON array at the\nend of your response inside a `[RS_GUARD_VERDICT_FINDINGS]` marker. Each\nelement must have this exact shape:\n\n```json\n{\n  \"path\": \"src/example.rs\",\n  \"line\": 42,\n  \"severity\": \"Critical\",\n  \"message\": \"Concise actionable description\",\n  \"suggestion\": \"Optional fix or follow-up\"\n}\n```\n\nThe `severity` field must be exactly one of these values:\n- `\"Critical\"`  — blocks merge unconditionally\n- `\"Security\"`  — blocks merge unconditionally\n- `\"Important\"` — blocks merge when count >= threshold\n- `\"Suggestion\"` — advisory, never blocks\n\nThe `path` is relative to the repository root. The `line` is 1-based\nand must point to a line actually present in the diff. Emit findings for\nevery real issue you identify; do not omit items to keep the list short.\n";
+const FINDINGS_INSTRUCTIONS: &str = "\n\n---\n\n## Structured Findings\n\nIn addition to the standard metadata block, include a JSON array at the\nend of your response inside a `[RS_GUARD_VERDICT_FINDINGS]` marker. Each\nelement must have this exact shape:\n\n```json\n{\n  \"path\": \"src/example.rs\",\n  \"line\": 42,\n  \"severity\": \"Critical\",\n  \"message\": \"Concise actionable description\",\n  \"suggestion\": \"Optional fix or follow-up\"\n}\n```\n\nThe `severity` field must be exactly one of these values:\n- `\"Critical\"`  — blocks merge unconditionally\n- `\"Security\"`  — blocks merge unconditionally\n- `\"Important\"` — blocks merge when count >= threshold\n- `\"Suggestion\"` — advisory, never blocks\n\nThe `path` is relative to the repository root. The `line` is 1-based\nand MUST point to a line that is visible in the diff (a changed or\ncontext line within a hunk). Do NOT report line numbers from the full\nfile that are outside the diff — findings on unmappable lines are\ndemoted to prose bullets and lose their inline placement.\n\nEmit findings for every real issue you identify; do not omit items to\nkeep the list short.\n";
 
 /// # Returns
 ///
@@ -971,6 +1124,34 @@ pub fn compose_prompt(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_next_escalated_max_tokens_from_none() {
+        // Unset max_tokens: escalate from the thinking floor (16,384 → 32,768).
+        assert_eq!(next_escalated_max_tokens(None), Some(32_768));
+    }
+
+    #[test]
+    fn test_next_escalated_max_tokens_at_floor() {
+        assert_eq!(next_escalated_max_tokens(Some(16_384)), Some(32_768));
+    }
+
+    #[test]
+    fn test_next_escalated_max_tokens_doubles() {
+        assert_eq!(next_escalated_max_tokens(Some(32_768)), Some(65_536));
+    }
+
+    #[test]
+    fn test_next_escalated_max_tokens_at_cap_returns_none() {
+        assert_eq!(next_escalated_max_tokens(Some(65_536)), None);
+        assert_eq!(next_escalated_max_tokens(Some(100_000)), None);
+    }
+
+    #[test]
+    fn test_next_escalated_max_tokens_below_floor_jumps_to_double_floor() {
+        // Explicit low values skip intermediate steps: floor applies first.
+        assert_eq!(next_escalated_max_tokens(Some(4_096)), Some(32_768));
+    }
 
     #[test]
     fn test_estimate_cost_cents_deepseek() {

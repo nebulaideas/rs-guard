@@ -76,6 +76,16 @@ pub enum RsGuardError {
     },
 }
 
+/// Marker substring used to detect reasoning-budget exhaustion in
+/// `RsGuardError::LlmApi` messages emitted for empty-content responses
+/// that carry `reasoning_content`.
+///
+/// Kept as a single shared constant so the message producer
+/// (`llm::resolve_assistant_content`) and the classifier
+/// (`is_reasoning_budget_exhausted`) cannot drift apart.
+pub(crate) const REASONING_BUDGET_EXHAUSTED_MARKER: &str =
+    "reasoning may have consumed the token budget";
+
 impl RsGuardError {
     /// Returns `true` if this error is transient and the operation should be retried.
     ///
@@ -92,6 +102,28 @@ impl RsGuardError {
                 status: 0 | 429 | 502 | 503 | 504,
                 ..
             }
+        )
+    }
+
+    /// Returns `true` if this error indicates a thinking model exhausted the
+    /// output token budget on chain-of-thought reasoning before producing
+    /// final content.
+    ///
+    /// This is detected via the marker message emitted for empty `content`
+    /// responses that **do** carry `reasoning_content` (DeepSeek/Kimi thinking
+    /// models). Callers use this to distinguish "escalate `max_tokens` and
+    /// retry" from ordinary transient errors that are blindly retried.
+    ///
+    /// Empty content **without** any reasoning content does not match: that
+    /// shape is treated as a plain transient failure.
+    pub fn is_reasoning_budget_exhausted(&self) -> bool {
+        matches!(
+            self,
+            RsGuardError::LlmApi {
+                status: 0,
+                message,
+                ..
+            } if message.contains(REASONING_BUDGET_EXHAUSTED_MARKER)
         )
     }
 
@@ -184,6 +216,46 @@ mod tests {
             message: "rate limited".to_string(),
         };
         assert!(err.is_retryable());
+    }
+
+    #[test]
+    fn test_is_reasoning_budget_exhausted_true() {
+        let err = RsGuardError::LlmApi {
+            provider: "deepseek".to_string(),
+            status: 0,
+            message: "Empty assistant content from LLM (reasoning_content: 66002 chars; \
+                      reasoning may have consumed the token budget)"
+                .to_string(),
+        };
+        assert!(err.is_reasoning_budget_exhausted());
+        assert!(err.is_retryable());
+    }
+
+    #[test]
+    fn test_is_reasoning_budget_exhausted_false_without_reasoning() {
+        let err = RsGuardError::LlmApi {
+            provider: "deepseek".to_string(),
+            status: 0,
+            message: "Empty assistant content from LLM (no reasoning content returned)".to_string(),
+        };
+        assert!(!err.is_reasoning_budget_exhausted());
+    }
+
+    #[test]
+    fn test_is_reasoning_budget_exhausted_false_other_errors() {
+        let connection = RsGuardError::LlmApi {
+            provider: "deepseek".to_string(),
+            status: 0,
+            message: "connection error".to_string(),
+        };
+        assert!(!connection.is_reasoning_budget_exhausted());
+
+        let http = RsGuardError::LlmApi {
+            provider: "deepseek".to_string(),
+            status: 500,
+            message: "reasoning may have consumed the token budget".to_string(),
+        };
+        assert!(!http.is_reasoning_budget_exhausted());
     }
 
     #[test]
