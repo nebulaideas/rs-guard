@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Review body truncation (#111)** — review bodies that exceed GitHub's 65,536
+  character limit are now **truncated** on a UTF-8 char boundary with a visible
+  `…[truncated: …]` notice, instead of failing the review. The findings JSON
+  block is stripped before truncation so only prose is cut. The signature budget
+  is always reserved. Applies to both `submit_review` and `submit_inline_review`.
+
 - **GitHub Check Runs** — `--check-run` / `RS_GUARD_CHECK_RUN` / `check_run` in
   `.reviewer.toml` creates a GitHub Check Run in addition to the PR review,
   mapping the verdict to a conclusion (`APPROVE`→`success`,
