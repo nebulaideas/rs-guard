@@ -145,6 +145,25 @@ fn test_generate_workflow_fork_safe() {
 }
 
 #[test]
+fn test_generate_workflow_includes_checks_write() {
+    let output = Command::new(rs_guard_bin())
+        .arg("generate-workflow")
+        .arg("--provider")
+        .arg("deepseek")
+        .output()
+        .expect("failed to execute rs-guard generate-workflow");
+
+    assert!(output.status.success());
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("checks: write"),
+        "workflow template must include checks: write for --check-run support: {}",
+        stdout
+    );
+}
+
+#[test]
 fn test_validate_config_passes_with_valid_config() {
     let dir = tempfile::tempdir().unwrap();
     let config_path = dir.path().join(".reviewer.toml");
@@ -197,6 +216,88 @@ fn test_validate_config_fails_on_typo() {
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("Unknown key `providor`"));
+}
+
+#[test]
+fn test_validate_config_shows_check_run_disabled_by_default() {
+    let dir = tempfile::tempdir().unwrap();
+    let config_path = dir.path().join(".reviewer.toml");
+    fs::write(
+        &config_path,
+        r#"provider = "deepseek"
+temperature = 0.1
+"#,
+    )
+    .unwrap();
+
+    let output = Command::new(rs_guard_bin())
+        .arg("validate-config")
+        .arg("--config")
+        .arg(&config_path)
+        .env("DEEPSEEK_API_KEY", "test-key")
+        .output()
+        .expect("failed to execute rs-guard validate-config");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Check Run:"));
+    assert!(stdout.contains("disabled"));
+}
+
+#[test]
+fn test_validate_config_shows_check_run_enabled_when_set() {
+    let dir = tempfile::tempdir().unwrap();
+    let config_path = dir.path().join(".reviewer.toml");
+    fs::write(
+        &config_path,
+        r#"provider = "deepseek"
+temperature = 0.1
+check_run = true
+check_run_name = "my-bot"
+"#,
+    )
+    .unwrap();
+
+    let output = Command::new(rs_guard_bin())
+        .arg("validate-config")
+        .arg("--config")
+        .arg(&config_path)
+        .env("DEEPSEEK_API_KEY", "test-key")
+        .output()
+        .expect("failed to execute rs-guard validate-config");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Check Run:        enabled"));
+    assert!(stdout.contains("Check Run name:   my-bot"));
+}
+
+#[test]
+fn test_validate_config_rejects_findings_as_toml_key() {
+    let dir = tempfile::tempdir().unwrap();
+    let config_path = dir.path().join(".reviewer.toml");
+    fs::write(
+        &config_path,
+        r#"provider = "deepseek"
+findings = true
+"#,
+    )
+    .unwrap();
+
+    let output = Command::new(rs_guard_bin())
+        .arg("validate-config")
+        .arg("--config")
+        .arg(&config_path)
+        .env("DEEPSEEK_API_KEY", "test-key")
+        .output()
+        .expect("failed to execute rs-guard validate-config");
+
+    assert!(
+        !output.status.success(),
+        "findings should be rejected as unknown TOML key"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("Unknown key `findings`"));
 }
 
 #[test]

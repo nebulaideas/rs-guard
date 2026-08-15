@@ -584,10 +584,9 @@ const MAX_FINDINGS_COUNT: usize = 1000;
 ///
 /// # Size limits
 ///
-/// The findings block is capped at [`MAX_FINDINGS_JSON_BYTES`] bytes and
-/// the resulting array at [`MAX_FINDINGS_COUNT`] entries. Both limits
-/// return `Err(VerdictParse)` so that over-sized responses fail loudly
-/// instead of silently truncating.
+/// The findings block is capped at 64 KiB (65,536 bytes) and the resulting
+/// array at 1,000 entries. Both limits return `Err(VerdictParse)` so that
+/// over-sized responses fail loudly instead of silently truncating.
 pub fn parse_findings(response: &str) -> Result<Option<Vec<Finding>>, RsGuardError> {
     // Use rfind so an attacker-influenced marker in the middle of the
     // response (e.g. in quoted diff content) cannot be picked up.

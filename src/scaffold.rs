@@ -44,6 +44,7 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
+      checks: write       # Required for --check-run (v1.7)
     steps:
       # Pinned from actions/checkout@v5 (93cb6efe) to avoid Node.js 20 deprecation.
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
@@ -271,6 +272,22 @@ pub fn run_validate_config(args: &ValidateConfigArgs) -> Result<(), Box<dyn std:
         detected_rules.as_ref(),
     ) {
         println!("{line}");
+    }
+
+    // Display v1.7 Check Run settings (findings/inline_comments are CLI/env
+    // only — not TOML keys — so they are not shown here).
+    let check_run = toml.as_ref().and_then(|t| t.check_run).unwrap_or(false);
+    let check_run_name = toml
+        .as_ref()
+        .and_then(|t| t.check_run_name.as_deref())
+        .unwrap_or("rs-guard");
+
+    println!(
+        "  Check Run:        {}",
+        if check_run { "enabled" } else { "disabled" }
+    );
+    if check_run {
+        println!("  Check Run name:   {}", check_run_name);
     }
 
     Ok(())
@@ -526,6 +543,11 @@ temperature = 0.1
 # .gemini/styleguide.md, .cursor/rules/*.md, and .windsurfrules.
 project_rules_enabled = true
 # rules_file = "docs/my-project-rules.md"
+
+# GitHub-native UX (v1.7)
+# check_run = true               # Publish a GitHub Check Run (requires checks: write)
+# check_run_name = "rs-guard"    # Custom Check Run name
+# Note: --findings and --inline-comments are CLI/env only, NOT TOML keys.
 
 [providers.{provider}]
 api_key_env = "{api_key_env}"
