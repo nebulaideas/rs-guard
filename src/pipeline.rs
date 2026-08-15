@@ -12,8 +12,8 @@ use crate::diff::{
 };
 use crate::error::RsGuardError;
 use crate::github::{
-    build_diff_position_map, dismiss_previous_reviews, format_inline_comment,
-    format_unmappable_findings, submit_review,
+    build_diff_position_map, create_check_run, dismiss_previous_reviews, format_inline_comment,
+    format_unmappable_findings, resolve_check_run_sha, review_state_to_conclusion, submit_review,
 };
 use crate::llm::factory::create_provider;
 use crate::output::{
@@ -553,6 +553,73 @@ async fn submit_ci_review(
     Ok(())
 }
 
+/// Creates a GitHub Check Run for the current review (non-blocking).
+///
+/// Called from [`handle_ci_output`] when `config.check_run` is enabled. The
+/// Check Run conclusion is derived from `state`. Failures are logged as
+/// warnings and never propagated — a Check Run is a status-reporting side
+/// channel and must not fail an otherwise-successful review.
+///
+/// In dry-run mode, prints the conclusion that would be sent and returns
+/// without hitting the GitHub API.
+async fn submit_ci_check_run(
+    config: &Config,
+    state: &ReviewState,
+    verdict: &crate::verdict::Verdict,
+    sanitized_response: &str,
+) {
+    let conclusion = review_state_to_conclusion(state);
+    let check_summary = format!(
+        "rs-guard review: {} ({} critical, {} security, {} important, {} suggestions)",
+        state,
+        verdict.critical_issues,
+        verdict.security_issues,
+        verdict.important_issues,
+        verdict.suggestions,
+    );
+
+    let head_sha = match resolve_check_run_sha(config.check_run_sha.as_deref()) {
+        Ok(sha) => sha,
+        Err(e) => {
+            log::warn!("Skipping Check Run — could not resolve head SHA: {}", e);
+            return;
+        }
+    };
+
+    if config.dry_run {
+        println!(
+            "🔍 DRY RUN — would create check run '{}' on {} with conclusion: {}",
+            config.check_run_name, head_sha, conclusion
+        );
+        log::info!("Dry-run mode: skipping GitHub Check Run creation");
+        return;
+    }
+
+    let ci_config = match config.validate_for_ci() {
+        Ok(c) => c,
+        Err(e) => {
+            log::warn!("Skipping Check Run — CI config invalid: {}", e);
+            return;
+        }
+    };
+
+    if let Err(e) = create_check_run(
+        &ci_config.github_base_url,
+        &ci_config.repo_owner,
+        &ci_config.repo_name,
+        &config.check_run_name,
+        &head_sha,
+        state,
+        &check_summary,
+        sanitized_response,
+        &ci_config.github_token,
+    )
+    .await
+    {
+        log::warn!("Failed to create Check Run: {}", e);
+    }
+}
+
 /// Prints the CI-mode review summary to stdout.
 #[allow(clippy::too_many_arguments)]
 fn print_ci_summary(
@@ -693,6 +760,11 @@ async fn handle_ci_output(
         }
     } else {
         submit_ci_review(config, state, &review_body).await?;
+    }
+
+    // Create a GitHub Check Run if enabled (non-blocking: failure is a warning).
+    if config.check_run {
+        submit_ci_check_run(config, state, verdict, &sanitized_response).await;
     }
 
     if config.output_format == OutputFormat::Text {
@@ -1619,5 +1691,184 @@ Some review text.
             verdict.findings[0].suggestion.as_deref(),
             Some("Fix it like this")
         );
+    }
+
+    // ─── Check Run pipeline integration ──────────────────────────────────
+
+    /// RAII guard that saves and restores an environment variable.
+    struct EnvGuard {
+        key: &'static str,
+        prev: Option<String>,
+    }
+
+    impl EnvGuard {
+        fn remove(key: &'static str) -> Self {
+            let prev = std::env::var(key).ok();
+            std::env::remove_var(key);
+            Self { key, prev }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            match &self.prev {
+                Some(v) => std::env::set_var(self.key, v),
+                None => std::env::remove_var(self.key),
+            }
+        }
+    }
+
+    fn check_run_verdict() -> crate::verdict::Verdict {
+        crate::verdict::Verdict {
+            verdict: "POSITIVE".into(),
+            critical_issues: 0,
+            security_issues: 0,
+            important_issues: 0,
+            suggestions: 0,
+            findings: Vec::new(),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_submit_ci_check_run_dry_run_does_not_call_api() {
+        use wiremock::matchers::{method, path_regex};
+        use wiremock::{Mock, MockServer};
+
+        let github = MockServer::start().await;
+        // No mock for check-runs: if the code calls it, the test panics on
+        // an unmounted request. We expect zero calls.
+        Mock::given(method("POST"))
+            .and(path_regex(r"/repos/.+/check-runs"))
+            .respond_with(wiremock::ResponseTemplate::new(201))
+            .expect(0)
+            .mount(&github)
+            .await;
+
+        let mut config = Config::empty();
+        config.check_run = true;
+        config.dry_run = true;
+        config.check_run_name = "rs-guard".into();
+        config.check_run_sha = Some("explicit-sha".into());
+
+        let state = ReviewState::Approve;
+        let verdict = check_run_verdict();
+        submit_ci_check_run(&config, &state, &verdict, "review text").await;
+
+        // If we reach here without a panic, the dry-run path skipped the API.
+    }
+
+    #[tokio::test]
+    async fn test_submit_ci_check_run_creates_check_run_when_enabled() {
+        use wiremock::matchers::{body_partial_json, method, path_regex};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let github = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path_regex(r"/repos/test-owner/test-repo/check-runs"))
+            .and(body_partial_json(serde_json::json!({
+                "name": "rs-guard",
+                "head_sha": "explicit-sha",
+                "conclusion": "success",
+            })))
+            .respond_with(ResponseTemplate::new(201))
+            .expect(1)
+            .mount(&github)
+            .await;
+
+        let mut config = Config::empty();
+        config.check_run = true;
+        config.dry_run = false;
+        config.check_run_name = "rs-guard".into();
+        config.check_run_sha = Some("explicit-sha".into());
+        config.is_ci = true;
+        config.github_base_url = github.uri();
+        config.repo_owner = Some("test-owner".into());
+        config.repo_name = Some("test-repo".into());
+        config.pr_number = Some(42);
+        config.github_token = Some("test-token".into());
+
+        let state = ReviewState::Approve;
+        let verdict = check_run_verdict();
+        submit_ci_check_run(&config, &state, &verdict, "review text").await;
+    }
+
+    #[tokio::test]
+    async fn test_submit_ci_check_run_failure_is_non_blocking() {
+        use wiremock::matchers::{method, path_regex};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let github = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path_regex(r"/repos/test-owner/test-repo/check-runs"))
+            .respond_with(ResponseTemplate::new(403).set_body_string("Forbidden"))
+            .up_to_n_times(4)
+            .mount(&github)
+            .await;
+
+        let mut config = Config::empty();
+        config.check_run = true;
+        config.dry_run = false;
+        config.check_run_name = "rs-guard".into();
+        config.check_run_sha = Some("explicit-sha".into());
+        config.is_ci = true;
+        config.github_base_url = github.uri();
+        config.repo_owner = Some("test-owner".into());
+        config.repo_name = Some("test-repo".into());
+        config.pr_number = Some(42);
+        config.github_token = Some("test-token".into());
+
+        let state = ReviewState::Approve;
+        let verdict = check_run_verdict();
+        // Must not panic / propagate the error.
+        submit_ci_check_run(&config, &state, &verdict, "review text").await;
+    }
+
+    #[tokio::test]
+    async fn test_submit_ci_check_run_skipped_when_sha_unresolvable() {
+        use wiremock::matchers::{method, path_regex};
+        use wiremock::{Mock, MockServer};
+
+        let github = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path_regex(r"/repos/.+/check-runs"))
+            .respond_with(wiremock::ResponseTemplate::new(201))
+            .expect(0)
+            .mount(&github)
+            .await;
+
+        let _g_sha = EnvGuard::remove("GITHUB_SHA");
+        let _g_event = EnvGuard::remove("GITHUB_EVENT_PATH");
+
+        let mut config = Config::empty();
+        config.check_run = true;
+        config.dry_run = false;
+        config.check_run_name = "rs-guard".into();
+        config.check_run_sha = None; // no explicit, no env → unresolvable
+
+        let state = ReviewState::Approve;
+        let verdict = check_run_verdict();
+        submit_ci_check_run(&config, &state, &verdict, "review text").await;
+    }
+
+    #[tokio::test]
+    async fn test_submit_ci_check_run_disabled_does_not_call_api() {
+        use wiremock::matchers::{method, path_regex};
+        use wiremock::{Mock, MockServer};
+
+        let github = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path_regex(r"/repos/.+/check-runs"))
+            .respond_with(wiremock::ResponseTemplate::new(201))
+            .expect(0)
+            .mount(&github)
+            .await;
+
+        let mut config = Config::empty();
+        config.check_run = false; // disabled
+        config.check_run_sha = Some("explicit-sha".into());
+
+        let state = ReviewState::Approve;
+        let verdict = check_run_verdict();
+        submit_ci_check_run(&config, &state, &verdict, "review text").await;
     }
 }

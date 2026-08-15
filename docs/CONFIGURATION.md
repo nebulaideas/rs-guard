@@ -243,6 +243,49 @@ or `inline_comments` as top-level TOML keys is rejected as an unknown key.
 
 ---
 
+## GitHub Check Runs
+
+rs-guard can publish a GitHub Check Run in addition to the PR review, so branch
+protection does not depend on `APPROVE` / `REQUEST_CHANGES` permissions (which
+`GITHUB_TOKEN` often cannot grant). The Check Run conclusion is derived from the
+review state: `APPROVE`→`success`, `REQUEST_CHANGES`→`failure`, `COMMENT`→`neutral`.
+
+| Flag / Env / TOML | Description |
+| ----------------- | ----------- |
+| `--check-run` / `RS_GUARD_CHECK_RUN` / `check_run` | Create a GitHub Check Run after submitting the review. Check Run failure is non-blocking (logged as a warning). Requires `checks: write` permission. |
+| `--check-run-name` / `RS_GUARD_CHECK_RUN_NAME` / `check_run_name` | Name for the Check Run (default: `rs-guard`). Validated non-empty and ≤ 255 chars. |
+| `--check-run-sha` / `RS_GUARD_CHECK_RUN_SHA` | Explicit commit SHA for the Check Run. When omitted, rs-guard resolves the SHA from `GITHUB_EVENT_PATH` (`pull_request.head.sha`) for PR events, falling back to `GITHUB_SHA`. |
+
+### SHA resolution
+
+For `pull_request` / `pull_request_target` events, GitHub Actions sets
+`GITHUB_SHA` to the **synthetic merge commit** (`refs/pull/<n>/merge`), not the
+PR head SHA. Check Runs must target the PR head SHA to attach to the PR's Checks
+tab, so rs-guard reads `pull_request.head.sha` from the event payload at
+`GITHUB_EVENT_PATH` first. Use `--check-run-sha` to override (e.g. for
+non-GitHub-Actions CI). `GITHUB_SHA` is the final fallback for push events.
+
+### Idempotent retries
+
+The Check Run is created with a stable `external_id`
+(`rs-guard:<sha>:<conclusion>`), so a request that succeeds but whose response
+is lost will not create a duplicate on retry — GitHub deduplicates by
+`external_id`.
+
+### Precedence
+
+`--check-run` respects CLI > env > TOML > defaults. An explicit
+`RS_GUARD_CHECK_RUN=false` overrides a TOML `check_run = true`.
+
+### TOML
+
+```toml
+check_run = true
+check_run_name = "rs-guard"
+```
+
+---
+
 ## CLI Flags
 
 These flags are available at the top level for the default review command:
@@ -263,6 +306,9 @@ These flags are available at the top level for the default review command:
 | `--base`        |       | (none)                     | Local mode: review `git diff <base>...HEAD` instead of staged changes. |
 | `--findings`    |       | Off                        | Request a `[RS_GUARD_VERDICT_FINDINGS]` JSON block from the LLM. Findings override metadata-block severity counts when present. Also set via `RS_GUARD_FINDINGS`. |
 | `--inline-comments` | | Off                     | Submit inline review comments on the PR diff mapped from structured findings. Implies `--findings`. Also set via `RS_GUARD_INLINE_COMMENTS`. |
+| `--check-run`   |       | Off                        | Create a GitHub Check Run (conclusion derived from verdict). Also set via `RS_GUARD_CHECK_RUN` / `check_run` in TOML. Requires `checks: write`. |
+| `--check-run-name` |   | `rs-guard`                | Name for the Check Run. Also set via `RS_GUARD_CHECK_RUN_NAME` / `check_run_name` in TOML. |
+| `--check-run-sha` |    | (auto)                    | Commit SHA for the Check Run (overrides auto-detection from `GITHUB_EVENT_PATH` / `GITHUB_SHA`). Also set via `RS_GUARD_CHECK_RUN_SHA`. |
 | `--help`        | `-h`  |                            | Display help.                        |
 | `--version`     | `-V`  |                            | Display version.                     |
 
@@ -311,6 +357,9 @@ Run `rs-guard <subcommand> --help` for details on each subcommand.
 | `RS_GUARD_RULES_FILE`   | Optional            | Path to an explicit project rules file. Overrides auto-detection. Mutually exclusive with `RS_GUARD_NO_PROJECT_RULES` / `--no-project-rules`. |
 | `RS_GUARD_FINDINGS`     | Optional            | Request structured findings from the LLM (CLI `--findings` equivalent). |
 | `RS_GUARD_INLINE_COMMENTS` | Optional         | Submit inline review comments on the PR diff (CLI `--inline-comments` equivalent). Implies `RS_GUARD_FINDINGS`. |
+| `RS_GUARD_CHECK_RUN`    | Optional            | Create a GitHub Check Run (CLI `--check-run` equivalent). Accepts `true`/`false`/`1`/`0`; an explicit `false` overrides a TOML `check_run = true`. |
+| `RS_GUARD_CHECK_RUN_NAME` | Optional          | Name for the Check Run (CLI `--check-run-name` equivalent). Default `rs-guard`. |
+| `RS_GUARD_CHECK_RUN_SHA` | Optional           | Explicit commit SHA for the Check Run (CLI `--check-run-sha` equivalent). Overrides auto-detection from `GITHUB_EVENT_PATH` / `GITHUB_SHA`. |
 
 ---
 

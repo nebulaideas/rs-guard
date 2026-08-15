@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **GitHub Check Runs** — `--check-run` / `RS_GUARD_CHECK_RUN` / `check_run` in
+  `.reviewer.toml` creates a GitHub Check Run in addition to the PR review,
+  mapping the verdict to a conclusion (`APPROVE`→`success`,
+  `REQUEST_CHANGES`→`failure`, `COMMENT`→`neutral`). Check Run failure is
+  non-blocking (logged as a warning). The head SHA is resolved from
+  `GITHUB_EVENT_PATH` (`pull_request.head.sha`) for PR events, with an
+  `--check-run-sha` / `RS_GUARD_CHECK_RUN_SHA` override and a `GITHUB_SHA`
+  fallback. A stable `external_id` makes retries idempotent. Requires
+  `checks: write` permission. Closes #109.
+
 ### Changed
 
 - **Automatic `max_tokens` escalation for thinking models** — empty assistant

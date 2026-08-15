@@ -249,6 +249,40 @@ pub struct ReviewArgs {
         help = "Submit inline review comments on the PR diff (implies --findings)"
     )]
     pub inline_comments: bool,
+
+    /// Create a GitHub Check Run in addition to the PR review.
+    ///
+    /// Maps the review verdict to a Check Run conclusion:
+    /// `APPROVE` → `success`, `REQUEST_CHANGES` → `failure`, `COMMENT` → `neutral`.
+    /// Check Run creation failure is logged as a warning and does NOT fail the
+    /// pipeline. Requires `checks: write` permission on the GitHub token.
+    #[arg(
+        long,
+        env = "RS_GUARD_CHECK_RUN",
+        help = "Create a GitHub Check Run in addition to the PR review"
+    )]
+    pub check_run: bool,
+
+    /// Name for the GitHub Check Run (default: `rs-guard`).
+    #[arg(
+        long,
+        env = "RS_GUARD_CHECK_RUN_NAME",
+        help = "Name for the GitHub Check Run [default: rs-guard]"
+    )]
+    pub check_run_name: Option<String>,
+
+    /// Explicit commit SHA for the GitHub Check Run.
+    ///
+    /// When omitted, rs-guard resolves the SHA from `GITHUB_EVENT_PATH`
+    /// (`pull_request.head.sha`) for PR events, falling back to `GITHUB_SHA`.
+    /// Use this to override the auto-detected SHA (e.g. for non-GitHub-Actions
+    /// CI).
+    #[arg(
+        long,
+        env = "RS_GUARD_CHECK_RUN_SHA",
+        help = "Commit SHA for the GitHub Check Run (overrides auto-detection)"
+    )]
+    pub check_run_sha: Option<String>,
 }
 
 /// Project type used by `rs-guard init` to select appropriate templates.
@@ -557,5 +591,58 @@ mod tests {
         let cli = Cli::parse_from(["rs-guard"]);
         assert!(!cli.review.findings);
         assert!(!cli.review.inline_comments);
+    }
+
+    #[test]
+    fn test_check_run_flag_default_false() {
+        let cli = Cli::parse_from(["rs-guard"]);
+        assert!(!cli.review.check_run, "check_run should default to false");
+    }
+
+    #[test]
+    fn test_check_run_flag_parsing() {
+        let cli = Cli::parse_from(["rs-guard", "--check-run"]);
+        assert!(
+            cli.review.check_run,
+            "--check-run should set check_run to true"
+        );
+    }
+
+    #[test]
+    fn test_check_run_name_default_none() {
+        let cli = Cli::parse_from(["rs-guard"]);
+        assert!(
+            cli.review.check_run_name.is_none(),
+            "check_run_name should default to None"
+        );
+    }
+
+    #[test]
+    fn test_check_run_name_flag_parsing() {
+        let cli = Cli::parse_from(["rs-guard", "--check-run-name", "my-check"]);
+        assert_eq!(
+            cli.review.check_run_name.as_deref(),
+            Some("my-check"),
+            "--check-run-name should set check_run_name"
+        );
+    }
+
+    #[test]
+    fn test_check_run_sha_default_none() {
+        let cli = Cli::parse_from(["rs-guard"]);
+        assert!(
+            cli.review.check_run_sha.is_none(),
+            "check_run_sha should default to None"
+        );
+    }
+
+    #[test]
+    fn test_check_run_sha_flag_parsing() {
+        let cli = Cli::parse_from(["rs-guard", "--check-run-sha", "abc123"]);
+        assert_eq!(
+            cli.review.check_run_sha.as_deref(),
+            Some("abc123"),
+            "--check-run-sha should set check_run_sha"
+        );
     }
 }
