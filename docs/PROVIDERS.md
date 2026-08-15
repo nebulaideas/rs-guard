@@ -52,7 +52,8 @@ DeepSeek V4 exposes multiple models. Use the generic `variant` mechanism (CLI `-
 
 `deepseek-v4-pro` is a powerful reasoning model. Because it performs extensive chain-of-thought internally, it often returns `"content": null` (or empty) while populating `reasoning_content`. rs-guard automatically:
 
-- Treats empty final content as a **retryable** error (up to 3 attempts with backoff).
+- **Escalates `max_tokens`** when reasoning exhausts the output budget: the request is re-sent with a doubled limit (16,384 → 32,768 → 65,536 cap) instead of blindly retrying the identical request.
+- Treats empty final content **without** reasoning as a transient error (up to 3 attempts with backoff).
 - Skips caching the response until a successful verdict is parsed.
 - Raises the `max_tokens` floor to **16,384** when you do not set an explicit value.
 - Raises the LLM timeout floor to **180s** (from 120s) for `deepseek` / `kimi` when not explicitly set.

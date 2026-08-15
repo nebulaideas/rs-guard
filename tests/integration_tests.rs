@@ -727,6 +727,64 @@ async fn test_full_pipeline_empty_content_retried_then_succeeds() {
 }
 
 #[tokio::test]
+async fn test_full_pipeline_empty_content_escalates_max_tokens() {
+    let github = MockServer::start().await;
+    let llm = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path_regex(r"/repos/test-owner/test-repo/pulls/\d+"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(VALID_DIFF))
+        .mount(&github)
+        .await;
+
+    // Catch-all first: null content + reasoning — deterministic budget failure.
+    // Mounted first so the escalated mock (mounted later) takes priority.
+    Mock::given(method("POST"))
+        .and(path_regex(r"/chat/completions"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "choices": [{
+                "message": {
+                    "content": null,
+                    "reasoning_content": "long internal reasoning that exhausted the budget"
+                }
+            }]
+        })))
+        .up_to_n_times(1)
+        .expect(1)
+        .mount(&llm)
+        .await;
+
+    // Escalated retry: must be sent with max_tokens = 32768 (None → floor 16384 → ×2).
+    Mock::given(method("POST"))
+        .and(path_regex(r"/chat/completions"))
+        .and(body_partial_json(json!({ "max_tokens": 32768 })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "choices": [{"message": {"content": POSITIVE_RESPONSE}}]
+        })))
+        .expect(1)
+        .mount(&llm)
+        .await;
+
+    Mock::given(method("POST"))
+        .and(path_regex(r"/repos/test-owner/test-repo/pulls/\d+/reviews"))
+        .respond_with(ResponseTemplate::new(200))
+        .mount(&github)
+        .await;
+
+    let mut config = ci_config(42, "deepseek", "test-token");
+    config.github_base_url = github.uri();
+    config.provider_config.base_url = Some(llm.uri());
+    config.no_cache = true;
+
+    let result = run_pipeline(config, None).await;
+    assert!(
+        matches!(result, Ok(PipelineResult::Success)),
+        "expected escalation retry to succeed, got: {:?}",
+        result
+    );
+}
+
+#[tokio::test]
 #[serial_test::serial]
 async fn test_full_pipeline_empty_content_not_cached_on_failure() {
     let temp_dir = tempfile::tempdir().unwrap();

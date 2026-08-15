@@ -368,13 +368,22 @@ fn resolve_assistant_content(
         reasoning_len
     );
 
+    // Empty content WITH reasoning is a deterministic budget failure: the
+    // marker suffix lets callers (pipeline retry escalation) distinguish it
+    // from a transient empty response with no reasoning at all.
+    let message = if reasoning_len > 0 {
+        format!(
+            "Empty assistant content from LLM (reasoning_content: {reasoning_len} chars; {})",
+            crate::error::REASONING_BUDGET_EXHAUSTED_MARKER
+        )
+    } else {
+        "Empty assistant content from LLM (no reasoning content returned)".to_string()
+    };
+
     Err(LlmError {
         provider: provider_name.to_string(),
         status: 0,
-        message: format!(
-            "Empty assistant content from LLM (reasoning_content: {reasoning_len} chars; \
-             reasoning may have consumed the token budget)"
-        ),
+        message,
     })
 }
 

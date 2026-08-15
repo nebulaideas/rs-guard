@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Automatic `max_tokens` escalation for thinking models** — empty assistant
+  content **with** `reasoning_content` (chain-of-thought exhausted the output
+  budget, e.g. DeepSeek/Kimi) is no longer blindly retried at the same token
+  limit. The request is re-sent with a doubled `max_tokens`
+  (16,384 → 32,768 → 65,536 cap) via a fresh provider instance. Empty content
+  **without** reasoning keeps the previous transient-retry behaviour (3 attempts
+  with backoff). Successful escalated responses are cached under the original
+  configured `max_tokens` so escalation is not repeated on subsequent runs.
+  Seen failing in the wild on PR #130's CI review (66k chars of reasoning, no
+  final answer after 4 identical attempts).
+
 ## [1.6.0] - 2026-07-21
 
 ### Added

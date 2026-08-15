@@ -239,6 +239,32 @@ where
     F: Fn() -> Fut,
     Fut: Future<Output = Result<T, RsGuardError>>,
 {
+    with_retry_predicated(operation, circuit, |_| true).await
+}
+
+/// Executes an async operation with automatic retry, gated by a predicate.
+///
+/// Identical to [`with_retry`] except that an error is only retried when —
+/// in addition to being retryable — `should_retry` returns `true` for it.
+/// This lets callers surface deterministic failures (e.g. a thinking model
+/// exhausting the output token budget on reasoning) after the first attempt
+/// so they can be handled differently instead of blindly retried.
+///
+/// # Arguments
+///
+/// * `operation` — A closure returning a `Future` that produces `Result<T, RsGuardError>`.
+/// * `circuit` — Optional circuit breaker to prevent calls when the provider is failing.
+/// * `should_retry` — Predicate consulted before each retry; receives the error.
+pub async fn with_retry_predicated<T, F, Fut, P>(
+    operation: F,
+    circuit: Option<&CircuitBreaker>,
+    should_retry: P,
+) -> Result<T, RsGuardError>
+where
+    F: Fn() -> Fut,
+    Fut: Future<Output = Result<T, RsGuardError>>,
+    P: Fn(&RsGuardError) -> bool,
+{
     // Check circuit breaker before attempting
     if let Some(cb) = circuit {
         if !cb.allow_request() {
@@ -259,9 +285,15 @@ where
                 return Ok(result);
             }
             Err(err) => {
-                if !err.is_retryable() || attempt == MAX_RETRIES {
+                let excluded = !should_retry(&err);
+                if !err.is_retryable() || excluded || attempt == MAX_RETRIES {
+                    // Predicate-excluded errors are deterministic response
+                    // shapes (e.g. reasoning budget exhaustion), not provider
+                    // outages: do not count them against the circuit breaker.
                     if let Some(cb) = circuit {
-                        cb.record_failure();
+                        if !excluded {
+                            cb.record_failure();
+                        }
                     }
                     return Err(err);
                 }
@@ -572,5 +604,95 @@ mod tests {
         cb.record_success();
         assert_eq!(cb.current_state(), CircuitState::Closed);
         assert_eq!(cb.failure_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_with_retry_predicated_surfaces_excluded_error_immediately() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let calls = AtomicUsize::new(0);
+        let budget_exhausted = || RsGuardError::LlmApi {
+            provider: "deepseek".to_string(),
+            status: 0,
+            message: format!(
+                "Empty assistant content from LLM (reasoning_content: 66002 chars; {})",
+                crate::error::REASONING_BUDGET_EXHAUSTED_MARKER
+            ),
+        };
+
+        let result: Result<(), RsGuardError> = with_retry_predicated(
+            || async {
+                calls.fetch_add(1, Ordering::SeqCst);
+                Err(budget_exhausted())
+            },
+            None,
+            |err| !err.is_reasoning_budget_exhausted(),
+        )
+        .await;
+
+        assert!(result.is_err());
+        // The predicate excludes the error from retries: exactly one attempt.
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn test_with_retry_predicated_still_retries_allowed_errors() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let calls = AtomicUsize::new(0);
+        let result: Result<&'static str, RsGuardError> = with_retry_predicated(
+            || async {
+                if calls.fetch_add(1, Ordering::SeqCst) < 1 {
+                    Err(RsGuardError::LlmApi {
+                        provider: "deepseek".to_string(),
+                        status: 0,
+                        message: "connection error".to_string(),
+                    })
+                } else {
+                    Ok("ok")
+                }
+            },
+            None,
+            |err| !err.is_reasoning_budget_exhausted(),
+        )
+        .await;
+
+        assert_eq!(result.unwrap(), "ok");
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn test_with_retry_predicated_excluded_error_does_not_open_circuit() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        // Threshold 1: a single recorded failure would open the breaker.
+        let cb = CircuitBreaker::new(1, 60);
+        let calls = AtomicUsize::new(0);
+        let budget_exhausted = || RsGuardError::LlmApi {
+            provider: "deepseek".to_string(),
+            status: 0,
+            message: format!(
+                "Empty assistant content from LLM (reasoning_content: 66002 chars; {})",
+                crate::error::REASONING_BUDGET_EXHAUSTED_MARKER
+            ),
+        };
+
+        let result: Result<(), RsGuardError> = with_retry_predicated(
+            || async {
+                calls.fetch_add(1, Ordering::SeqCst);
+                Err(budget_exhausted())
+            },
+            Some(&cb),
+            |err| !err.is_reasoning_budget_exhausted(),
+        )
+        .await;
+
+        assert!(result.is_err());
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        // The excluded error is a deterministic response shape, not an
+        // outage: it must not count against the circuit breaker.
+        assert_eq!(cb.failure_count(), 0);
+        assert_eq!(cb.current_state(), CircuitState::Closed);
+        assert!(cb.allow_request());
     }
 }

@@ -709,14 +709,14 @@ The same diff+prompt+provider+model+temperature combination was cached within th
 
 Thinking models return `content: null` (or empty) + `reasoning_content` when the output budget is exhausted by chain-of-thought before the final answer.
 
-rs-guard treats this as a transient (retryable) error and will retry up to 3 times with backoff. The response is **never cached** until a successful verdict parse.
+rs-guard detects this shape and **automatically escalates**: instead of blindly retrying the identical request, `max_tokens` is doubled (16,384 → 32,768 → 65,536 cap) and the request is re-sent. Empty content **without** any `reasoning_content` is treated as a plain transient error and retried up to 3 times with backoff. Responses are **never cached** until a successful verdict parse, and a successful escalated response is cached under your original configuration so the escalation is not repeated.
 
-**Fixes:**
-- Raise `max_tokens` (env `RS_GUARD_MAX_TOKENS`, `--max-tokens`, or TOML). For deepseek/kimi the default is auto-raised to 16,384 **only** when you have not set an explicit value.
+**Fixes if escalation still fails at the cap:**
+- Raise `max_tokens` explicitly (env `RS_GUARD_MAX_TOKENS`, `--max-tokens`, or TOML). For deepseek/kimi the default is auto-raised to 16,384 **only** when you have not set an explicit value.
 - Consider `--llm-timeout 180` or `RS_GUARD_LLM_TIMEOUT=180` if the model needs more wall time for reasoning.
 - Use a cheaper/faster variant when possible (e.g. `flash`).
 
-You will see a warning in logs containing the length of `reasoning_content`.
+You will see a warning in logs containing the length of `reasoning_content` and the escalation steps.
 
 ### LLM request timing out
 
