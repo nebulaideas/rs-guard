@@ -19,6 +19,47 @@ const BOT_SIGNATURE: &str = "<!-- rs-guard-bot -->";
 /// GitHub's maximum character limit for review body.
 const GITHUB_REVIEW_BODY_LIMIT: usize = 65536;
 
+/// Truncation notice appended to a review body that exceeds GitHub's limit.
+const REVIEW_BODY_TRUNCATION_NOTICE: &str =
+    "\n\n…[truncated: review body exceeds GitHub's 65,536 character limit]";
+
+/// Truncates a review body so that `message + "\n\n" + BOT_SIGNATURE` fits
+/// within GitHub's 65,536 character limit, appending a truncation notice when
+/// content is cut.
+///
+/// rs-guard never fails a useful review solely because the body exceeds
+/// GitHub's 65k limit (v1.7 #111). The prose is truncated on a UTF-8 char
+/// boundary and a visible notice is appended so the reader knows content was
+/// dropped. The findings JSON block is stripped upstream in the pipeline
+/// (`strip_findings_json`) before this function is called, so only prose is
+/// truncated here.
+///
+/// Returns the (possibly truncated) message text **without** the signature —
+/// the signature is appended by the internal submission helper.
+#[must_use]
+pub fn truncate_review_body(message: &str) -> String {
+    // Fast path: the full body (message + separator + signature) fits.
+    let overhead = 2 + BOT_SIGNATURE.len(); // "\n\n" + signature
+    if message.len() + overhead <= GITHUB_REVIEW_BODY_LIMIT {
+        return message.to_string();
+    }
+
+    // Reserve budget for the notice + separator + signature.
+    let budget =
+        GITHUB_REVIEW_BODY_LIMIT.saturating_sub(overhead + REVIEW_BODY_TRUNCATION_NOTICE.len());
+
+    // Cut on a char boundary to avoid splitting a UTF-8 codepoint.
+    let mut end = budget;
+    while end > 0 && !message.is_char_boundary(end) {
+        end -= 1;
+    }
+
+    let mut out = String::with_capacity(GITHUB_REVIEW_BODY_LIMIT);
+    out.push_str(&message[..end]);
+    out.push_str(REVIEW_BODY_TRUNCATION_NOTICE);
+    out
+}
+
 /// Submits a review to a GitHub Pull Request without permission fallback.
 async fn submit_review_inner(
     base_url: &str,
@@ -117,21 +158,29 @@ pub async fn submit_review(
 ) -> Result<(), RsGuardError> {
     validate_github_base_url(base_url)?;
 
-    // Validate review body length before submission
-    let full_body = format!("{}\n\n{}", message, BOT_SIGNATURE);
-    if full_body.len() > GITHUB_REVIEW_BODY_LIMIT {
-        return Err(RsGuardError::GitHubApi {
-            status: 0,
-            message: format!(
-                "Review body exceeds GitHub's character limit ({} chars). \
-                Consider using a shorter prompt or chunking the diff.",
-                GITHUB_REVIEW_BODY_LIMIT
-            ),
-        });
-    }
+    // Truncate the review body so it always fits GitHub's 65k limit (v1.7 #111).
+    // Never fail a useful review solely because the body is too long.
+    let safe_message = truncate_review_body(message);
+    let was_truncated = safe_message.len() != message.len();
 
-    let result =
-        submit_review_inner(base_url, owner, repo, pr_number, &state, message, token).await;
+    let result = submit_review_inner(
+        base_url,
+        owner,
+        repo,
+        pr_number,
+        &state,
+        &safe_message,
+        token,
+    )
+    .await;
+
+    if was_truncated {
+        log::warn!(
+            "Review body was truncated from {} to {} chars to fit GitHub's limit",
+            message.len(),
+            safe_message.len()
+        );
+    }
 
     match result {
         Ok(()) => Ok(()),
@@ -140,14 +189,17 @@ pub async fn submit_review(
                 "Permission denied for {}. Falling back to COMMENT...",
                 state
             );
-            let fallback_msg = format!("[Bot fallback from {}]\n\n{}", state, message);
+            // Re-truncate: the fallback prefix adds bytes that may push the
+            // already-truncated message back over the limit (#111 review).
+            let fallback_msg = format!("[Bot fallback from {}]\n\n{}", state, safe_message);
+            let safe_fallback = truncate_review_body(&fallback_msg);
             submit_review_inner(
                 base_url,
                 owner,
                 repo,
                 pr_number,
                 &ReviewState::Comment,
-                &fallback_msg,
+                &safe_fallback,
                 token,
             )
             .await
@@ -479,7 +531,15 @@ pub async fn submit_inline_review(
         })
         .collect();
 
-    let full_body = format!("{}\n\n{}", body, BOT_SIGNATURE);
+    let safe_body = truncate_review_body(body);
+    if safe_body.len() != body.len() {
+        log::warn!(
+            "Inline review body was truncated from {} to {} chars to fit GitHub's limit",
+            body.len(),
+            safe_body.len()
+        );
+    }
+    let full_body = format!("{}\n\n{}", safe_body, BOT_SIGNATURE);
     let review_body = json!({
         "body": full_body,
         "event": state.as_github_state(),
@@ -959,6 +1019,56 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_submit_review_oversized_body_with_fallback_still_fits_limit() {
+        use wiremock::matchers::body_partial_json;
+
+        let mock_server = MockServer::start().await;
+
+        // First call: REQUEST_CHANGES fails with 422 "not permitted".
+        Mock::given(method("POST"))
+            .and(path_regex(r"/repos/owner/repo/pulls/\d+/reviews"))
+            .and(body_partial_json(json!({"event": "REQUEST_CHANGES"})))
+            .respond_with(
+                ResponseTemplate::new(422).set_body_string(
+                    r#"{"message":"Unprocessable Entity","errors":["GitHub Actions is not permitted to request changes."]}"#,
+                ),
+            )
+            .up_to_n_times(1)
+            .mount(&mock_server)
+            .await;
+
+        // Second call: COMMENT fallback must succeed and fit the limit.
+        Mock::given(method("POST"))
+            .and(path_regex(r"/repos/owner/repo/pulls/\d+/reviews"))
+            .and(body_partial_json(json!({"event": "COMMENT"})))
+            .respond_with(ResponseTemplate::new(200))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        // Oversized body that will be truncated, then re-truncated after
+        // the fallback prefix is prepended.
+        let long_message = "x".repeat(GITHUB_REVIEW_BODY_LIMIT + 100);
+
+        let result = submit_review(
+            &mock_server.uri(),
+            "owner",
+            "repo",
+            1,
+            ReviewState::RequestChanges,
+            &long_message,
+            "token",
+        )
+        .await;
+
+        assert!(
+            result.is_ok(),
+            "oversized body + fallback should still succeed: {:?}",
+            result
+        );
+    }
+
+    #[tokio::test]
     async fn test_submit_review_no_fallback_on_permission_denied_for_comment() {
         let mock_server = MockServer::start().await;
 
@@ -1019,10 +1129,20 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_submit_review_body_too_long() {
+    async fn test_submit_review_body_too_long_is_truncated_not_errored() {
+        use wiremock::matchers::body_partial_json;
+
         let mock_server = MockServer::start().await;
 
-        // Create a message that exceeds the limit
+        // A message that exceeds the limit must be truncated, not rejected.
+        Mock::given(method("POST"))
+            .and(path_regex(r"/repos/owner/repo/pulls/\d+/reviews"))
+            .and(body_partial_json(json!({"event": "COMMENT"})))
+            .respond_with(ResponseTemplate::new(200))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
         let long_message = "x".repeat(GITHUB_REVIEW_BODY_LIMIT + 100);
 
         let result = submit_review(
@@ -1036,11 +1156,77 @@ mod tests {
         )
         .await;
 
-        assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("exceeds GitHub's character limit"));
+        assert!(
+            result.is_ok(),
+            "oversized body should be truncated and submitted, not errored: {:?}",
+            result
+        );
+    }
+
+    // ─── truncate_review_body unit tests (#111) ─────────────────────────
+
+    #[test]
+    fn test_truncate_review_body_short_message_unchanged() {
+        let msg = "Looks good.";
+        assert_eq!(truncate_review_body(msg), msg);
+    }
+
+    #[test]
+    fn test_truncate_review_body_at_limit_unchanged() {
+        // message + "\n\n" + signature == limit exactly → no truncation.
+        let overhead = 2 + BOT_SIGNATURE.len();
+        let msg = "x".repeat(GITHUB_REVIEW_BODY_LIMIT - overhead);
+        let out = truncate_review_body(&msg);
+        assert_eq!(out.len(), msg.len());
+        assert!(!out.contains("truncated"));
+    }
+
+    #[test]
+    fn test_truncate_review_body_oversized_is_truncated() {
+        let msg = "x".repeat(GITHUB_REVIEW_BODY_LIMIT + 1000);
+        let out = truncate_review_body(&msg);
+        // Final body (out + separator + signature) must fit the limit.
+        let full = format!("{}\n\n{}", out, BOT_SIGNATURE);
+        assert!(
+            full.len() <= GITHUB_REVIEW_BODY_LIMIT,
+            "truncated body + signature must fit limit, got {} > {}",
+            full.len(),
+            GITHUB_REVIEW_BODY_LIMIT
+        );
+        assert!(out.contains("truncated"), "must include truncation notice");
+    }
+
+    #[test]
+    fn test_truncate_review_body_preserves_truncation_notice_text() {
+        let msg = "x".repeat(GITHUB_REVIEW_BODY_LIMIT + 10);
+        let out = truncate_review_body(&msg);
+        assert!(
+            out.contains("[truncated:"),
+            "notice must be human-readable and descriptive"
+        );
+    }
+
+    #[test]
+    fn test_truncate_review_body_utf8_char_boundary() {
+        // Build a message that ends with multi-byte chars just before the cut.
+        // If we didn't cut on a char boundary, String::push_str would panic.
+        let fill = "x".repeat(GITHUB_REVIEW_BODY_LIMIT - 10);
+        let suffix = "🦀🦀🦀🦀🦀"; // 5 × 4-byte chars = 20 bytes
+        let msg = format!("{}{}", fill, suffix);
+        let out = truncate_review_body(&msg);
+        // Must not panic and must fit.
+        let full = format!("{}\n\n{}", out, BOT_SIGNATURE);
+        assert!(full.len() <= GITHUB_REVIEW_BODY_LIMIT);
+    }
+
+    #[test]
+    fn test_truncate_review_body_signature_budget_reserved() {
+        // The signature must always be appended intact after truncation.
+        let msg = "y".repeat(GITHUB_REVIEW_BODY_LIMIT + 50);
+        let out = truncate_review_body(&msg);
+        let full = format!("{}\n\n{}", out, BOT_SIGNATURE);
+        assert!(full.ends_with(BOT_SIGNATURE));
+        assert!(full.len() <= GITHUB_REVIEW_BODY_LIMIT);
     }
 
     #[tokio::test]
@@ -1573,6 +1759,7 @@ diff --git a/a.rs b/a.rs
         }
     }
 
+    #[serial_test::serial]
     #[test]
     fn test_resolve_check_run_sha_explicit_wins() {
         let _g = EnvGuard::remove("GITHUB_SHA");
@@ -1581,6 +1768,7 @@ diff --git a/a.rs b/a.rs
         assert_eq!(sha, "explicit-sha-123");
     }
 
+    #[serial_test::serial]
     #[test]
     fn test_resolve_check_run_sha_explicit_empty_falls_through() {
         let _g = EnvGuard::set("GITHUB_SHA", "fallback-sha");
@@ -1589,6 +1777,7 @@ diff --git a/a.rs b/a.rs
         assert_eq!(sha, "fallback-sha");
     }
 
+    #[serial_test::serial]
     #[test]
     fn test_resolve_check_run_sha_from_event_path() {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -1603,6 +1792,7 @@ diff --git a/a.rs b/a.rs
         assert_eq!(sha, "pr-head-sha-abc");
     }
 
+    #[serial_test::serial]
     #[test]
     fn test_resolve_check_run_sha_event_path_not_pull_request_falls_back() {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -1615,6 +1805,7 @@ diff --git a/a.rs b/a.rs
         assert_eq!(sha, "push-sha");
     }
 
+    #[serial_test::serial]
     #[test]
     fn test_resolve_check_run_sha_no_event_path_uses_github_sha() {
         let _g = EnvGuard::set("GITHUB_SHA", "just-sha");
@@ -1623,6 +1814,7 @@ diff --git a/a.rs b/a.rs
         assert_eq!(sha, "just-sha");
     }
 
+    #[serial_test::serial]
     #[test]
     fn test_resolve_check_run_sha_nothing_set_errors() {
         let _g = EnvGuard::remove("GITHUB_SHA");
@@ -1637,6 +1829,7 @@ diff --git a/a.rs b/a.rs
         );
     }
 
+    #[serial_test::serial]
     #[test]
     fn test_resolve_check_run_sha_unreadable_event_path_falls_back() {
         let _g = EnvGuard::set("GITHUB_EVENT_PATH", "/nonexistent/path/event.json");
