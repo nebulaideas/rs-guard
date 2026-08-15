@@ -332,6 +332,39 @@ jobs:
 - **Token scope:** `GITHUB_TOKEN` has `pull-requests: write` scope by default. Request explicitly if needed.
 - **Artifacts:** `review-result.txt` and `rs-guard-metrics.json` are written by rs-guard and can be uploaded as workflow artifacts.
 
+### GitHub Check Runs (branch protection)
+
+By default rs-guard submits a PR review (`APPROVE` / `REQUEST_CHANGES` / `COMMENT`). `GITHUB_TOKEN` often cannot `APPROVE` or `REQUEST_CHANGES`, which blocks branch-protection rules that require a review state. Enable Check Runs to publish a status check that branch protection can require independently:
+
+```yaml
+permissions:
+  pull-requests: write
+  contents: read
+  checks: write          # required for Check Runs
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    if: ${{ !github.event.pull_request.head.repo.fork }}
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+      - name: Download rs-guard
+        run: ./scripts/rs-guard-install.sh
+      - name: AI Code Review
+        run: ./rs-guard --check-run
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO_FULL_NAME: ${{ github.repository }}
+```
+
+The Check Run conclusion is derived from the verdict: `APPROVE`→`success`, `REQUEST_CHANGES`→`failure`, `COMMENT`→`neutral`. Check Run creation failure is **non-fatal** — it is logged as a warning and the review still completes. If you rely on the Check Run for a required branch-protection check, monitor creation failures.
+
+The head SHA is resolved automatically from `GITHUB_EVENT_PATH` (`pull_request.head.sha`) for PR events — you do not need to pass it explicitly. Use `--check-run-sha` (or `RS_GUARD_CHECK_RUN_SHA`) only for non-GitHub-Actions CI. Customize the name with `--check-run-name` (default `rs-guard`).
+
+> **Caveat:** because Check Run creation is non-fatal, a required branch-protection check may silently fail to be created, leaving PRs blocked or without the expected status. Alert on the `Failed to create Check Run` log line if you depend on it.
+
 ---
 
 ## Local Pre-commit Setup

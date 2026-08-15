@@ -545,6 +545,209 @@ pub async fn submit_inline_review(
     }
 }
 
+/// Maps a [`ReviewState`] to the GitHub Check Run `conclusion` field.
+///
+/// | `ReviewState`    | Conclusion  |
+/// |------------------|-------------|
+/// | `Approve`        | `"success"` |
+/// | `RequestChanges` | `"failure"` |
+/// | `Comment`        | `"neutral"` |
+#[must_use]
+pub(crate) fn review_state_to_conclusion(state: &ReviewState) -> &'static str {
+    match state {
+        ReviewState::Approve => "success",
+        ReviewState::RequestChanges => "failure",
+        ReviewState::Comment => "neutral",
+    }
+}
+
+/// Maximum length for a Check Run `output.text` field (GitHub API constraint).
+const CHECK_RUN_OUTPUT_TEXT_LIMIT: usize = 65_536;
+
+/// Truncates the Check Run `output.text` to fit GitHub's size limit, appending
+/// a truncation notice when content is cut.
+fn truncate_check_run_text(text: &str) -> String {
+    if text.len() <= CHECK_RUN_OUTPUT_TEXT_LIMIT {
+        return text.to_string();
+    }
+    let notice = "\n\n…[truncated: output exceeds GitHub Check Run text limit]";
+    let budget = CHECK_RUN_OUTPUT_TEXT_LIMIT.saturating_sub(notice.len());
+    // Cut on a char boundary to avoid splitting a UTF-8 codepoint.
+    let mut end = budget;
+    while end > 0 && !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    let mut out = String::with_capacity(CHECK_RUN_OUTPUT_TEXT_LIMIT);
+    out.push_str(&text[..end]);
+    out.push_str(notice);
+    out
+}
+
+/// Resolves the commit SHA for a GitHub Check Run.
+///
+/// Resolution order:
+/// 1. `explicit_sha` — from `--check-run-sha` / `RS_GUARD_CHECK_RUN_SHA`.
+/// 2. `GITHUB_EVENT_PATH` — for `pull_request`/`pull_request_target` events,
+///    reads `pull_request.head.sha` from the event payload JSON. This is the
+///    PR head SHA, which is what Check Runs must target (not the synthetic
+///    merge commit in `GITHUB_SHA`).
+/// 3. `GITHUB_SHA` — fallback for push events and non-GitHub-Actions CI.
+///
+/// # Errors
+///
+/// Returns [`RsGuardError::Config`] if no SHA can be resolved, or if
+/// `GITHUB_EVENT_PATH` is set but cannot be read or parsed.
+pub fn resolve_check_run_sha(explicit_sha: Option<&str>) -> Result<String, RsGuardError> {
+    if let Some(sha) = explicit_sha {
+        let trimmed = sha.trim();
+        if !trimmed.is_empty() {
+            return Ok(trimmed.to_string());
+        }
+    }
+
+    if let Ok(path) = std::env::var("GITHUB_EVENT_PATH") {
+        if !path.is_empty() {
+            match std::fs::read_to_string(&path) {
+                Ok(content) => {
+                    if let Ok(payload) = serde_json::from_str::<serde_json::Value>(&content) {
+                        if let Some(head_sha) = payload
+                            .get("pull_request")
+                            .and_then(|pr| pr.get("head"))
+                            .and_then(|head| head.get("sha"))
+                            .and_then(|s| s.as_str())
+                        {
+                            return Ok(head_sha.to_string());
+                        }
+                    }
+                    // Not a pull_request event or missing head.sha — fall through.
+                }
+                Err(e) => {
+                    log::warn!(
+                        "GITHUB_EVENT_PATH is set but could not be read ({}); \
+                         falling back to GITHUB_SHA",
+                        e
+                    );
+                }
+            }
+        }
+    }
+
+    std::env::var("GITHUB_SHA").map_err(|_| {
+        RsGuardError::Config(
+            "Could not resolve a commit SHA for the Check Run. Set \
+             --check-run-sha / RS_GUARD_CHECK_RUN_SHA, or run in GitHub Actions \
+             (GITHUB_EVENT_PATH / GITHUB_SHA)."
+                .to_string(),
+        )
+    })
+}
+
+/// Creates a GitHub Check Run for the current commit.
+///
+/// The Check Run is created with `status: "completed"` and a conclusion
+/// derived from the review state. The `head_sha` is resolved via
+/// [`resolve_check_run_sha`] (explicit override → `GITHUB_EVENT_PATH`
+/// `pull_request.head.sha` → `GITHUB_SHA`).
+///
+/// A stable `external_id` (derived from the SHA, name, and conclusion) makes
+/// retries idempotent: GitHub deduplicates Check Runs with the same
+/// `external_id`, so a request that succeeds but whose response is lost will
+/// not create a duplicate on retry.
+///
+/// Check Run creation failure does NOT fail the pipeline — callers should
+/// log the error as a warning.
+///
+/// # Arguments
+///
+/// * `base_url` — GitHub API base URL (e.g. `"https://api.github.com"`).
+/// * `owner` — Repository owner.
+/// * `repo` — Repository name.
+/// * `name` — Check Run name (e.g. `"rs-guard"`).
+/// * `head_sha` — Commit SHA the Check Run targets.
+/// * `state` — Review state, mapped to a Check Run conclusion.
+/// * `summary` — Short summary of the review verdict.
+/// * `text` — Full review text (optional, can be empty; truncated to the
+///   GitHub limit).
+/// * `token` — GitHub authentication token.
+///
+/// # Errors
+///
+/// Returns [`RsGuardError::GitHubApi`] if the API request fails after retries.
+/// The `base_url` is validated against an allowlist before any request is made.
+#[allow(clippy::too_many_arguments)]
+pub async fn create_check_run(
+    base_url: &str,
+    owner: &str,
+    repo: &str,
+    name: &str,
+    head_sha: &str,
+    state: &ReviewState,
+    summary: &str,
+    text: &str,
+    token: &str,
+) -> Result<(), RsGuardError> {
+    validate_github_base_url(base_url)?;
+
+    let client = build_github_http_client(REQUEST_TIMEOUT)?;
+
+    let url = format!(
+        "{}/repos/{}/{}/check-runs",
+        base_url.trim_end_matches('/'),
+        owner,
+        repo
+    );
+
+    let headers = github_headers(token)?;
+
+    let conclusion = review_state_to_conclusion(state);
+    let external_id = format!("rs-guard:{}:{}", head_sha, conclusion);
+    let truncated_text = truncate_check_run_text(text);
+
+    let body = json!({
+        "name": name,
+        "head_sha": head_sha,
+        "status": "completed",
+        "conclusion": conclusion,
+        "external_id": external_id,
+        "output": {
+            "title": format!("rs-guard: {}", state),
+            "summary": summary,
+            "text": truncated_text,
+        }
+    });
+
+    with_retry_simple(|| async {
+        let resp = client
+            .post(&url)
+            .headers(headers.clone())
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| {
+                let status = e.status().map(|s| s.as_u16()).unwrap_or(0);
+                RsGuardError::GitHubApi {
+                    status,
+                    message: e.to_string(),
+                }
+            })?;
+
+        let status = resp.status();
+        if !status.is_success() {
+            let body_text = resp
+                .text()
+                .await
+                .unwrap_or_else(|e| format!("[failed to read response body: {}]", e));
+            return Err(RsGuardError::GitHubApi {
+                status: status.as_u16(),
+                message: body_text,
+            });
+        }
+
+        Ok(())
+    })
+    .await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1274,5 +1477,435 @@ diff --git a/a.rs b/a.rs
         let comment = format_inline_comment(&finding);
         assert!(comment.contains("💡"));
         assert!(comment.contains("Extract to MAGIC_NUMBER"));
+    }
+
+    // ─── Check Run: conclusion mapping ───────────────────────────────────
+
+    #[test]
+    fn test_review_state_to_conclusion_approve() {
+        assert_eq!(review_state_to_conclusion(&ReviewState::Approve), "success");
+    }
+
+    #[test]
+    fn test_review_state_to_conclusion_request_changes() {
+        assert_eq!(
+            review_state_to_conclusion(&ReviewState::RequestChanges),
+            "failure"
+        );
+    }
+
+    #[test]
+    fn test_review_state_to_conclusion_comment() {
+        assert_eq!(review_state_to_conclusion(&ReviewState::Comment), "neutral");
+    }
+
+    // ─── Check Run: text truncation ──────────────────────────────────────
+
+    #[test]
+    fn test_truncate_check_run_text_short_unchanged() {
+        let text = "short review text";
+        assert_eq!(truncate_check_run_text(text), text);
+    }
+
+    #[test]
+    fn test_truncate_check_run_text_empty() {
+        assert_eq!(truncate_check_run_text(""), "");
+    }
+
+    #[test]
+    fn test_truncate_check_run_text_exact_limit_unchanged() {
+        let text = "x".repeat(CHECK_RUN_OUTPUT_TEXT_LIMIT);
+        assert_eq!(
+            truncate_check_run_text(&text).len(),
+            CHECK_RUN_OUTPUT_TEXT_LIMIT
+        );
+        assert!(!truncate_check_run_text(&text).contains("truncated"));
+    }
+
+    #[test]
+    fn test_truncate_check_run_text_over_limit_truncates_with_notice() {
+        let text = "x".repeat(CHECK_RUN_OUTPUT_TEXT_LIMIT + 1000);
+        let out = truncate_check_run_text(&text);
+        assert!(out.len() <= CHECK_RUN_OUTPUT_TEXT_LIMIT, "must fit limit");
+        assert!(out.contains("truncated"), "must append truncation notice");
+        assert!(out.starts_with('x'));
+    }
+
+    #[test]
+    fn test_truncate_check_run_text_preserves_char_boundary() {
+        // Build a string that ends with a multi-byte char right at the budget.
+        let prefix = "x".repeat(CHECK_RUN_OUTPUT_TEXT_LIMIT - 1);
+        let mut text = prefix;
+        text.push('🦀'); // 4 bytes
+        let out = truncate_check_run_text(&text);
+        // The result must be valid UTF-8 (String guarantees this) and fit.
+        assert!(out.len() <= CHECK_RUN_OUTPUT_TEXT_LIMIT);
+        assert!(out.contains("truncated"));
+    }
+
+    // ─── Check Run: SHA resolution ───────────────────────────────────────
+
+    /// RAII guard that saves and restores an environment variable.
+    struct EnvGuard {
+        key: &'static str,
+        prev: Option<String>,
+    }
+
+    impl EnvGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let prev = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            Self { key, prev }
+        }
+        fn remove(key: &'static str) -> Self {
+            let prev = std::env::var(key).ok();
+            std::env::remove_var(key);
+            Self { key, prev }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            match &self.prev {
+                Some(v) => std::env::set_var(self.key, v),
+                None => std::env::remove_var(self.key),
+            }
+        }
+    }
+
+    #[test]
+    fn test_resolve_check_run_sha_explicit_wins() {
+        let _g = EnvGuard::remove("GITHUB_SHA");
+        let _g2 = EnvGuard::remove("GITHUB_EVENT_PATH");
+        let sha = resolve_check_run_sha(Some("explicit-sha-123")).expect("explicit sha should win");
+        assert_eq!(sha, "explicit-sha-123");
+    }
+
+    #[test]
+    fn test_resolve_check_run_sha_explicit_empty_falls_through() {
+        let _g = EnvGuard::set("GITHUB_SHA", "fallback-sha");
+        let _g2 = EnvGuard::remove("GITHUB_EVENT_PATH");
+        let sha = resolve_check_run_sha(Some("   ")).expect("empty explicit falls through");
+        assert_eq!(sha, "fallback-sha");
+    }
+
+    #[test]
+    fn test_resolve_check_run_sha_from_event_path() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let event_path = dir.path().join("event.json");
+        let payload = serde_json::json!({
+            "pull_request": { "head": { "sha": "pr-head-sha-abc" } }
+        });
+        std::fs::write(&event_path, payload.to_string()).expect("write event");
+        let _g = EnvGuard::set("GITHUB_EVENT_PATH", event_path.to_str().unwrap());
+        let _g2 = EnvGuard::set("GITHUB_SHA", "merge-sha");
+        let sha = resolve_check_run_sha(None).expect("should read event path");
+        assert_eq!(sha, "pr-head-sha-abc");
+    }
+
+    #[test]
+    fn test_resolve_check_run_sha_event_path_not_pull_request_falls_back() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let event_path = dir.path().join("event.json");
+        let payload = serde_json::json!({ "ref": "refs/heads/main" });
+        std::fs::write(&event_path, payload.to_string()).expect("write event");
+        let _g = EnvGuard::set("GITHUB_EVENT_PATH", event_path.to_str().unwrap());
+        let _g2 = EnvGuard::set("GITHUB_SHA", "push-sha");
+        let sha = resolve_check_run_sha(None).expect("should fall back to GITHUB_SHA");
+        assert_eq!(sha, "push-sha");
+    }
+
+    #[test]
+    fn test_resolve_check_run_sha_no_event_path_uses_github_sha() {
+        let _g = EnvGuard::set("GITHUB_SHA", "just-sha");
+        let _g2 = EnvGuard::remove("GITHUB_EVENT_PATH");
+        let sha = resolve_check_run_sha(None).expect("should use GITHUB_SHA");
+        assert_eq!(sha, "just-sha");
+    }
+
+    #[test]
+    fn test_resolve_check_run_sha_nothing_set_errors() {
+        let _g = EnvGuard::remove("GITHUB_SHA");
+        let _g2 = EnvGuard::remove("GITHUB_EVENT_PATH");
+        let result = resolve_check_run_sha(None);
+        assert!(result.is_err(), "should error when no SHA source available");
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            msg.contains("commit SHA") || msg.contains("GITHUB_SHA"),
+            "error should explain SHA resolution: {}",
+            msg
+        );
+    }
+
+    #[test]
+    fn test_resolve_check_run_sha_unreadable_event_path_falls_back() {
+        let _g = EnvGuard::set("GITHUB_EVENT_PATH", "/nonexistent/path/event.json");
+        let _g2 = EnvGuard::set("GITHUB_SHA", "fallback-sha");
+        let sha = resolve_check_run_sha(None).expect("should fall back to GITHUB_SHA");
+        assert_eq!(sha, "fallback-sha");
+    }
+
+    // ─── Check Run: create_check_run (wiremock) ──────────────────────────
+
+    #[serial_test::serial]
+    #[tokio::test]
+    async fn test_create_check_run_success() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path_regex(r"/repos/owner/repo/check-runs"))
+            .respond_with(
+                ResponseTemplate::new(201)
+                    .set_body_json(json!({"id": 1, "name": "rs-guard", "conclusion": "success"})),
+            )
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        let result = create_check_run(
+            &mock_server.uri(),
+            "owner",
+            "repo",
+            "rs-guard",
+            "abc123def456",
+            &ReviewState::Approve,
+            "Review passed",
+            "Full review text",
+            "token",
+        )
+        .await;
+
+        assert!(
+            result.is_ok(),
+            "create_check_run should succeed: {:?}",
+            result
+        );
+    }
+
+    #[serial_test::serial]
+    #[tokio::test]
+    async fn test_create_check_run_request_changes_conclusion() {
+        use wiremock::matchers::body_partial_json;
+
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path_regex(r"/repos/owner/repo/check-runs"))
+            .and(body_partial_json(json!({"conclusion": "failure"})))
+            .respond_with(
+                ResponseTemplate::new(201).set_body_json(json!({"id": 2, "conclusion": "failure"})),
+            )
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        let result = create_check_run(
+            &mock_server.uri(),
+            "owner",
+            "repo",
+            "rs-guard",
+            "abc123def456",
+            &ReviewState::RequestChanges,
+            "Issues found",
+            "Full review",
+            "token",
+        )
+        .await;
+
+        assert!(
+            result.is_ok(),
+            "create_check_run(RequestChanges) failed: {:?}",
+            result
+        );
+    }
+
+    #[serial_test::serial]
+    #[tokio::test]
+    async fn test_create_check_run_comment_conclusion() {
+        use wiremock::matchers::body_partial_json;
+
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path_regex(r"/repos/owner/repo/check-runs"))
+            .and(body_partial_json(json!({"conclusion": "neutral"})))
+            .respond_with(
+                ResponseTemplate::new(201).set_body_json(json!({"id": 3, "conclusion": "neutral"})),
+            )
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        let result = create_check_run(
+            &mock_server.uri(),
+            "owner",
+            "repo",
+            "rs-guard",
+            "abc123def456",
+            &ReviewState::Comment,
+            "Comments only",
+            "Full review",
+            "token",
+        )
+        .await;
+
+        assert!(
+            result.is_ok(),
+            "create_check_run(Comment) failed: {:?}",
+            result
+        );
+    }
+
+    #[serial_test::serial]
+    #[tokio::test]
+    async fn test_create_check_run_sends_correct_payload() {
+        use wiremock::matchers::body_partial_json;
+
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path_regex(r"/repos/owner/repo/check-runs"))
+            .and(body_partial_json(json!({
+                "name": "rs-guard",
+                "head_sha": "abc123def456",
+                "status": "completed",
+                "conclusion": "success",
+                "external_id": "rs-guard:abc123def456:success",
+                "output": {
+                    "title": "rs-guard: APPROVE",
+                    "summary": "All clear",
+                    "text": "Details here",
+                }
+            })))
+            .respond_with(ResponseTemplate::new(201).set_body_json(json!({"id": 1})))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        let result = create_check_run(
+            &mock_server.uri(),
+            "owner",
+            "repo",
+            "rs-guard",
+            "abc123def456",
+            &ReviewState::Approve,
+            "All clear",
+            "Details here",
+            "token",
+        )
+        .await;
+
+        assert!(result.is_ok(), "Payload validation failed: {:?}", result);
+    }
+
+    #[serial_test::serial]
+    #[tokio::test]
+    async fn test_create_check_run_custom_name() {
+        use wiremock::matchers::body_partial_json;
+
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path_regex(r"/repos/owner/repo/check-runs"))
+            .and(body_partial_json(json!({"name": "my-custom-check"})))
+            .respond_with(ResponseTemplate::new(201).set_body_json(json!({"id": 1})))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        let result = create_check_run(
+            &mock_server.uri(),
+            "owner",
+            "repo",
+            "my-custom-check",
+            "abc123def456",
+            &ReviewState::Approve,
+            "summary",
+            "text",
+            "token",
+        )
+        .await;
+
+        assert!(result.is_ok(), "Custom name check failed: {:?}", result);
+    }
+
+    #[serial_test::serial]
+    #[tokio::test]
+    async fn test_create_check_run_truncates_long_text() {
+        use wiremock::matchers::body_partial_json;
+
+        let mock_server = MockServer::start().await;
+        let long_text = "x".repeat(CHECK_RUN_OUTPUT_TEXT_LIMIT + 5000);
+
+        Mock::given(method("POST"))
+            .and(path_regex(r"/repos/owner/repo/check-runs"))
+            .and(body_partial_json(json!({"conclusion": "neutral"})))
+            .respond_with(ResponseTemplate::new(201).set_body_json(json!({"id": 1})))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        let result = create_check_run(
+            &mock_server.uri(),
+            "owner",
+            "repo",
+            "rs-guard",
+            "abc123def456",
+            &ReviewState::Comment,
+            "summary",
+            &long_text,
+            "token",
+        )
+        .await;
+
+        assert!(result.is_ok(), "Long text check failed: {:?}", result);
+    }
+
+    #[serial_test::serial]
+    #[tokio::test]
+    async fn test_create_check_run_api_error() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path_regex(r"/repos/owner/repo/check-runs"))
+            .respond_with(ResponseTemplate::new(403).set_body_string("Forbidden"))
+            .up_to_n_times(4) // retries up to 3 times + initial
+            .mount(&mock_server)
+            .await;
+
+        let result = create_check_run(
+            &mock_server.uri(),
+            "owner",
+            "repo",
+            "rs-guard",
+            "abc123def456",
+            &ReviewState::Approve,
+            "summary",
+            "text",
+            "token",
+        )
+        .await;
+
+        assert!(result.is_err(), "Expected error for 403");
+        assert!(result.unwrap_err().to_string().contains("403"));
+    }
+
+    #[tokio::test]
+    async fn test_create_check_run_invalid_base_url() {
+        let result = create_check_run(
+            "https://evil.example.com",
+            "owner",
+            "repo",
+            "rs-guard",
+            "abc123def456",
+            &ReviewState::Approve,
+            "summary",
+            "text",
+            "token",
+        )
+        .await;
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("allowlist"));
     }
 }

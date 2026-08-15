@@ -110,9 +110,29 @@ rs-guard needs exactly these capabilities on the target repository:
 | Capability | Classic scope | Fine-grained permission |
 | List/read PR metadata + diff | `repo` | `Contents: Read` |
 | Submit a review (APPROVE / REQUEST_CHANGES / COMMENT) | `repo` | `Pull requests: Read and write` |
+| Publish a Check Run (optional, `--check-run`) | `repo` (or `workflow` for Actions) | `Checks: Read and write` |
 
 No other scopes are required. Never grant `delete_repo`, `admin:*`, or
 workflow-modifying scopes to the review identity.
+
+### Check Runs (`--check-run`)
+
+Check Runs are optional and opt-in. When enabled, rs-guard publishes a Check
+Run (conclusion derived from the verdict) in addition to the PR review, so
+branch protection can require the check without depending on `APPROVE` /
+`REQUEST_CHANGES` permissions (which `GITHUB_TOKEN` often cannot grant). Add
+`checks: write` to the workflow `permissions:` block:
+
+```yaml
+permissions:
+  pull-requests: write
+  contents: read
+  checks: write          # only when using --check-run
+```
+
+Check Run creation failure is non-fatal (logged as a warning); the review still
+completes. If you rely on the Check Run for a required branch-protection check,
+alert on `Failed to create Check Run` log lines.
 
 ---
 

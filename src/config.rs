@@ -237,6 +237,18 @@ pub struct TomlConfig {
     /// Output format: `"text"` or `"json"`.
     #[serde(default)]
     pub output_format: Option<String>,
+    /// Create a GitHub Check Run in addition to the PR review.
+    ///
+    /// Maps the review verdict to a Check Run conclusion. Can be overridden by
+    /// the `--check-run` CLI flag or `RS_GUARD_CHECK_RUN` env var.
+    #[serde(default)]
+    pub check_run: Option<bool>,
+    /// Name for the GitHub Check Run (default: `rs-guard`).
+    ///
+    /// Can be overridden by the `--check-run-name` CLI flag or
+    /// `RS_GUARD_CHECK_RUN_NAME` env var.
+    #[serde(default)]
+    pub check_run_name: Option<String>,
 }
 
 /// Returns `None` when `result_format` is unset or blank so static provider
@@ -270,6 +282,8 @@ const KNOWN_TOP_LEVEL_KEYS: &[&str] = &[
     "project_rules_enabled",
     "rules_file",
     "output_format",
+    "check_run",
+    "check_run_name",
 ];
 
 /// Returns the closest known top-level key to `unknown`, or `None` if no
@@ -765,6 +779,46 @@ fn parse_output_format(raw: &str) -> Result<crate::cli::OutputFormat, RsGuardErr
     }
 }
 
+/// Parses a boolean environment variable value (`true`/`false`/`1`/`0`),
+/// case-insensitive, trimming surrounding whitespace.
+///
+/// Used for tri-state flags where an explicit `false` must override a TOML
+/// default of `true` (e.g. `RS_GUARD_CHECK_RUN=false`).
+fn parse_bool_env(var_name: &str, raw: &str) -> Result<bool, RsGuardError> {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "true" | "1" => Ok(true),
+        "false" | "0" => Ok(false),
+        other => Err(RsGuardError::Config(format!(
+            "invalid boolean for {}: {:?} (expected \"true\" or \"false\")",
+            var_name, other
+        ))),
+    }
+}
+
+/// Maximum length for a GitHub Check Run name (GitHub API constraint).
+const CHECK_RUN_NAME_MAX_LEN: usize = 255;
+
+/// Validates a GitHub Check Run name.
+///
+/// Rejects empty names and names exceeding GitHub's length limit, so users
+/// receive an actionable configuration error instead of a late API failure.
+fn validate_check_run_name(name: &str) -> Result<(), RsGuardError> {
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        return Err(RsGuardError::Config(
+            "check_run_name must not be empty".to_string(),
+        ));
+    }
+    if trimmed.len() > CHECK_RUN_NAME_MAX_LEN {
+        return Err(RsGuardError::Config(format!(
+            "check_run_name must not exceed {} characters (got {})",
+            CHECK_RUN_NAME_MAX_LEN,
+            trimmed.len()
+        )));
+    }
+    Ok(())
+}
+
 /// Resolves output format from TOML before CLI apply.
 ///
 /// Precedence: CLI `--format` / `RS_GUARD_FORMAT` (via clap in `apply_args`) >
@@ -1007,6 +1061,19 @@ pub struct Config {
     /// When `true`, findings are mapped to diff positions and submitted as
     /// inline comments. Implies `findings`.
     pub inline_comments: bool,
+    /// Whether to create a GitHub Check Run in addition to the PR review.
+    ///
+    /// When `true`, rs-guard creates a Check Run via the GitHub Checks API
+    /// after submitting the review. Check Run failure does NOT fail the
+    /// pipeline — it is logged as a warning.
+    pub check_run: bool,
+    /// Name for the GitHub Check Run (default: `rs-guard`).
+    pub check_run_name: String,
+    /// Explicit commit SHA for the GitHub Check Run.
+    ///
+    /// When `None`, the SHA is resolved from `GITHUB_EVENT_PATH`
+    /// (`pull_request.head.sha`) for PR events, falling back to `GITHUB_SHA`.
+    pub check_run_sha: Option<String>,
 }
 
 impl Config {
@@ -1060,6 +1127,9 @@ impl Config {
             diff_base: None,
             findings: false,
             inline_comments: false,
+            check_run: false,
+            check_run_name: "rs-guard".to_string(),
+            check_run_sha: None,
         }
     }
 
@@ -1144,6 +1214,12 @@ impl Config {
         let rules_file = resolve_rules_file_from_env_and_toml(toml.as_ref());
         let output_format = resolve_output_format(toml.as_ref())?;
         let diff_base = resolve_diff_base_from_toml(toml.as_ref());
+        let check_run = toml.as_ref().and_then(|t| t.check_run).unwrap_or(false);
+        let check_run_name = toml
+            .as_ref()
+            .and_then(|t| t.check_run_name.clone())
+            .unwrap_or_else(|| "rs-guard".to_string());
+        validate_check_run_name(&check_run_name)?;
 
         Ok(Config {
             provider,
@@ -1183,6 +1259,9 @@ impl Config {
             diff_base,
             findings: false,
             inline_comments: false,
+            check_run,
+            check_run_name,
+            check_run_sha: None,
         })
     }
 
@@ -1328,6 +1407,23 @@ impl Config {
             self.findings = true;
         } else if args.findings {
             self.findings = true;
+        }
+
+        // --check-run / RS_GUARD_CHECK_RUN: tri-state to respect
+        // CLI > env > TOML > defaults. A `false` env value must override a
+        // TOML `true`, so we check env presence explicitly rather than only
+        // acting on a truthy `args.check_run`.
+        if let Some(sha) = args.check_run_sha.clone() {
+            self.check_run_sha = Some(sha);
+        }
+        if let Ok(val) = std::env::var("RS_GUARD_CHECK_RUN") {
+            self.check_run = parse_bool_env("RS_GUARD_CHECK_RUN", &val)?;
+        } else if args.check_run {
+            self.check_run = true;
+        }
+        if let Some(ref name) = args.check_run_name {
+            validate_check_run_name(name)?;
+            self.check_run_name = name.clone();
         }
 
         Ok(())
@@ -2268,5 +2364,225 @@ mod tests {
         config.apply_args(&cli.review).unwrap();
         assert_eq!(config.diff_base, None);
         std::env::remove_var("DEEPSEEK_API_KEY");
+    }
+
+    // ─── Check Run config tests ─────────────────────────────────────────
+
+    #[test]
+    fn test_config_empty_check_run_defaults() {
+        let config = Config::empty();
+        assert!(!config.check_run, "check_run should default to false");
+        assert_eq!(
+            config.check_run_name, "rs-guard",
+            "check_run_name should default to 'rs-guard'"
+        );
+        assert!(config.check_run_sha.is_none(), "check_run_sha default None");
+    }
+
+    #[test]
+    fn test_config_from_env_check_run_defaults() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        std::env::set_var("DEEPSEEK_API_KEY", "test-key");
+        std::env::remove_var("RS_GUARD_CHECK_RUN");
+        std::env::remove_var("RS_GUARD_CHECK_RUN_NAME");
+        std::env::remove_var("RS_GUARD_CHECK_RUN_SHA");
+        let config = Config::from_env(None).unwrap();
+        assert!(!config.check_run);
+        assert_eq!(config.check_run_name, "rs-guard");
+        std::env::remove_var("DEEPSEEK_API_KEY");
+    }
+
+    #[test]
+    fn test_config_from_env_check_run_toml_override() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        std::env::set_var("DEEPSEEK_API_KEY", "test-key");
+        std::env::remove_var("RS_GUARD_CHECK_RUN");
+        std::env::remove_var("RS_GUARD_CHECK_RUN_NAME");
+        let toml = TomlConfig {
+            check_run: Some(true),
+            check_run_name: Some("my-bot".to_string()),
+            ..Default::default()
+        };
+        let config = Config::from_env(Some(toml)).unwrap();
+        assert!(config.check_run, "TOML check_run=true should be respected");
+        assert_eq!(config.check_run_name, "my-bot");
+        std::env::remove_var("DEEPSEEK_API_KEY");
+    }
+
+    #[test]
+    fn test_config_apply_args_check_run_cli_flag() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        std::env::set_var("DEEPSEEK_API_KEY", "test-key");
+        std::env::remove_var("RS_GUARD_CHECK_RUN");
+        let mut config = Config::from_env(None).unwrap();
+        assert!(!config.check_run);
+        use clap::Parser;
+        let cli = crate::cli::Cli::parse_from(["rs-guard", "--check-run"]);
+        config.apply_args(&cli.review).unwrap();
+        assert!(config.check_run, "--check-run should enable check_run");
+        std::env::remove_var("DEEPSEEK_API_KEY");
+    }
+
+    #[test]
+    fn test_config_apply_args_check_run_name_cli_flag() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        std::env::set_var("DEEPSEEK_API_KEY", "test-key");
+        let mut config = Config::from_env(None).unwrap();
+        assert_eq!(config.check_run_name, "rs-guard");
+        use clap::Parser;
+        let cli = crate::cli::Cli::parse_from(["rs-guard", "--check-run-name", "custom-name"]);
+        config.apply_args(&cli.review).unwrap();
+        assert_eq!(config.check_run_name, "custom-name");
+        std::env::remove_var("DEEPSEEK_API_KEY");
+    }
+
+    #[test]
+    fn test_config_apply_args_check_run_name_none_preserves_toml() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        std::env::set_var("DEEPSEEK_API_KEY", "test-key");
+        std::env::remove_var("RS_GUARD_CHECK_RUN_NAME");
+        let toml = TomlConfig {
+            check_run_name: Some("toml-name".to_string()),
+            ..Default::default()
+        };
+        let mut config = Config::from_env(Some(toml)).unwrap();
+        assert_eq!(config.check_run_name, "toml-name");
+        use clap::Parser;
+        let cli = crate::cli::Cli::parse_from(["rs-guard"]);
+        config.apply_args(&cli.review).unwrap();
+        assert_eq!(
+            config.check_run_name, "toml-name",
+            "TOML name should be preserved when CLI flag is not set"
+        );
+        std::env::remove_var("DEEPSEEK_API_KEY");
+    }
+
+    #[test]
+    fn test_config_apply_args_check_run_sha_cli_flag() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        std::env::set_var("DEEPSEEK_API_KEY", "test-key");
+        std::env::remove_var("RS_GUARD_CHECK_RUN_SHA");
+        let mut config = Config::from_env(None).unwrap();
+        assert!(config.check_run_sha.is_none());
+        use clap::Parser;
+        let cli = crate::cli::Cli::parse_from(["rs-guard", "--check-run-sha", "deadbeef"]);
+        config.apply_args(&cli.review).unwrap();
+        assert_eq!(config.check_run_sha.as_deref(), Some("deadbeef"));
+        std::env::remove_var("DEEPSEEK_API_KEY");
+    }
+
+    #[test]
+    fn test_config_apply_args_env_false_overrides_toml_true() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        std::env::set_var("DEEPSEEK_API_KEY", "test-key");
+        std::env::set_var("RS_GUARD_CHECK_RUN", "false");
+        let toml = TomlConfig {
+            check_run: Some(true),
+            ..Default::default()
+        };
+        let mut config = Config::from_env(Some(toml)).unwrap();
+        assert!(
+            config.check_run,
+            "TOML true should hold before apply_args (env handled in apply_args)"
+        );
+        use clap::Parser;
+        let cli = crate::cli::Cli::parse_from(["rs-guard"]);
+        config.apply_args(&cli.review).unwrap();
+        assert!(
+            !config.check_run,
+            "RS_GUARD_CHECK_RUN=false must override TOML check_run=true"
+        );
+        std::env::remove_var("RS_GUARD_CHECK_RUN");
+        std::env::remove_var("DEEPSEEK_API_KEY");
+    }
+
+    #[test]
+    fn test_config_apply_args_env_true_enables() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        std::env::set_var("DEEPSEEK_API_KEY", "test-key");
+        std::env::set_var("RS_GUARD_CHECK_RUN", "true");
+        let mut config = Config::from_env(None).unwrap();
+        assert!(!config.check_run);
+        use clap::Parser;
+        let cli = crate::cli::Cli::parse_from(["rs-guard"]);
+        config.apply_args(&cli.review).unwrap();
+        assert!(config.check_run, "RS_GUARD_CHECK_RUN=true should enable");
+        std::env::remove_var("RS_GUARD_CHECK_RUN");
+        std::env::remove_var("DEEPSEEK_API_KEY");
+    }
+
+    #[test]
+    fn test_config_apply_args_env_invalid_bool_rejected_by_clap() {
+        // clap validates the env var at parse time, so an invalid bool never
+        // reaches apply_args. This test documents that contract.
+        let _guard = ENV_MUTEX.lock().unwrap();
+        std::env::set_var("DEEPSEEK_API_KEY", "test-key");
+        std::env::set_var("RS_GUARD_CHECK_RUN", "yes");
+        use clap::Parser;
+        let result = crate::cli::Cli::try_parse_from(["rs-guard"]);
+        assert!(
+            result.is_err(),
+            "clap should reject invalid bool env value at parse time"
+        );
+        std::env::remove_var("RS_GUARD_CHECK_RUN");
+        std::env::remove_var("DEEPSEEK_API_KEY");
+    }
+
+    #[test]
+    fn test_validate_check_run_name_empty_rejected() {
+        assert!(validate_check_run_name("").is_err());
+        assert!(validate_check_run_name("   ").is_err());
+    }
+
+    #[test]
+    fn test_validate_check_run_name_valid_accepted() {
+        assert!(validate_check_run_name("rs-guard").is_ok());
+        assert!(validate_check_run_name("my-check").is_ok());
+    }
+
+    #[test]
+    fn test_validate_check_run_name_too_long_rejected() {
+        let long = "x".repeat(CHECK_RUN_NAME_MAX_LEN + 1);
+        assert!(validate_check_run_name(&long).is_err());
+    }
+
+    #[test]
+    fn test_validate_check_run_name_at_limit_accepted() {
+        let exact = "x".repeat(CHECK_RUN_NAME_MAX_LEN);
+        assert!(validate_check_run_name(&exact).is_ok());
+    }
+
+    #[test]
+    fn test_config_from_env_rejects_empty_check_run_name() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        std::env::set_var("DEEPSEEK_API_KEY", "test-key");
+        let toml = TomlConfig {
+            check_run_name: Some("   ".to_string()),
+            ..Default::default()
+        };
+        let result = Config::from_env(Some(toml));
+        assert!(result.is_err(), "empty check_run_name should be rejected");
+        std::env::remove_var("DEEPSEEK_API_KEY");
+    }
+
+    #[test]
+    fn test_parse_bool_env_truthy() {
+        assert!(parse_bool_env("X", "true").unwrap());
+        assert!(parse_bool_env("X", "TRUE").unwrap());
+        assert!(parse_bool_env("X", "1").unwrap());
+        assert!(parse_bool_env("X", "  1  ").unwrap());
+    }
+
+    #[test]
+    fn test_parse_bool_env_falsy() {
+        assert!(!parse_bool_env("X", "false").unwrap());
+        assert!(!parse_bool_env("X", "0").unwrap());
+        assert!(!parse_bool_env("X", "  0  ").unwrap());
+    }
+
+    #[test]
+    fn test_parse_bool_env_invalid() {
+        assert!(parse_bool_env("X", "yes").is_err());
+        assert!(parse_bool_env("X", "").is_err());
     }
 }
