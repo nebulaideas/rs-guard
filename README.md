@@ -28,8 +28,8 @@ Built by [Ismael Marín](https://ismaelmarin.dev) / [@igmarin](https://github.co
 - 📋 **Project rules injection** — Auto-detects `AGENTS.md`, `CLAUDE.md`, and other AI-agent instruction files, layers them into the review prompt. Supports `--rules-file` override, `--no-project-rules` opt-out, and an interactive local picker when multiple files are detected
 - 🔒 **SSRF protection** — URL allowlist per provider; `Authorization` headers never sent to unknown hosts
 - 🧩 **Model variants** — `ModelAlias` (e.g. DeepSeek flash/pro) and `ExtraBody` injection (e.g. Kimi thinking mode) via `--variant`, config, or `ProviderConfig`
-- 📝 **Structured findings & inline comments** — `--findings` requests a `[RS_GUARD_VERDICT_FINDINGS]` JSON block; `--inline-comments` maps findings to diff positions and posts them as inline review comments (implies `--findings`)
-- ✅ **GitHub Check Runs** — `--check-run` publishes a Check Run (verdict→conclusion) for branch protection without `APPROVE`/`REQUEST_CHANGES` permissions; resolves the PR head SHA from `GITHUB_EVENT_PATH`; idempotent retries via `external_id`
+- 📝 **Structured findings & inline comments** (v1.7) — `--findings` requests a `[RS_GUARD_VERDICT_FINDINGS]` JSON block; `--inline-comments` maps findings to diff positions and posts them as inline review comments (implies `--findings`)
+- ✅ **GitHub Check Runs** (v1.7) — `--check-run` publishes a Check Run (verdict→conclusion) for branch protection without `APPROVE`/`REQUEST_CHANGES` permissions; resolves the PR head SHA from `GITHUB_EVENT_PATH`; idempotent retries via `external_id`
 - 📦 **Single binary** — No runtime dependencies; ~3s typical execution
 
 ---

@@ -15,6 +15,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   block is stripped before truncation so only prose is cut. The signature budget
   is always reserved. Applies to both `submit_review` and `submit_inline_review`.
 
+## [1.7.0] - 2026-08-XX
+
+### Added
+
+- **Structured findings mode** (`--findings` / `RS_GUARD_FINDINGS`) — opt-in
+  feature that asks the LLM to emit a structured JSON array of findings via a
+  `[RS_GUARD_VERDICT_FINDINGS]` marker. Severity counts (`critical`, `security`,
+  `important`, `suggestion`) are derived from the findings array when present,
+  falling back to the existing metadata-based tag counting otherwise. Findings
+  counts use a **max-rule** merge: findings can add evidence but never suppress
+  a blocking preliminary verdict. Closes #110.
+- **Inline review comments** (`--inline-comments` / `RS_GUARD_INLINE_COMMENTS`) —
+  posts each structured finding as an inline review comment on the specific file
+  and line in the PR diff. Implies `--findings`. Findings that cannot be mapped
+  to a diff position are appended to the review body. Closes #108.
+- **GitHub Check Runs** (`--check-run` / `RS_GUARD_CHECK_RUN` / `check_run` in
+  `.reviewer.toml`) — creates a GitHub Check Run in addition to the PR review.
+  Conclusion mapping: `APPROVE` → `success`, `REQUEST_CHANGES` → `failure`,
+  `COMMENT` → `neutral`. Custom name via `--check-run-name` /
+  `RS_GUARD_CHECK_RUN_NAME` / `check_run_name`. Head SHA resolved from
+  `GITHUB_EVENT_PATH` (`pull_request.head.sha`) for PR events, with
+  `--check-run-sha` override and `GITHUB_SHA` fallback. Idempotent retries via
+  stable `external_id`. Requires `checks: write` permission. Closes #109.
+- **Diff hunk parser** — unified diff hunks are parsed into `(path, line) → position`
+  maps to support inline comment placement. Closes #108.
 - **GitHub Check Runs** — `--check-run` / `RS_GUARD_CHECK_RUN` / `check_run` in
   `.reviewer.toml` creates a GitHub Check Run in addition to the PR review,
   mapping the verdict to a conclusion (`APPROVE`→`success`,
@@ -35,8 +60,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   **without** reasoning keeps the previous transient-retry behaviour (3 attempts
   with backoff). Successful escalated responses are cached under the original
   configured `max_tokens` so escalation is not repeated on subsequent runs.
-  Seen failing in the wild on PR #130's CI review (66k chars of reasoning, no
-  final answer after 4 identical attempts).
+- **Documentation updated** for all v1.7 features: `USAGE.md`, `CONFIGURATION.md`,
+  `GITHUB_BOT_SETUP.md`, and `README.md`. Closes #112.
 
 ## [1.6.0] - 2026-07-21
 

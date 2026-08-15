@@ -38,6 +38,11 @@ temperature = 0.1               # Sampling temperature (0.0 to 2.0)
 max_tokens = 8192               # Maximum tokens for LLM completion
 llm_timeout_secs = 180          # Total timeout for LLM HTTP calls in seconds (default 120)
 
+# GitHub-native UX (v1.7)
+# check_run = true               # Publish a GitHub Check Run (requires checks: write)
+# check_run_name = "rs-guard"    # Custom Check Run name
+# Note: --findings and --inline-comments are CLI/env only (NOT TOML keys).
+
 # Example for deepseek-v4-pro (complex reasoning)
 # variant = "pro"
 # max_tokens = 16384
@@ -98,6 +103,9 @@ base_url = "https://open.bigmodel.cn/api/paas/v4"
 | `project_rules_enabled` | boolean | `true` | Whether to scan for and load project rules files. Set to `false` to disable auto-detection. Can also be disabled via `--no-project-rules` CLI flag or `RS_GUARD_NO_PROJECT_RULES` env var (any non-empty value disables). |
 | `rules_file` | string | (none) | Path to an explicit project rules file. Overrides auto-detection. Mutually exclusive with `--no-project-rules` / `RS_GUARD_NO_PROJECT_RULES`. Can also be set via `--rules-file` CLI flag or `RS_GUARD_RULES_FILE` env var. |
 | `diff_base` | string | (none) | Local mode only: git base ref for three-dot range review (`git diff <base>...HEAD`) instead of staged changes. Equivalent to `--base` / `RS_GUARD_BASE`. Ignored in CI mode. Blank values are treated as unset. |
+| `output_format` | string | `\"text\"` | Output format: `\"text\"` or `\"json\"`. Equivalent to `--format` / `RS_GUARD_FORMAT`. |
+| `check_run` | boolean | `false` | Create a GitHub Check Run in addition to the PR review. Requires `checks: write` permission. Equivalent to `--check-run` / `RS_GUARD_CHECK_RUN`. |
+| `check_run_name` | string | `\"rs-guard\"` | Custom name for the GitHub Check Run. Equivalent to `--check-run-name` / `RS_GUARD_CHECK_RUN_NAME`. |
 
 #### Provider Section Fields
 
@@ -393,6 +401,11 @@ max_tokens = 8192
 chunk_head_lines = 600   # Preserve more context for large PRs
 chunk_tail_lines = 600
 
+# GitHub-native UX (v1.7)
+check_run = true             # Publish a GitHub Check Run
+check_run_name = "rs-guard"  # Custom Check Run name
+# Note: --findings and --inline-comments are CLI/env only, NOT TOML keys.
+
 [providers.openrouter]
 api_key_env = "OPENROUTER_API_KEY"
 base_url = "https://openrouter.ai/api/v1"
@@ -464,3 +477,36 @@ Precedence for the base ref value itself: CLI `--base` > `RS_GUARD_BASE` > TOML 
 Diff source precedence: `--diff-file` > CI mode > base range > staged diff.
 
 See [LOCAL_MODE.md — Branch-range review](LOCAL_MODE.md#branch-range-review---base) for validation rules and examples.
+
+
+## GitHub-native UX features (v1.7)
+
+### Structured findings
+
+| Source | Key |
+|--------|-----|
+| CLI | `--findings` |
+| Environment | `RS_GUARD_FINDINGS` |
+| TOML | _(not available — CLI/env only; rejected as unknown key)_ |
+
+When enabled, rs-guard instructs the LLM to emit a `[RS_GUARD_VERDICT_FINDINGS]` JSON block after the prose overview. Severity counts (`critical`, `security`, `important`, `suggestion`) are derived from the findings array rather than tag counting. Findings counts use a **max-rule** merge: findings can add evidence but never suppress a blocking preliminary verdict.
+
+### Inline review comments
+
+| Source | Key |
+|--------|-----|
+| CLI | `--inline-comments` |
+| Environment | `RS_GUARD_INLINE_COMMENTS` |
+| TOML | _(not available — CLI/env only; rejected as unknown key)_ |
+
+Posts each structured finding as an inline comment on the diff. Implies `--findings`. Findings that cannot be mapped to a diff position are appended to the review body.
+
+### GitHub Check Runs
+
+| Source | Key |
+|--------|-----|
+| CLI | `--check-run` / `--check-run-name` |
+| Environment | `RS_GUARD_CHECK_RUN` / `RS_GUARD_CHECK_RUN_NAME` |
+| TOML | `check_run = true` / `check_run_name = "rs-guard"` |
+
+Creates a GitHub Check Run in addition to the PR review. Conclusion mapping: `APPROVE` → `success`, `REQUEST_CHANGES` → `failure`, `COMMENT` → `neutral`. Requires `checks: write` on the GitHub token.
