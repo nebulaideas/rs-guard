@@ -22,7 +22,8 @@
 
 use crate::error::RsGuardError;
 use crate::llm::{
-    build_llm_client, chat_messages, providers, send_chat_request, ChatRequest, LlmProvider,
+    build_llm_client, chat_messages, providers, send_chat_request, ChatCompletionResult,
+    ChatRequest, LlmProvider,
 };
 use async_trait::async_trait;
 use std::borrow::Cow;
@@ -158,7 +159,7 @@ impl LlmProvider for GenericOpenAiCompatibleClient {
         system_prompt: &str,
         user_message: &str,
         temperature: f32,
-    ) -> Result<String, RsGuardError> {
+    ) -> Result<ChatCompletionResult, RsGuardError> {
         let (effective_model, extra_body) =
             providers::apply_variant(self.meta.name, &self.model, self.variant.as_deref())?;
 
@@ -215,7 +216,34 @@ mod tests {
         let client = build("deepseek", &mock_server.uri());
         assert_eq!(client.name(), "deepseek");
         let result = client.chat_completion("system", "user", 0.1).await.unwrap();
-        assert_eq!(result, "OK");
+        assert_eq!(result.content, "OK");
+        // No usage in response → None.
+        assert!(result.usage.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_generic_extracts_api_usage() {
+        let mock_server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/chat/completions"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "choices": [{ "message": { "content": "Review complete" } }],
+                "usage": {
+                    "prompt_tokens": 500,
+                    "completion_tokens": 200,
+                    "total_tokens": 700
+                }
+            })))
+            .mount(&mock_server)
+            .await;
+
+        let client = build("deepseek", &mock_server.uri());
+        let result = client.chat_completion("system", "user", 0.1).await.unwrap();
+        assert_eq!(result.content, "Review complete");
+        let usage = result.usage.expect("usage should be present from API");
+        assert_eq!(usage.prompt_tokens, Some(500));
+        assert_eq!(usage.completion_tokens, Some(200));
+        assert_eq!(usage.total_tokens, Some(700));
     }
 
     #[tokio::test]
@@ -248,7 +276,7 @@ mod tests {
 
         let client = build("qwen", &mock_server.uri());
         let result = client.chat_completion("system", "user", 0.1).await.unwrap();
-        assert_eq!(result, "qwen ok");
+        assert_eq!(result.content, "qwen ok");
     }
 
     #[tokio::test]
@@ -297,7 +325,7 @@ mod tests {
         let client =
             build("openai", &mock_server.uri()).with_result_format(Some("json_object".to_string()));
         let result = client.chat_completion("system", "user", 0.1).await.unwrap();
-        assert_eq!(result, "override ok");
+        assert_eq!(result.content, "override ok");
     }
 
     #[tokio::test]
@@ -316,7 +344,7 @@ mod tests {
 
         let client = build("qwen", &mock_server.uri()).with_result_format(Some(String::new()));
         let result = client.chat_completion("system", "user", 0.1).await.unwrap();
-        assert_eq!(result, "fallback ok");
+        assert_eq!(result.content, "fallback ok");
     }
 
     #[tokio::test]
@@ -337,7 +365,7 @@ mod tests {
         let client =
             build("qwen", &mock_server.uri()).with_result_format(Some("custom_format".to_string()));
         let result = client.chat_completion("system", "user", 0.1).await.unwrap();
-        assert_eq!(result, "precedence ok");
+        assert_eq!(result.content, "precedence ok");
     }
 
     #[tokio::test]
@@ -358,7 +386,7 @@ mod tests {
 
         let client = build("openrouter", &mock_server.uri());
         let result = client.chat_completion("system", "user", 0.1).await.unwrap();
-        assert_eq!(result, "openrouter ok");
+        assert_eq!(result.content, "openrouter ok");
     }
 
     #[tokio::test]
@@ -384,7 +412,7 @@ mod tests {
         .unwrap()
         .with_base_url(mock_server.uri());
         let result = client.chat_completion("system", "user", 0.1).await.unwrap();
-        assert_eq!(result, "override ok");
+        assert_eq!(result.content, "override ok");
     }
 
     #[tokio::test]
@@ -415,7 +443,7 @@ mod tests {
         .unwrap()
         .with_base_url(mock_server.uri());
         let result = client.chat_completion("system", "user", 0.1).await.unwrap();
-        assert_eq!(result, "appended ok");
+        assert_eq!(result.content, "appended ok");
     }
 
     #[tokio::test]
@@ -445,7 +473,7 @@ mod tests {
         .unwrap()
         .with_base_url(mock_server.uri());
         let result = client.chat_completion("system", "user", 0.1).await.unwrap();
-        assert_eq!(result, "both overridden");
+        assert_eq!(result.content, "both overridden");
     }
 
     #[tokio::test]
@@ -465,7 +493,7 @@ mod tests {
         let client =
             build("kimi", &mock_server.uri()).with_variant(Some("thinking-on".to_string()));
         let result = client.chat_completion("system", "user", 0.1).await.unwrap();
-        assert_eq!(result, "kimi ok");
+        assert_eq!(result.content, "kimi ok");
     }
 
     #[tokio::test]
@@ -486,7 +514,7 @@ mod tests {
             .with_model("ignored-base")
             .with_variant(Some("flash".to_string()));
         let result = client.chat_completion("system", "user", 0.1).await.unwrap();
-        assert_eq!(result, "flash ok");
+        assert_eq!(result.content, "flash ok");
     }
 
     #[tokio::test]

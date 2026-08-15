@@ -276,7 +276,7 @@ async fn obtain_llm_response_with_composed_prompt(
     cache: &DiffCache,
     diff_content: &str,
     composed_prompt: &str,
-) -> anyhow::Result<(String, bool)> {
+) -> anyhow::Result<(String, bool, Option<crate::llm::TokenUsage>)> {
     let base_url = effective_base_url(config);
 
     if let Some(cached) = cache.get_with_project_rules(
@@ -293,7 +293,8 @@ async fn obtain_llm_response_with_composed_prompt(
         config.findings,
     ) {
         log::info!("Cache hit — using cached LLM response");
-        return Ok((cached, false));
+        // Cache hits don't have usage data — fall back to estimates.
+        return Ok((cached, false, None));
     }
 
     if !config.is_ci {
@@ -304,12 +305,12 @@ async fn obtain_llm_response_with_composed_prompt(
             println!("{}", msg);
         }
     }
-    let response = call_llm_with_budget_escalation(config, composed_prompt, diff_content)
+    let result = call_llm_with_budget_escalation(config, composed_prompt, diff_content)
         .await
         .context("LLM API call failed")?;
 
     if !config.is_ci {
-        let msg = format!("✅ Response received ({} chars)", response.len());
+        let msg = format!("✅ Response received ({} chars)", result.content.len());
         if config.output_format == OutputFormat::Json {
             eprintln!("{}", msg);
         } else {
@@ -317,7 +318,7 @@ async fn obtain_llm_response_with_composed_prompt(
         }
     }
 
-    Ok((response, !config.no_cache))
+    Ok((result.content, !config.no_cache, result.usage))
 }
 
 /// Upper bound for automatic `max_tokens` escalation when a thinking model
@@ -357,7 +358,7 @@ async fn call_llm_with_budget_escalation(
     config: &Config,
     composed_prompt: &str,
     diff_content: &str,
-) -> anyhow::Result<String> {
+) -> anyhow::Result<crate::llm::ChatCompletionResult> {
     let mut attempt_max_tokens = config.provider_config.max_tokens;
 
     loop {
@@ -464,8 +465,9 @@ fn write_review_outputs(
     verdict: &crate::verdict::Verdict,
     state: &ReviewState,
     review_config: &ReviewConfig,
-    estimated_tokens_in: usize,
-    estimated_tokens_out: usize,
+    tokens_in: u64,
+    tokens_out: u64,
+    token_source: &str,
     latency: std::time::Duration,
     estimated_cost_cents: Option<f64>,
     secrets_redacted_count: u32,
@@ -485,8 +487,9 @@ fn write_review_outputs(
         provider: config.provider.clone(),
         model: config.model.clone(),
         variant: config.variant.clone(),
-        estimated_tokens_in,
-        estimated_tokens_out,
+        estimated_tokens_in: tokens_in as usize,
+        estimated_tokens_out: tokens_out as usize,
+        token_source: token_source.to_string(),
         latency_secs: latency.as_secs_f64(),
         estimated_cost_cents,
         diff_lines: diff.line_count,
@@ -627,8 +630,9 @@ fn print_ci_summary(
     diff: &DiffResult,
     verdict: &crate::verdict::Verdict,
     state: &ReviewState,
-    estimated_tokens_in: usize,
-    estimated_tokens_out: usize,
+    tokens_in: u64,
+    tokens_out: u64,
+    token_source: &str,
     latency: std::time::Duration,
     estimated_cost_cents: Option<f64>,
 ) {
@@ -643,8 +647,13 @@ fn print_ci_summary(
     if let Some(ref v) = config.variant {
         println!("Variant:       {}", v);
     }
-    println!("Est. Tokens In:  {}", estimated_tokens_in);
-    println!("Est. Tokens Out: {}", estimated_tokens_out);
+    let token_label = match token_source {
+        "api" => "Tokens",
+        "mixed" => "Tokens (mixed)",
+        _ => "Est. Tokens",
+    };
+    println!("{} In:  {}", token_label, tokens_in);
+    println!("{} Out: {}", token_label, tokens_out);
     println!("Latency:     {:.1}s", latency.as_secs_f64());
     println!(
         "Est. Cost:   {}",
@@ -669,8 +678,9 @@ async fn handle_ci_output(
     state: &ReviewState,
     was_chunked: bool,
     removed_lines: usize,
-    estimated_tokens_in: usize,
-    estimated_tokens_out: usize,
+    tokens_in: u64,
+    tokens_out: u64,
+    token_source: &str,
     latency: std::time::Duration,
     estimated_cost_cents: Option<f64>,
 ) -> anyhow::Result<PipelineResult> {
@@ -773,8 +783,9 @@ async fn handle_ci_output(
             diff,
             verdict,
             state,
-            estimated_tokens_in,
-            estimated_tokens_out,
+            tokens_in,
+            tokens_out,
+            token_source,
             latency,
             estimated_cost_cents,
         );
@@ -914,15 +925,40 @@ pub async fn run_pipeline(
         check_token_warning(estimated_tokens_in, context_window, &config.provider);
     }
 
-    let (llm_response, should_cache) =
+    let (llm_response, should_cache, api_usage) =
         obtain_llm_response_with_composed_prompt(&config, &cache, &diff_content, &composed_prompt)
             .await?;
     let latency = start.elapsed();
-    let estimated_tokens_out = estimate_tokens(&llm_response);
+
+    // Prefer API-reported token usage over char heuristics (v1.8 #115).
+    // Only label as "api" when both prompt and completion tokens are present;
+    // a partial usage object is labeled "mixed" to avoid misleading metrics.
+    let (tokens_in, tokens_out, token_source) = match &api_usage {
+        Some(u) if u.prompt_tokens.is_some() && u.completion_tokens.is_some() => {
+            // Both counts from API — unwrap_or(0) is safe due to the guard.
+            let in_tokens = u.prompt_tokens.unwrap_or(0);
+            let out_tokens = u.completion_tokens.unwrap_or(0);
+            (in_tokens, out_tokens, "api")
+        }
+        Some(u) if u.has_any() => {
+            // Partial usage — fill missing direction with estimate.
+            let in_tokens = u.prompt_tokens.unwrap_or(estimated_tokens_in as u64);
+            let out_tokens = u
+                .completion_tokens
+                .unwrap_or(estimate_tokens(&llm_response) as u64);
+            (in_tokens, out_tokens, "mixed")
+        }
+        _ => (
+            estimated_tokens_in as u64,
+            estimate_tokens(&llm_response) as u64,
+            "estimate",
+        ),
+    };
+
     let estimated_cost_cents = estimate_cost_cents(
         &config.provider,
-        estimated_tokens_in as u64,
-        estimated_tokens_out as u64,
+        tokens_in,
+        tokens_out,
         config.pricing.as_ref(),
     );
 
@@ -967,8 +1003,9 @@ pub async fn run_pipeline(
         &verdict,
         &state,
         &review_config,
-        estimated_tokens_in,
-        estimated_tokens_out,
+        tokens_in,
+        tokens_out,
+        token_source,
         latency,
         estimated_cost_cents,
         u32::try_from(secrets_redacted_count).unwrap_or(u32::MAX),
@@ -985,8 +1022,9 @@ pub async fn run_pipeline(
             provider: config.provider.clone(),
             model: config.model.clone(),
             variant: config.variant.clone(),
-            estimated_tokens_in,
-            estimated_tokens_out,
+            estimated_tokens_in: tokens_in as usize,
+            estimated_tokens_out: tokens_out as usize,
+            token_source: token_source.to_string(),
             latency_secs: latency.as_secs_f64(),
             estimated_cost_cents,
             diff_lines: diff.line_count,
@@ -1006,8 +1044,9 @@ pub async fn run_pipeline(
             &state,
             was_chunked,
             removed_lines,
-            estimated_tokens_in,
-            estimated_tokens_out,
+            tokens_in,
+            tokens_out,
+            token_source,
             latency,
             estimated_cost_cents,
         )

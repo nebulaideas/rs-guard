@@ -80,7 +80,7 @@ async fn test_deepseek_provider_success() {
         .chat_completion("You are a reviewer.", "diff content", 0.1)
         .await;
     assert!(result.is_ok());
-    assert!(result.unwrap().contains("POSITIVE"));
+    assert!(result.unwrap().content.contains("POSITIVE"));
 }
 
 #[tokio::test]
@@ -99,7 +99,7 @@ async fn test_deepseek_trait_dispatch() {
         .chat_completion("You are a reviewer.", "diff content", 0.1)
         .await;
     assert!(result.is_ok());
-    assert!(result.unwrap().contains("Trait dispatch works"));
+    assert!(result.unwrap().content.contains("Trait dispatch works"));
 }
 
 #[tokio::test]
@@ -114,7 +114,10 @@ async fn test_kimi_trait_dispatch() {
         .chat_completion("You are a reviewer.", "diff content", 0.1)
         .await;
     assert!(result.is_ok());
-    assert!(result.unwrap().contains("Kimi trait dispatch works"));
+    assert!(result
+        .unwrap()
+        .content
+        .contains("Kimi trait dispatch works"));
 }
 
 #[tokio::test]
@@ -129,7 +132,10 @@ async fn test_qwen_trait_dispatch() {
         .chat_completion("You are a reviewer.", "diff content", 0.1)
         .await;
     assert!(result.is_ok());
-    assert!(result.unwrap().contains("Qwen trait dispatch works"));
+    assert!(result
+        .unwrap()
+        .content
+        .contains("Qwen trait dispatch works"));
 }
 
 #[tokio::test]
@@ -148,7 +154,10 @@ async fn test_openrouter_trait_dispatch() {
         .chat_completion("You are a reviewer.", "diff content", 0.1)
         .await;
     assert!(result.is_ok());
-    assert!(result.unwrap().contains("OpenRouter trait dispatch works"));
+    assert!(result
+        .unwrap()
+        .content
+        .contains("OpenRouter trait dispatch works"));
 }
 
 #[tokio::test]
@@ -167,7 +176,10 @@ async fn test_openai_trait_dispatch() {
         .chat_completion("You are a reviewer.", "diff content", 0.1)
         .await;
     assert!(result.is_ok());
-    assert!(result.unwrap().contains("OpenAI trait dispatch works"));
+    assert!(result
+        .unwrap()
+        .content
+        .contains("OpenAI trait dispatch works"));
 }
 
 #[tokio::test]
@@ -182,7 +194,10 @@ async fn test_grok_trait_dispatch() {
         .chat_completion("You are a reviewer.", "diff content", 0.1)
         .await;
     assert!(result.is_ok());
-    assert!(result.unwrap().contains("Grok trait dispatch works"));
+    assert!(result
+        .unwrap()
+        .content
+        .contains("Grok trait dispatch works"));
 }
 
 #[tokio::test]
@@ -197,7 +212,7 @@ async fn test_glm_trait_dispatch() {
         .chat_completion("You are a reviewer.", "diff content", 0.1)
         .await;
     assert!(result.is_ok());
-    assert!(result.unwrap().contains("GLM trait dispatch works"));
+    assert!(result.unwrap().content.contains("GLM trait dispatch works"));
 }
 
 #[test]
@@ -223,7 +238,7 @@ async fn test_factory_applies_base_url_override() {
         .chat_completion("You are a reviewer.", "diff content", 0.1)
         .await;
     assert!(result.is_ok());
-    assert!(result.unwrap().contains("Custom base URL works"));
+    assert!(result.unwrap().content.contains("Custom base URL works"));
 }
 
 #[tokio::test]
@@ -239,7 +254,7 @@ async fn test_factory_applies_max_tokens() {
         .chat_completion("You are a reviewer.", "diff content", 0.1)
         .await;
     assert!(result.is_ok());
-    assert!(result.unwrap().contains("max_tokens applied"));
+    assert!(result.unwrap().content.contains("max_tokens applied"));
 }
 
 #[tokio::test]
@@ -264,7 +279,10 @@ async fn test_factory_applies_result_format_override() {
         .chat_completion("You are a reviewer.", "diff content", 0.1)
         .await;
     assert!(result.is_ok());
-    assert!(result.unwrap().contains("result_format override ok"));
+    assert!(result
+        .unwrap()
+        .content
+        .contains("result_format override ok"));
 }
 
 #[tokio::test]
@@ -290,7 +308,7 @@ async fn test_deepseek_variant_flash_maps_to_model_id() {
         .chat_completion("You are a reviewer.", "diff content", 0.1)
         .await;
     assert!(result.is_ok());
-    assert!(result.unwrap().contains("Flash OK"));
+    assert!(result.unwrap().content.contains("Flash OK"));
 }
 
 #[tokio::test]
@@ -316,7 +334,7 @@ async fn test_deepseek_variant_pro_maps_to_model_id() {
         .chat_completion("You are a reviewer.", "diff content", 0.1)
         .await;
     assert!(result.is_ok());
-    assert!(result.unwrap().contains("Pro OK"));
+    assert!(result.unwrap().content.contains("Pro OK"));
 }
 
 #[tokio::test]
@@ -359,7 +377,7 @@ async fn test_openai_variant_ignored_sends_configured_model() {
         .chat_completion("You are a reviewer.", "diff content", 0.1)
         .await;
     assert!(result.is_ok());
-    assert!(result.unwrap().contains("ignore variant OK"));
+    assert!(result.unwrap().content.contains("ignore variant OK"));
 }
 
 #[tokio::test]
@@ -403,7 +421,7 @@ async fn test_kimi_variant_thinking_on_sends_thinking_enabled() {
         .chat_completion("You are a reviewer.", "diff content", 0.1)
         .await;
     assert!(result.is_ok());
-    assert!(result.unwrap().contains("thinking-on OK"));
+    assert!(result.unwrap().content.contains("thinking-on OK"));
 }
 
 #[tokio::test]
@@ -428,7 +446,7 @@ async fn test_kimi_variant_thinking_off_sends_thinking_disabled() {
         .chat_completion("You are a reviewer.", "diff content", 0.1)
         .await;
     assert!(result.is_ok());
-    assert!(result.unwrap().contains("thinking-off OK"));
+    assert!(result.unwrap().content.contains("thinking-off OK"));
 }
 
 #[tokio::test]
@@ -457,7 +475,7 @@ async fn test_openrouter_default_referer_header_sent() {
         .chat_completion("You are a reviewer.", "diff content", 0.1)
         .await;
     assert!(result.is_ok());
-    assert!(result.unwrap().contains("default referer ok"));
+    assert!(result.unwrap().content.contains("default referer ok"));
 }
 
 #[tokio::test]
@@ -481,7 +499,7 @@ async fn test_openrouter_custom_referer_override() {
         .chat_completion("You are a reviewer.", "diff content", 0.1)
         .await;
     assert!(result.is_ok());
-    assert!(result.unwrap().contains("override referer ok"));
+    assert!(result.unwrap().content.contains("override referer ok"));
 }
 
 #[tokio::test]
@@ -504,7 +522,7 @@ async fn test_qwen_result_format_sent() {
         .chat_completion("You are a reviewer.", "diff content", 0.1)
         .await;
     assert!(result.is_ok());
-    assert!(result.unwrap().contains("qwen result_format ok"));
+    assert!(result.unwrap().content.contains("qwen result_format ok"));
 }
 
 // ============================================================================

@@ -25,10 +25,15 @@ pub struct ReviewMetrics {
     /// Provider-specific model variant, if any.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub variant: Option<String>,
-    /// Estimated input tokens sent to the LLM (character count / 4 heuristic).
+    /// Input tokens sent to the LLM. From API `usage` when available, otherwise
+    /// estimated via char heuristic.
     pub estimated_tokens_in: usize,
-    /// Estimated output tokens received from the LLM (character count / 4 heuristic).
+    /// Output tokens received from the LLM. From API `usage` when available,
+    /// otherwise estimated via char heuristic.
     pub estimated_tokens_out: usize,
+    /// Source of token counts: `"api"` (from provider response) or `"estimate"`
+    /// (char heuristic). v1.8 #115.
+    pub token_source: String,
     /// API latency in seconds.
     pub latency_secs: f64,
     /// Estimated cost in cents (USD). `None` when pricing is unknown (F9).
@@ -73,6 +78,8 @@ pub struct ReviewResultJson {
     pub estimated_tokens_in: usize,
     /// Estimated output tokens.
     pub estimated_tokens_out: usize,
+    /// Source of token counts: `"api"` or `"estimate"`. v1.8 #115.
+    pub token_source: String,
     /// Latency in seconds.
     pub latency_secs: f64,
     /// Estimated cost in cents, if known.
@@ -338,6 +345,7 @@ mod tests {
             variant: None,
             estimated_tokens_in: 4230,
             estimated_tokens_out: 892,
+            token_source: "estimate".to_string(),
             latency_secs: 8.4,
             estimated_cost_cents: Some(3.0),
             diff_lines: 150,
@@ -672,6 +680,7 @@ mod tests {
             variant: None,
             estimated_tokens_in: 100,
             estimated_tokens_out: 50,
+            token_source: "estimate".into(),
             latency_secs: 1.5,
             estimated_cost_cents: Some(0.02),
             diff_lines: 42,

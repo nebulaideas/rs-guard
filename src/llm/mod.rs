@@ -95,11 +95,74 @@ pub struct ChatMessageResponse {
     pub reasoning_content: Option<String>,
 }
 
+/// Token usage information returned by OpenAI-compatible APIs.
+///
+/// Most providers include a `usage` object in the response with
+/// `prompt_tokens` and `completion_tokens`. When present, these are
+/// preferred over character-based heuristics for metrics and cost
+/// estimation (v1.8 #115).
+#[derive(Debug, Default, Deserialize)]
+pub struct TokenUsage {
+    /// Number of tokens in the prompt (input).
+    #[serde(default)]
+    pub prompt_tokens: Option<u64>,
+    /// Number of tokens in the completion (output).
+    #[serde(default)]
+    pub completion_tokens: Option<u64>,
+    /// Total tokens (some providers include this; computed otherwise).
+    #[serde(default)]
+    pub total_tokens: Option<u64>,
+}
+
+impl TokenUsage {
+    /// Returns `true` if at least one of `prompt_tokens` or `completion_tokens`
+    /// is present. `total_tokens` alone does not count — the pipeline needs
+    /// per-direction counts to be useful.
+    #[must_use]
+    pub fn has_any(&self) -> bool {
+        self.prompt_tokens.is_some() || self.completion_tokens.is_some()
+    }
+}
+
 /// Parsed response from a chat completion API call.
 #[derive(Debug, Deserialize)]
 pub struct ChatResponse {
     /// List of completion choices returned by the model.
     pub choices: Vec<ChatChoice>,
+    /// Optional token usage from the API (v1.8 #115).
+    #[serde(default)]
+    pub usage: Option<TokenUsage>,
+}
+
+/// Result of a chat completion call, including optional API-reported usage.
+///
+/// When the provider returns `usage` data (prompt/completion tokens), it is
+/// captured here so the pipeline can prefer real token counts over character
+/// heuristics for metrics and cost estimation (v1.8 #115).
+#[derive(Debug)]
+pub struct ChatCompletionResult {
+    /// The generated text content from the LLM.
+    pub content: String,
+    /// Optional token usage from the API response.
+    pub usage: Option<TokenUsage>,
+}
+
+impl ChatCompletionResult {
+    /// Creates a result with content but no usage data (for cache hits or
+    /// providers that don't report usage).
+    #[must_use]
+    pub fn from_content(content: String) -> Self {
+        Self {
+            content,
+            usage: None,
+        }
+    }
+}
+
+impl From<String> for ChatCompletionResult {
+    fn from(content: String) -> Self {
+        Self::from_content(content)
+    }
 }
 
 /// Async trait for LLM provider implementations.
@@ -124,7 +187,7 @@ pub trait LlmProvider: Send + Sync + std::fmt::Debug {
         system_prompt: &str,
         user_message: &str,
         temperature: f32,
-    ) -> Result<String, RsGuardError>;
+    ) -> Result<ChatCompletionResult, RsGuardError>;
 }
 
 /// Dynamic-dispatch handle for an LLM provider.
@@ -185,7 +248,7 @@ pub(crate) async fn send_chat_request<B: Serialize + Send>(
     url: &str,
     request: &B,
     provider_name: &str,
-) -> Result<String, RsGuardError> {
+) -> Result<ChatCompletionResult, RsGuardError> {
     log::debug!(
         "[{}] POST {} (effective params logged at debug level)",
         provider_name,
@@ -269,7 +332,10 @@ pub(crate) async fn send_chat_request<B: Serialize + Send>(
 /// Uses loose [`Value`] traversal instead of strict structs so provider-specific
 /// shapes (nullable `content`, multimodal content arrays, extra choice fields)
 /// do not fail deserialization.
-fn parse_completion_response_body(body: &str, provider_name: &str) -> Result<String, LlmError> {
+fn parse_completion_response_body(
+    body: &str,
+    provider_name: &str,
+) -> Result<ChatCompletionResult, LlmError> {
     let value: Value = serde_json::from_str(body).map_err(|e| LlmError {
         provider: provider_name.to_string(),
         status: 0,
@@ -298,7 +364,20 @@ fn parse_completion_response_body(body: &str, provider_name: &str) -> Result<Str
     let content = extract_text_field(message.get("content"));
     let reasoning_content = extract_optional_text_field(message.get("reasoning_content"));
 
-    resolve_assistant_content(&content, reasoning_content.as_deref(), provider_name)
+    let resolved_content =
+        resolve_assistant_content(&content, reasoning_content.as_deref(), provider_name)?;
+
+    // Extract usage data if present (v1.8 #115).
+    let usage = value.get("usage").map(|u| TokenUsage {
+        prompt_tokens: u.get("prompt_tokens").and_then(Value::as_u64),
+        completion_tokens: u.get("completion_tokens").and_then(Value::as_u64),
+        total_tokens: u.get("total_tokens").and_then(Value::as_u64),
+    });
+
+    Ok(ChatCompletionResult {
+        content: resolved_content,
+        usage,
+    })
 }
 
 /// Extracts text from a chat `content` or `reasoning_content` field.
@@ -818,9 +897,9 @@ mod tests {
         .await
         .unwrap();
 
-        assert_eq!(result, "Final review verdict here.");
+        assert_eq!(result.content, "Final review verdict here.");
         assert!(
-            !result.contains("SECRET REASONING"),
+            !result.content.contains("SECRET REASONING"),
             "reasoning_content must not appear in the content returned to pipeline"
         );
     }
@@ -847,7 +926,7 @@ mod tests {
         .to_string();
 
         let result = parse_completion_response_body(&body, "deepseek").unwrap();
-        assert_eq!(result, "Review OK");
+        assert_eq!(result.content, "Review OK");
     }
 
     #[tokio::test]
@@ -886,7 +965,68 @@ mod tests {
         )
         .await
         .unwrap();
-        assert_eq!(result, "Array content OK");
+        assert_eq!(result.content, "Array content OK");
+    }
+
+    #[test]
+    fn test_parse_usage_from_response() {
+        let body = serde_json::json!({
+            "choices": [{ "message": { "content": "Review OK" } }],
+            "usage": {
+                "prompt_tokens": 1234,
+                "completion_tokens": 567,
+                "total_tokens": 1801
+            }
+        })
+        .to_string();
+
+        let result = parse_completion_response_body(&body, "deepseek").unwrap();
+        assert_eq!(result.content, "Review OK");
+        let usage = result.usage.expect("usage should be present");
+        assert_eq!(usage.prompt_tokens, Some(1234));
+        assert_eq!(usage.completion_tokens, Some(567));
+        assert_eq!(usage.total_tokens, Some(1801));
+        assert!(usage.has_any());
+    }
+
+    #[test]
+    fn test_parse_usage_absent_when_not_in_response() {
+        let body = serde_json::json!({
+            "choices": [{ "message": { "content": "Review OK" } }]
+        })
+        .to_string();
+
+        let result = parse_completion_response_body(&body, "deepseek").unwrap();
+        assert_eq!(result.content, "Review OK");
+        assert!(result.usage.is_none(), "usage should be None when absent");
+    }
+
+    #[test]
+    fn test_parse_usage_partial_fields() {
+        let body = serde_json::json!({
+            "choices": [{ "message": { "content": "Review OK" } }],
+            "usage": {
+                "prompt_tokens": 100
+            }
+        })
+        .to_string();
+
+        let result = parse_completion_response_body(&body, "deepseek").unwrap();
+        let usage = result.usage.expect("usage should be present");
+        assert_eq!(usage.prompt_tokens, Some(100));
+        assert_eq!(usage.completion_tokens, None);
+        assert_eq!(usage.total_tokens, None);
+        assert!(usage.has_any());
+    }
+
+    #[test]
+    fn test_token_usage_has_any_false_when_empty() {
+        let usage = TokenUsage {
+            prompt_tokens: None,
+            completion_tokens: None,
+            total_tokens: None,
+        };
+        assert!(!usage.has_any());
     }
 
     #[tokio::test]
@@ -926,8 +1066,8 @@ mod tests {
         .await;
 
         assert!(result.is_ok());
-        let content = result.unwrap();
-        assert_eq!(content, "Review text");
-        assert!(!content.contains("Internal reasoning"));
+        let result = result.unwrap();
+        assert_eq!(result.content, "Review text");
+        assert!(!result.content.contains("Internal reasoning"));
     }
 }
