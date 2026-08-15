@@ -1573,6 +1573,7 @@ diff --git a/a.rs b/a.rs
         }
     }
 
+    #[serial_test::serial]
     #[test]
     fn test_resolve_check_run_sha_explicit_wins() {
         let _g = EnvGuard::remove("GITHUB_SHA");
@@ -1581,6 +1582,7 @@ diff --git a/a.rs b/a.rs
         assert_eq!(sha, "explicit-sha-123");
     }
 
+    #[serial_test::serial]
     #[test]
     fn test_resolve_check_run_sha_explicit_empty_falls_through() {
         let _g = EnvGuard::set("GITHUB_SHA", "fallback-sha");
@@ -1589,6 +1591,7 @@ diff --git a/a.rs b/a.rs
         assert_eq!(sha, "fallback-sha");
     }
 
+    #[serial_test::serial]
     #[test]
     fn test_resolve_check_run_sha_from_event_path() {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -1603,6 +1606,7 @@ diff --git a/a.rs b/a.rs
         assert_eq!(sha, "pr-head-sha-abc");
     }
 
+    #[serial_test::serial]
     #[test]
     fn test_resolve_check_run_sha_event_path_not_pull_request_falls_back() {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -1615,6 +1619,7 @@ diff --git a/a.rs b/a.rs
         assert_eq!(sha, "push-sha");
     }
 
+    #[serial_test::serial]
     #[test]
     fn test_resolve_check_run_sha_no_event_path_uses_github_sha() {
         let _g = EnvGuard::set("GITHUB_SHA", "just-sha");
@@ -1623,6 +1628,7 @@ diff --git a/a.rs b/a.rs
         assert_eq!(sha, "just-sha");
     }
 
+    #[serial_test::serial]
     #[test]
     fn test_resolve_check_run_sha_nothing_set_errors() {
         let _g = EnvGuard::remove("GITHUB_SHA");
@@ -1637,6 +1643,7 @@ diff --git a/a.rs b/a.rs
         );
     }
 
+    #[serial_test::serial]
     #[test]
     fn test_resolve_check_run_sha_unreadable_event_path_falls_back() {
         let _g = EnvGuard::set("GITHUB_EVENT_PATH", "/nonexistent/path/event.json");
