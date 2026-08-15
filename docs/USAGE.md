@@ -811,9 +811,15 @@ The diff exceeds 100 KB / 1500 lines. In CI: an explanatory `COMMENT` is posted.
 
 The diff was truncated (400 head + 400 tail preserved). Expected for large PRs.
 
-### `Review body exceeds GitHub's character limit`
+### `Review body was truncated …`
 
-GitHub has a 65536 character limit for review bodies. If your review exceeds this:
+GitHub has a 65536 character limit for review bodies. As of v1.7, rs-guard
+**truncates** the review body on a UTF-8 char boundary and appends a visible
+`…[truncated: review body exceeds GitHub's 65,536 character limit]` notice so
+the review is always submitted (never failed solely for being too long). The
+findings JSON block is stripped before truncation, so only prose is cut.
+
+If you see this notice frequently:
 
 - Use a shorter prompt (e.g., remove detailed instructions)
 - The diff will be chunked automatically for large PRs
