@@ -71,7 +71,7 @@ Requires Rust toolchain. Use this if you need a custom build or want to contribu
 
 #### Prerequisites
 
-Install Rust (requires version 1.82+):
+Install Rust (requires version 1.88+):
 
 ```bash
 # Linux/macOS
@@ -79,7 +79,7 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 source $HOME/.cargo/env
 
 # Verify installation
-rustc --version  # Should be 1.82 or higher
+rustc --version  # Should be 1.88 or higher
 cargo --version
 ```
 
@@ -424,13 +424,13 @@ Download the matching binary variant.
 
 ### Build fails with "Rust version too old"
 
-**Cause:** Rust version < 1.82.
+**Cause:** Rust version < 1.88.
 
 **Solution:**
 
 ```bash
 rustup update stable
-rustc --version  # Verify >= 1.82
+rustc --version  # Verify >= 1.88
 ```
 
 ### "SSL certificate error" during download

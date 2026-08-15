@@ -15,6 +15,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   block is stripped before truncation so only prose is cut. The signature budget
   is always reserved. Applies to both `submit_review` and `submit_inline_review`.
 
+### Changed
+
+- **Removed `rust-toolchain.toml` pin (#135)** — the toolchain pin to 1.97.1
+  (introduced when wiremock 0.6.5 required `let`-chains, stabilized in Rust
+  1.88) has been removed. CI already uses `stable` via `dtolnay/rust-toolchain`.
+  The `Cargo.toml` `rust-version = "1.88"` remains as the declared MSRV.
+  Evaluation: wiremock 0.6.5 is the latest version (no upgrade available);
+  `httpmock` has the same 1.88 MSRV; `mockito` (MSRV 1.70) lacks
+  `body_partial_json` matching used across 8 test files. Accepting 1.88 as the
+  permanent MSRV is the pragmatic choice — Rust 1.88 is over a year old.
+
 ## [1.7.0] - 2026-08-XX
 
 ### Added
