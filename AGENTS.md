@@ -8,7 +8,7 @@
 
 **rs-guard** is a Rust-based AI code review CLI tool. It fetches Pull Request diffs from GitHub, sends them to an LLM provider for review, parses a structured verdict from the response, and submits the review state (`APPROVE`, `REQUEST_CHANGES`, or `COMMENT`) back to GitHub — all in a single execution.
 
-**Current Status:** Phases 1–7 are complete; v1.6.0 released. The crate is published on crates.io and registered on crates.ai.
+**Current Status:** Phases 1–7 are complete; v1.7.0 released. The crate is published on crates.io and registered on crates.ai.
 
 **Project Rules Injection (v1.5.0):** rs-guard auto-detects AI-agent instruction files (`AGENTS.md`, `CLAUDE.md`, `.github/copilot-instructions.md`, `.gemini/styleguide.md`, `.cursor/rules/*.md`, `.windsurfrules`) and layers them into the review prompt as a "Project Conventions" section. Users can opt out with `--no-project-rules`, override with `--rules-file`, or select interactively in local mode when multiple files exist.
 
@@ -56,8 +56,8 @@
 | OpenAI               | ✅ Phase 2 | `gpt-4o-mini`        | `OPENAI_API_KEY`     |
 | Grok (xAI)           | ✅ Phase 7 | `grok-3`             | `XAI_API_KEY`        |
 | GLM (Zhipu AI)       | ✅ Phase 7 | `glm-4`              | `ZHIPUAI_API_KEY`    |
-| Ollama (local)       | ✅ v1.8    | `llama3.2`           | `OLLAMA_API_KEY` (optional) |
-| Gemini (Google)      | ✅ v1.8    | `gemini-2.5-flash`   | `GEMINI_API_KEY`     |
+| Ollama (local)       | ✅ v1.7    | `llama3.2`           | `OLLAMA_API_KEY` (optional) |
+| Gemini (Google)      | ✅ v1.7    | `gemini-2.5-flash`   | `GEMINI_API_KEY`     |
 
 All 9 providers are served by a single `GenericOpenAiCompatibleClient` (pub(crate)) parameterized by `ProviderMeta`. Per-provider differences (Qwen `result_format`, OpenRouter attribution headers, Ollama no-auth) are expressed as metadata fields, not per-client code. Ollama is local-mode only (loopback rejected in CI).
 
@@ -155,7 +155,7 @@ rs-guard/
 # Build
 cargo build
 
-# Full test suite (~267 tests)
+# Full test suite (~803 tests)
 cargo test
 
 # Lint (zero warnings required)
@@ -182,19 +182,21 @@ cargo audit
 
 | Module        | Test Count                        | Type               |
 | ------------- | --------------------------------- | ------------------ |
-| `verdict.rs`  | 56 (22 inline + 34 integration)   | Unit + Integration |
-| `config.rs`   | 49                                | Integration        |
-| `github.rs`   | 19                                | Inline (wiremock)  |
-| `output.rs`   | 11                                | Inline             |
-| `cache.rs`    | 31                                | Inline             |
-| `retry.rs`    | 17 (6 retry + 11 circuit breaker) | Inline             |
-| `provider*`   | 74 (45 inline + 29 integration)   | Unit + Integration |
-| `diff.rs`     | 40 (35 inline + 5 integration)    | Unit + Integration |
-| `redact.rs`   | 15                                | Inline             |
-| `pipeline.rs` | 37 (21 inline + 16 integration)   | Unit + Integration |
-| `http.rs`     | 18                                | Inline             |
-| `cli.rs`      | 3                                 | Inline             |
-| **Total**     | **~450**                          |                    |
+| `verdict.rs`  | 62 inline + 39 integration        | Unit + Integration |
+| `config.rs`   | 72 inline + 172 integration       | Unit + Integration |
+| `github.rs`   | 62                                | Inline (wiremock)  |
+| `output.rs`   | 14                                | Inline             |
+| `cache.rs`    | 35                                | Inline             |
+| `retry.rs`    | 20                                | Inline             |
+| `llm/*`       | 70 inline + 32 integration        | Unit + Integration |
+| `diff.rs`     | 50 inline + 5 integration         | Unit + Integration |
+| `redact.rs`   | 18                                | Inline             |
+| `pipeline.rs` | 44 inline + 20 integration        | Unit + Integration |
+| `http.rs`     | 21                                | Inline             |
+| `cli.rs`      | 22                                | Inline             |
+| `rules.rs`    | 31 inline + 23 integration        | Unit + Integration |
+| `scaffold.rs` | 23 inline + 12 integration        | Unit + Integration |
+| **Total**     | **~803**                          |                    |
 
 ---
 
@@ -294,8 +296,8 @@ cargo audit
 
 ## Notes for Agents
 
-- **Source code exists** — all ~3,800 lines across 13 modules.
-- **~450 tests** pass with `wiremock`, `serial_test`, and `tempfile` infrastructure.
+- **Source code exists** — all ~19,800 lines across 16 modules.
+- **~803 tests** pass with `wiremock`, `serial_test`, and `tempfile` infrastructure.
 - **The implementation plan** (`docs/MVP_IMPLEMENTATION_PLAN.md`) is authoritative but section "Phase 0: Pre-requisite Cleanup" was added during Phase 3 implementation.
 - **`Config::empty()`** is a `#[doc(hidden)]` constructor for tests — not for production use.
 - **New modules** added since the original plan: `pipeline.rs`, `http.rs`, `redact.rs`, `cache.rs`, `llm/providers.rs`, `llm/generic_client.rs` (v1.2).

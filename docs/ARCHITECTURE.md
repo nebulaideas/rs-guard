@@ -131,17 +131,23 @@ pub trait LlmProvider: Send + Sync + std::fmt::Debug {
         system_prompt: &str,
         user_content: &str,
         temperature: f32,
-    ) -> Result<String, RsGuardError>;
+    ) -> Result<ChatCompletionResult, RsGuardError>;
 }
 ```
 
+`ChatCompletionResult` carries the generated content plus optional API-reported
+token usage (`prompt_tokens` / `completion_tokens`), enabling accurate metrics
+when the provider returns a `usage` block (v1.7 #115).
+
 The factory maps a provider name string to a `Box<dyn LlmProvider>` via a single
 data-driven path: [`GenericOpenAiCompatibleClient`](../src/llm/generic_client.rs)
-parameterized by [`ProviderMeta`](../src/llm/providers.rs).
+parameterized by [`ProviderMeta`](../src/llm/providers.rs). Nine providers are
+registered: DeepSeek, Kimi, Qwen, OpenRouter, OpenAI, Grok, GLM, Ollama (local),
+and Gemini (Google).
 
 Adding a new OpenAI-compatible provider requires:
 
-1. A `ProviderMeta` entry in `src/llm/providers.rs` (name, env var, default model, base URL, optional `result_format` / headers / variants)
+1. A `ProviderMeta` entry in `src/llm/providers.rs` (name, env var, `api_key_required`, default model, base URL, CI allowlist, optional `result_format` / headers / variants)
 2. SSRF allowlist update in `http.rs` if the host is new
 3. Docs (`PROVIDERS.md`) and tests (`known_provider_names`, factory smoke tests)
 

@@ -377,11 +377,16 @@ pub fn parse_metadata_block(response: &str) -> Option<Verdict> {
         if !CRITICAL_BUGS_WARNED.swap(true, Ordering::Relaxed) {
             if critical_from_issues.is_some() {
                 log::warn!(
-                    "Deprecated metadata field 'CriticalBugs:' detected alongside                      'CriticalIssues:'; 'CriticalBugs:' is ignored. Prefer                      'CriticalIssues:' only. CriticalBugs will be removed in a                      future major release."
+                    "Deprecated metadata field 'CriticalBugs:' detected alongside \
+                     'CriticalIssues:'; 'CriticalBugs:' is ignored. Prefer \
+                     'CriticalIssues:' only. CriticalBugs will be removed in a \
+                     future major release."
                 );
             } else {
                 log::warn!(
-                    "Deprecated metadata field 'CriticalBugs:' detected; use                      'CriticalIssues:' instead. CriticalBugs will be removed in                      a future major release."
+                    "Deprecated metadata field 'CriticalBugs:' detected; use \
+                     'CriticalIssues:' instead. CriticalBugs will be removed in \
+                     a future major release."
                 );
             }
         }

@@ -129,6 +129,8 @@ base_url = "https://generativelanguage.googleapis.com/v1beta/openai"
 | `variant`        | string | no       | Provider-specific model variant override for this provider.                     |
 | `result_format`  | string | no       | Override the `result_format` field sent to the provider (e.g. `"message"`, `"json_object"`). Useful for custom OpenAI-compatible endpoints. |
 
+> **Note on `api_key_required`:** Whether a provider requires an API key is determined by its `ProviderMeta` entry in `src/llm/providers.rs`, not by TOML. Providers with `api_key_required = false` (e.g. Ollama) treat a missing or empty env var as an empty string and skip the `Authorization` header. Providers with `api_key_required = true` (all others) error if the key is missing or empty.
+
 #### Circuit Breaker Section (`[circuit_breaker]`)
 
 Optional. Enables a circuit breaker to stop retrying after repeated LLM failures. Disabled by default.

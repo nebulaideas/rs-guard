@@ -49,7 +49,7 @@ pub enum RsGuardError {
 
     /// The PR diff exceeds the maximum allowed size.
     #[error(
-        "Diff too large: {size_bytes} bytes ({line_count} lines). Maximum is 100KB or 1500 lines."
+        "Diff too large: {size_bytes} bytes ({line_count} lines). Maximum is 500 KB or 5,000 lines."
     )]
     DiffTooLarge {
         /// Actual diff size in bytes.

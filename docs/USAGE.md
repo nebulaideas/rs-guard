@@ -181,7 +181,9 @@ rs-guard --format json --dry-run
 export RS_GUARD_FORMAT=json
 ```
 
-Fields include `verdict`, severity counts, `state`, `provider`, `model`, token/latency/cost estimates, `diff_lines`, `project_rules_file`, and `dry_run`. Default remains `text`.
+Fields include `verdict`, severity counts, `state`, `provider`, `model`, `estimated_tokens_in`, `estimated_tokens_out`, `token_source` (`"api"`, `"mixed"`, or `"estimate"`), `latency_secs`, `estimated_cost_cents`, `diff_lines`, `project_rules_file`, and `dry_run`. Default remains `text`.
+
+**`token_source`** indicates where the token counts came from: `"api"` when the provider returned `usage` data with both prompt and completion tokens, `"mixed"` when only one direction was reported (the other is estimated), or `"estimate"` when no usage data was available (character-based heuristic). This lets CI dashboards distinguish real token costs from estimates.
 
 ---
 

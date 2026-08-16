@@ -136,9 +136,14 @@ pub trait LlmProvider: Send + Sync + std::fmt::Debug {
         system_prompt: &str,
         user_message: &str,
         temperature: f32,
-    ) -> Result<String, RsGuardError>;
+    ) -> Result<ChatCompletionResult, RsGuardError>;
 }
 ```
+
+`ChatCompletionResult` carries the generated `content: String` plus an optional
+`usage: Option<TokenUsage>` with `prompt_tokens` / `completion_tokens` from the
+provider's response (v1.7 #115). When `usage` is absent (e.g. cache hits),
+the pipeline falls back to character-based token estimates.
 
 ### `llm::ProviderConfig`
 
@@ -383,6 +388,7 @@ ProviderMeta {
     default_base_url: "https://api.newprovider.com/v1",
     default_model: "default-model",
     api_key_env: "NEWPROVIDER_API_KEY",
+    api_key_required: true,  // Set to false for local providers like Ollama
     ci_allowed_hosts: &[("https", "api.newprovider.com")],
     context_window: 128_000,
     variants: &[],
@@ -394,9 +400,11 @@ ProviderMeta {
 The `factory.rs` module resolves the provider name to a `ProviderMeta` and constructs a `GenericOpenAiCompatibleClient` parameterized by that metadata — no new module or match arm is required.
 
 **Field explanations:**
+- `api_key_required`: When `true` (default), `resolve_api_key` errors if the env var is missing or empty. When `false` (e.g. Ollama), a missing env var is treated as an empty string and no `Authorization` header is sent.
 - `variants`: Provider-specific model variants (e.g. DeepSeek's `flash`/`pro`, Kimi's `thinking-on`/`thinking-off`). Leave empty if your provider has no variants.
 - `result_format`: Uses `Option<Cow<'static, str>>` so known providers keep a zero-cost borrowed value. Set to `Some(Cow::Borrowed("message"))` when the provider requires it (Qwen/DashScope); otherwise `None`. Per-provider TOML overrides (`[providers.<name>].result_format`) take precedence over this static default at runtime.
 - `default_extra_headers`: Default HTTP headers sent with every request. Use for provider-specific attribution (e.g. OpenRouter's `HTTP-Referer` and `X-Title`). Most providers don't need this.
+- `ci_allowed_hosts`: Hosts allowed in CI mode (scheme, host) tuples. Use an empty slice `&[]` for local-only providers (loopback is rejected in CI by default).
 
 ### 2. Update `.reviewer.toml` Schema
 
