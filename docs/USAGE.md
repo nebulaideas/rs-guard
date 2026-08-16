@@ -552,6 +552,47 @@ When the provider changes via CLI or env var:
 
 rs-guard uses a system prompt sent alongside the diff to the LLM. The embedded default works out-of-the-box, but tailoring it to your project produces better, more relevant reviews. A well-crafted prompt reduces false positives, catches domain-specific bugs a generic reviewer would miss, and respects your team's conventions.
 
+### Prompt Composition Model
+
+rs-guard composes the final review prompt in three layers. Each layer can be used independently or combined:
+
+```
+┌─────────────────────────────────────────────────────┐
+│  Layer 3: Project Rules (auto-detected or --rules-file)  │
+│  AGENTS.md, CLAUDE.md, .cursor/rules/*.md, etc.     │
+│  → Appended as "Project Conventions" section        │
+├─────────────────────────────────────────────────────┤
+│  Layer 2: Custom Prompt (--prompt-file)             │
+│  .github/review-prompt.md or any path               │
+│  → Replaces the default entirely                    │
+├─────────────────────────────────────────────────────┤
+│  Layer 1: DEFAULT_PROMPT (built-in, src/config.rs)  │
+│  Generic five-axis review, language-agnostic        │
+│  → Used when no --prompt-file is specified          │
+└─────────────────────────────────────────────────────┘
+```
+
+| Layer | What it is | When it applies | How to customize |
+|---|---|---|---|
+| **1. Default** | `DEFAULT_PROMPT` in `src/config.rs` — generic five-axis review | Always, unless overridden by Layer 2 | Copy a template from `examples/prompts/` and adapt |
+| **2. Custom prompt** | A markdown file with project-specific review rules | When `--prompt-file` is set or `.github/review-prompt.md` exists | Write your own or start from a template |
+| **3. Project rules** | Auto-detected convention files (`AGENTS.md`, `CLAUDE.md`, etc.) | Always, unless `--no-project-rules` is set | Maintain your existing agent instruction files |
+
+**Think of Layer 2 as a review skill** — it focuses the LLM on what matters for *your* project.
+A generic prompt reviews any codebase; a custom prompt reviews *yours*. The rs-guard repository
+itself uses `.github/review-prompt.md` as its own review skill (see it for a real-world example
+of a specialized prompt with architecture invariants, security rules, and blocking conditions).
+
+**When to use each layer:**
+
+- **Just Layer 1** — quick start, no customization needed. Works for any language.
+- **Layers 1 + 3** — generic review + your project conventions. Good for teams that already
+  maintain `AGENTS.md` or similar files.
+- **Layers 2 + 3** — specialized review + project conventions. Best for projects with
+  domain-specific review concerns (security-critical code, performance-sensitive paths,
+  framework-specific anti-patterns).
+- **Layer 2 only** — specialized review without auto-detected conventions. Use `--no-project-rules`.
+
 Create `.github/review-prompt.md` in your repository root (or pass `--prompt-file`).
 
 ### Prompt Templates

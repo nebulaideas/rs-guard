@@ -4,6 +4,13 @@ This directory contains language-agnostic review prompt templates for rs-guard.
 Each template implements the five-axis review format used by the built-in default prompt,
 and includes a `## Project-Specific Focus` section for customization.
 
+> **What is a review prompt?** Think of it as a **review skill** — it focuses the LLM on what
+> matters for *your* project. A generic prompt reviews any codebase; a custom prompt reviews
+> *yours*. rs-guard composes the final prompt in three layers: the built-in default, your custom
+> prompt file (Layer 2), and auto-detected project rules like `AGENTS.md` (Layer 3).
+> See [`docs/USAGE.md`](../../docs/USAGE.md) → "Prompt Composition Model" for the full layering
+> diagram and when to use each combination.
+
 ## Available Prompts
 
 - **[general-code-review.md](general-code-review.md)** — Canonical agnostic baseline
