@@ -447,12 +447,15 @@ pub(crate) fn build_llm_client(
     timeout: std::time::Duration,
 ) -> Result<reqwest::Client, RsGuardError> {
     let mut headers = HeaderMap::new();
-    headers.insert(
-        header::AUTHORIZATION,
-        HeaderValue::from_str(&format!("Bearer {}", api_key)).map_err(|e| {
-            RsGuardError::Config(format!("Invalid {} API key format: {}", provider_name, e))
-        })?,
-    );
+    // Skip Authorization header when the API key is empty (e.g. Ollama local).
+    if !api_key.is_empty() {
+        headers.insert(
+            header::AUTHORIZATION,
+            HeaderValue::from_str(&format!("Bearer {}", api_key)).map_err(|e| {
+                RsGuardError::Config(format!("Invalid {} API key format: {}", provider_name, e))
+            })?,
+        );
+    }
     headers.insert(
         header::CONTENT_TYPE,
         HeaderValue::from_static("application/json"),
@@ -500,6 +503,18 @@ mod tests {
             err.contains("Invalid deepseek API key format"),
             "Expected API key format error, got: {}",
             err
+        );
+    }
+
+    #[test]
+    fn test_build_llm_client_allows_empty_api_key() {
+        // Ollama and other local providers don't require an API key.
+        // An empty key should succeed (no Authorization header is set).
+        let result = build_llm_client("ollama", "", &[], std::time::Duration::from_secs(60));
+        assert!(
+            result.is_ok(),
+            "empty API key should be allowed: {:?}",
+            result
         );
     }
 

@@ -512,6 +512,100 @@ rs-guard uses the standard non-streaming `/chat/completions` endpoint. Advanced 
 
 ---
 
+## Ollama (Local)
+
+### Quick Start
+
+```bash
+# Install Ollama: https://ollama.com
+ollama pull llama3.2
+# No API key required — Ollama runs locally without authentication.
+```
+
+### Provider Details
+
+| Key | Value |
+| Base URL | `http://127.0.0.1:11434/v1` |
+| Default Model | `llama3.2` |
+| Context Window | 32,000 tokens |
+| Auth Header | None (no API key required) |
+| CI Mode | Not supported — loopback rejected in CI mode |
+| Note | Local-only; run in local mode (unset `GITHUB_ACTIONS`) |
+
+### CLI Usage
+
+```bash
+rs-guard --provider ollama --model llama3.2
+# Or use a different model:
+rs-guard --provider ollama --model qwen2.5-coder:7b
+```
+
+### TOML Configuration
+
+```toml
+provider = "ollama"
+model = "llama3.2"
+
+[providers.ollama]
+base_url = "http://127.0.0.1:11434/v1"
+# api_key_env is optional — Ollama does not require authentication.
+```
+
+### Provider Divergence
+
+Ollama provides an OpenAI-compatible `/chat/completions` endpoint. No API key is needed by default. If you enable Ollama's auth proxy, set `OLLAMA_API_KEY` and it will be sent as a Bearer token. Ollama is **local-mode only** — the loopback address is rejected in CI mode to prevent token exfiltration.
+
+---
+
+## Gemini (Google)
+
+### Quick Start
+
+```bash
+export GEMINI_API_KEY="your-api-key"
+```
+
+### Provider Details
+
+| Key | Value |
+| Base URL | `https://generativelanguage.googleapis.com/v1beta/openai` |
+| Default Model | `gemini-2.5-flash` |
+| Context Window | 1,000,000 tokens |
+| Auth Header | `Bearer {GEMINI_API_KEY}` |
+| Variants | `flash` (gemini-2.5-flash), `pro` (gemini-2.5-pro) |
+| Note | Google's OpenAI-compatible endpoint |
+
+### CLI Usage
+
+```bash
+rs-guard --provider gemini
+# Or use the pro variant for complex reasoning:
+rs-guard --provider gemini --variant pro
+```
+
+### TOML Configuration
+
+```toml
+provider = "gemini"
+model = "gemini-2.5-flash"
+
+[providers.gemini]
+api_key_env = "GEMINI_API_KEY"
+base_url = "https://generativelanguage.googleapis.com/v1beta/openai"
+```
+
+### API Key Acquisition
+
+1. Visit [Google AI Studio](https://aistudio.google.com/apikey)
+2. Sign in with a Google account
+3. Create a new API key
+
+### Provider Divergence
+
+rs-guard uses Google's OpenAI-compatible endpoint (`/v1beta/openai/chat/completions`), not the native Gemini API. This means standard OpenAI request/response shapes work out of the box. Gemini-specific features (multimodal input, grounding, code execution) are not supported via this endpoint.
+
+---
+
 ## Environment Variables Reference
 
 | Variable | Provider | Required When |
@@ -522,3 +616,5 @@ rs-guard uses the standard non-streaming `/chat/completions` endpoint. Advanced 
 | `OPENAI_API_KEY` | OpenAI | `--provider openai` |
 | `XAI_API_KEY` | Grok | `--provider grok` |
 | `ZHIPUAI_API_KEY` | GLM | `--provider glm` |
+| `OLLAMA_API_KEY` | Ollama | Optional (only if Ollama auth proxy is enabled) |
+| `GEMINI_API_KEY` | Gemini | `--provider gemini` |

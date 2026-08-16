@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Ollama and Gemini provider presets (#116)** — `--provider ollama` uses
+  `http://127.0.0.1:11434/v1` with `llama3.2` default model (local mode only,
+  no API key required). `--provider gemini` uses Google's OpenAI-compatible
+  endpoint at `generativelanguage.googleapis.com` with `gemini-2.5-flash`
+  default and `flash`/`pro` variants. New `api_key_required` field on
+  `ProviderMeta` allows providers like Ollama to skip the API key check.
 - **Review body truncation (#111)** — review bodies that exceed GitHub's 65,536
   character limit are now **truncated** on a UTF-8 char boundary with a visible
   `…[truncated: …]` notice, instead of failing the review. The findings JSON

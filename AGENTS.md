@@ -56,8 +56,10 @@
 | OpenAI               | ✅ Phase 2 | `gpt-4o-mini`        | `OPENAI_API_KEY`     |
 | Grok (xAI)           | ✅ Phase 7 | `grok-3`             | `XAI_API_KEY`        |
 | GLM (Zhipu AI)       | ✅ Phase 7 | `glm-4`              | `ZHIPUAI_API_KEY`    |
+| Ollama (local)       | ✅ v1.8    | `llama3.2`           | `OLLAMA_API_KEY` (optional) |
+| Gemini (Google)      | ✅ v1.8    | `gemini-2.5-flash`   | `GEMINI_API_KEY`     |
 
-All 7 providers are served by a single `GenericOpenAiCompatibleClient` (pub(crate)) parameterized by `ProviderMeta`. Per-provider differences (Qwen `result_format`, OpenRouter attribution headers) are expressed as metadata fields, not per-client code.
+All 9 providers are served by a single `GenericOpenAiCompatibleClient` (pub(crate)) parameterized by `ProviderMeta`. Per-provider differences (Qwen `result_format`, OpenRouter attribution headers, Ollama no-auth) are expressed as metadata fields, not per-client code. Ollama is local-mode only (loopback rejected in CI).
 
 ---
 

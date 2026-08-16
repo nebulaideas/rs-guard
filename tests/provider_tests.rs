@@ -200,6 +200,65 @@ async fn test_glm_trait_dispatch() {
     assert!(result.unwrap().contains("GLM trait dispatch works"));
 }
 
+#[tokio::test]
+async fn test_gemini_trait_dispatch() {
+    let mock_server = MockServer::start().await;
+    mount_success(&mock_server, "Gemini trait dispatch works.").await;
+
+    let provider: Box<dyn LlmProvider> = create_provider(
+        "gemini",
+        "test-key",
+        &config_at("gemini", &mock_server.uri()),
+    )
+    .unwrap();
+    assert_eq!(provider.name(), "gemini");
+    let result = provider
+        .chat_completion("You are a reviewer.", "diff content", 0.1)
+        .await;
+    assert!(result.is_ok());
+    assert!(result.unwrap().contains("Gemini trait dispatch works"));
+}
+
+#[tokio::test]
+async fn test_gemini_pro_variant_maps_to_pro_model() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/chat/completions"))
+        .and(body_partial_json(serde_json::json!({
+            "model": "gemini-2.5-pro"
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "choices": [{ "message": { "content": "pro ok" } }]
+        })))
+        .mount(&mock_server)
+        .await;
+
+    let mut config = config_at("gemini", &mock_server.uri());
+    config.variant = Some("pro".to_string());
+    let provider: Box<dyn LlmProvider> = create_provider("gemini", "test-key", &config).unwrap();
+    let result = provider
+        .chat_completion("system", "user", 0.1)
+        .await
+        .unwrap();
+    assert_eq!(result, "pro ok");
+}
+
+#[tokio::test]
+async fn test_ollama_trait_dispatch_no_key() {
+    let mock_server = MockServer::start().await;
+    mount_success(&mock_server, "Ollama trait dispatch works.").await;
+
+    // Ollama does not require an API key — pass empty string.
+    let provider: Box<dyn LlmProvider> =
+        create_provider("ollama", "", &config_at("ollama", &mock_server.uri())).unwrap();
+    assert_eq!(provider.name(), "ollama");
+    let result = provider
+        .chat_completion("You are a reviewer.", "diff content", 0.1)
+        .await;
+    assert!(result.is_ok());
+    assert!(result.unwrap().contains("Ollama trait dispatch works"));
+}
+
 #[test]
 fn test_unknown_provider_fails() {
     let result = create_provider("unknown", "test-key", &default_config());
