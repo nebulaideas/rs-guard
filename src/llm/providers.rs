@@ -359,12 +359,12 @@ pub(crate) fn apply_variant(
                     )));
                 }
 
-                // TODO (R6, 1.3.0): Optimize by parsing JSON once at startup and caching
-                // the serde_json::Value in ProviderVariant. Currently parses on every
-                // variant use, but the strings are small and hardcoded, so the overhead
-                // is minimal (microseconds). Would require changing ProviderVariant to
-                // use serde_json::Value instead of &'static str, which has lifetime
-                // implications for the static all_providers() table.
+                // NOTE: This parses JSON on every variant use. Could be optimized by
+                // caching the serde_json::Value in ProviderVariant, but the strings are
+                // small and hardcoded so overhead is minimal (microseconds). Caching
+                // would require changing ProviderVariant from &'static str to
+                // serde_json::Value, which has lifetime implications for the static
+                // all_providers() table — not worth the complexity.
                 let val: serde_json::Value = serde_json::from_str(json).map_err(|e| {
                     RsGuardError::Config(format!(
                         "Invalid hardcoded variant JSON for key '{}': {}",
