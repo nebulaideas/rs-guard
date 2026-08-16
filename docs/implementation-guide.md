@@ -22,7 +22,7 @@ How the project is built, how to extend it, and the architectural decisions behi
 
 ### Rust Toolchain
 
-rs-guard requires **Rust 1.82** or later (set in `Cargo.toml` → `rust-version = "1.82"`). Install via [rustup](https://rustup.rs):
+rs-guard requires **Rust 1.88** or later (set in `Cargo.toml` → `rust-version = "1.88"`). Install via [rustup](https://rustup.rs):
 
 ```bash
 rustup install stable
