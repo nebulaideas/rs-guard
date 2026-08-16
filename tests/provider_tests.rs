@@ -231,7 +231,10 @@ async fn test_gemini_trait_dispatch() {
         .chat_completion("You are a reviewer.", "diff content", 0.1)
         .await;
     assert!(result.is_ok());
-    assert!(result.unwrap().contains("Gemini trait dispatch works"));
+    assert!(result
+        .unwrap()
+        .content
+        .contains("Gemini trait dispatch works"));
 }
 
 #[tokio::test]
@@ -255,7 +258,7 @@ async fn test_gemini_pro_variant_maps_to_pro_model() {
         .chat_completion("system", "user", 0.1)
         .await
         .unwrap();
-    assert_eq!(result, "pro ok");
+    assert_eq!(result.content, "pro ok");
 }
 
 #[tokio::test]
@@ -271,7 +274,10 @@ async fn test_ollama_trait_dispatch_no_key() {
         .chat_completion("You are a reviewer.", "diff content", 0.1)
         .await;
     assert!(result.is_ok());
-    assert!(result.unwrap().contains("Ollama trait dispatch works"));
+    assert!(result
+        .unwrap()
+        .content
+        .contains("Ollama trait dispatch works"));
 }
 
 #[test]

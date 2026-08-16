@@ -575,7 +575,7 @@ mod tests {
             .unwrap()
             .with_base_url(mock_server.uri());
         let result = client.chat_completion("system", "user", 0.1).await.unwrap();
-        assert_eq!(result, "ollama ok");
+        assert_eq!(result.content, "ollama ok");
 
         // Verify no Authorization header was sent.
         let requests = mock_server.received_requests().await;
