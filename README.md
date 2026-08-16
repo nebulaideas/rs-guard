@@ -90,7 +90,7 @@ cargo build --release
 # Binary at: ./target/release/rs-guard
 ```
 
-Requires Rust 1.82+.
+Requires Rust 1.88+.
 
 ### cargo install
 

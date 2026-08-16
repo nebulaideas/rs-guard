@@ -15,11 +15,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   endpoint at `generativelanguage.googleapis.com` with `gemini-2.5-flash`
   default and `flash`/`pro` variants. New `api_key_required` field on
   `ProviderMeta` allows providers like Ollama to skip the API key check.
+- **API token usage (#115)** — when the LLM provider returns `usage` data
+  (`prompt_tokens` / `completion_tokens`), rs-guard now uses these real token
+  counts for metrics and cost estimation instead of the character-based
+  heuristic. A new `token_source` field in `ReviewMetrics` and `--format json`
+  output indicates the source: `"api"` (both counts from API), `"mixed"` (partial
+  API usage, other count estimated), or `"estimate"` (char heuristic fallback).
+  The heuristic remains as a fallback when `usage` is absent (e.g. cache hits).
 - **Review body truncation (#111)** — review bodies that exceed GitHub's 65,536
   character limit are now **truncated** on a UTF-8 char boundary with a visible
   `…[truncated: …]` notice, instead of failing the review. The findings JSON
   block is stripped before truncation so only prose is cut. The signature budget
   is always reserved. Applies to both `submit_review` and `submit_inline_review`.
+
+### Changed
+
+- **Removed `rust-toolchain.toml` pin (#135)** — the toolchain pin to 1.97.1
+  (introduced when wiremock 0.6.5 required `let`-chains, stabilized in Rust
+  1.88) has been removed. CI already uses `stable` via `dtolnay/rust-toolchain`.
+  The `Cargo.toml` `rust-version = "1.88"` remains as the declared MSRV.
+  Evaluation: wiremock 0.6.5 is the latest version (no upgrade available);
+  `httpmock` has the same 1.88 MSRV; `mockito` (MSRV 1.70) lacks
+  `body_partial_json` matching used across 8 test files. Accepting 1.88 as the
+  permanent MSRV is the pragmatic choice — Rust 1.88 is over a year old.
 
 ## [1.7.0] - 2026-08-XX
 

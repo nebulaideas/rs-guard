@@ -241,6 +241,7 @@ async fn test_full_pipeline_json_format_success() {
         variant: None,
         estimated_tokens_in: 1,
         estimated_tokens_out: 1,
+        token_source: "estimate".into(),
         latency_secs: 0.1,
         estimated_cost_cents: None,
         diff_lines: 6,
