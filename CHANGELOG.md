@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **API token usage (#115)** — when the LLM provider returns `usage` data
+  (`prompt_tokens` / `completion_tokens`), rs-guard now uses these real token
+  counts for metrics and cost estimation instead of the character-based
+  heuristic. A new `token_source` field in `ReviewMetrics` and `--format json`
+  output indicates the source: `"api"` (both counts from API), `"mixed"` (partial
+  API usage, other count estimated), or `"estimate"` (char heuristic fallback).
+  The heuristic remains as a fallback when `usage` is absent (e.g. cache hits).
 - **Review body truncation (#111)** — review bodies that exceed GitHub's 65,536
   character limit are now **truncated** on a UTF-8 char boundary with a visible
   `…[truncated: …]` notice, instead of failing the review. The findings JSON
