@@ -4,7 +4,7 @@
 
 > **A memory-safe Rust CLI for multi-provider AI code review of GitHub Pull Requests — 242 `rs-guard` crate downloads.**
 
-**AI-powered code review CLI for GitHub Pull Requests.** Multi-provider LLM support (DeepSeek, Kimi, Qwen, OpenRouter, OpenAI, Grok, GLM), response caching, exponential backoff retry, and local pre-commit execution — all in a single Rust binary.
+**AI-powered code review CLI for GitHub Pull Requests.** Multi-provider LLM support (DeepSeek, Kimi, Qwen, OpenRouter, OpenAI, Grok, GLM, Ollama, Gemini), response caching, exponential backoff retry, and local pre-commit execution — all in a single Rust binary.
 
 Built by [Ismael Marín](https://ismaelmarin.dev) / [@igmarin](https://github.com/igmarin).
 
@@ -18,7 +18,7 @@ Built by [Ismael Marín](https://ismaelmarin.dev) / [@igmarin](https://github.co
 
 ## Features
 
-- 🤖 **Multi-provider LLM** — DeepSeek, Kimi (Moonshot AI), Qwen (Alibaba Cloud), OpenRouter, OpenAI, Grok (xAI), GLM (Zhipu AI)
+- 🤖 **Multi-provider LLM** — DeepSeek, Kimi (Moonshot AI), Qwen (Alibaba Cloud), OpenRouter, OpenAI, Grok (xAI), GLM (Zhipu AI), Ollama (local), Gemini (Google)
 - ⚡ **Response caching** — SHA-256 keyed, 24-hour TTL, 100 MB limit; skip with `--no-cache`
 - 🔄 **Automatic retry** — Exponential backoff (1s/2s/4s ±25% jitter) + optional circuit breaker
 - 🔍 **In-memory verdict parsing** — Structured metadata block (`Verdict` + four severity counts: `CriticalIssues`, `SecurityIssues`, `ImportantIssues`, `Suggestions`); no intermediate comment spam
@@ -170,6 +170,8 @@ See [docs/USAGE.md](docs/USAGE.md) for the complete reference including all envi
 | `OPENAI_API_KEY`        | OpenAI provider     | [OpenAI Platform](https://platform.openai.com)          |
 | `XAI_API_KEY`           | Grok provider       | [xAI](https://x.ai)                                     |
 | `ZHIPUAI_API_KEY`       | GLM provider        | [Zhipu AI](https://open.bigmodel.cn)                    |
+| `OLLAMA_API_KEY`        | Ollama provider     | Optional — [Ollama](https://ollama.com) (local, no key needed) |
+| `GEMINI_API_KEY`        | Gemini provider     | [Google AI Studio](https://aistudio.google.com/apikey)  |
 | `GITHUB_TOKEN`          | CI mode             | Auto-provided by GitHub Actions                         |
 | `PR_NUMBER`             | CI mode             | Pull request number                                     |
 | `REPO_FULL_NAME`        | CI mode             | Repository in `owner/repo` format                       |

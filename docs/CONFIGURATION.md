@@ -31,7 +31,7 @@ Place `.reviewer.toml` in your repository root (or pass `--config /path/to/confi
 
 ```toml
 # Top-level settings
-provider = "deepseek"           # LLM provider: deepseek | kimi | qwen | openrouter | openai | grok | glm
+provider = "deepseek"           # LLM provider: deepseek | kimi | qwen | openrouter | openai | grok | glm | ollama | gemini
 model = "deepseek-v4-flash"     # Model identifier (provider-specific)
 variant = "flash"               # Provider-specific model variant (e.g. "flash", "pro" for deepseek). Optional.
 temperature = 0.1               # Sampling temperature (0.0 to 2.0)
@@ -81,6 +81,18 @@ base_url = "https://api.x.ai/v1"
 api_key_env = "ZHIPUAI_API_KEY"
 base_url = "https://open.bigmodel.cn/api/paas/v4"
 # model = "glm-4"
+
+[providers.ollama]
+# Ollama runs locally — no API key required by default.
+# Loopback only; rejected in CI mode (unset GITHUB_ACTIONS to use locally).
+base_url = "http://127.0.0.1:11434/v1"
+# model = "llama3.2"
+# api_key_env = "OLLAMA_API_KEY"  # Only needed if Ollama auth proxy is enabled
+
+[providers.gemini]
+api_key_env = "GEMINI_API_KEY"
+base_url = "https://generativelanguage.googleapis.com/v1beta/openai"
+# model = "gemini-2.5-flash"
 ```
 
 ### Field Reference
@@ -346,6 +358,8 @@ Run `rs-guard <subcommand> --help` for details on each subcommand.
 | `OPENAI_API_KEY`        | OpenAI provider     | API key from OpenAI.                     |
 | `XAI_API_KEY`           | Grok provider       | API key from xAI.                       |
 | `ZHIPUAI_API_KEY`       | GLM provider        | API key from Zhipu AI.                  |
+| `OLLAMA_API_KEY`        | Ollama provider     | Optional. Only needed if Ollama auth proxy is enabled. |
+| `GEMINI_API_KEY`        | Gemini provider     | API key from Google AI Studio.          |
 | `GITHUB_TOKEN`          | GitHub mode         | Auto-provided by GitHub Actions.         |
 | `PR_NUMBER`             | GitHub mode         | Pull request number.                     |
 | `REPO_FULL_NAME`        | GitHub mode         | Repository in `owner/repo` format.       |

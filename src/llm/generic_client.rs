@@ -556,4 +556,39 @@ mod tests {
             msg
         );
     }
+
+    #[tokio::test]
+    async fn test_ollama_no_auth_header_when_key_empty() {
+        // Ollama does not require an API key — verify that no Authorization
+        // header is sent when the key is empty.
+        let mock_server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/chat/completions"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "choices": [{ "message": { "content": "ollama ok" } }]
+            })))
+            .mount(&mock_server)
+            .await;
+
+        let meta = find_provider("ollama").expect("ollama must be registered");
+        let client = GenericOpenAiCompatibleClient::new(meta, "", &[], None)
+            .unwrap()
+            .with_base_url(mock_server.uri());
+        let result = client.chat_completion("system", "user", 0.1).await.unwrap();
+        assert_eq!(result, "ollama ok");
+
+        // Verify no Authorization header was sent.
+        let requests = mock_server.received_requests().await;
+        assert!(requests.is_some(), "should have received requests");
+        for req in requests.unwrap() {
+            let has_auth = req
+                .headers
+                .iter()
+                .any(|(name, _)| name.as_str().eq_ignore_ascii_case("authorization"));
+            assert!(
+                !has_auth,
+                "Ollama with empty key should not send Authorization header"
+            );
+        }
+    }
 }

@@ -56,6 +56,10 @@ pub struct ProviderMeta {
     pub default_model: &'static str,
     /// Environment variable name for the API key.
     pub api_key_env: &'static str,
+    /// Whether an API key is required. `false` for local providers like Ollama
+    /// that don't require authentication. When `false`, a missing env var is
+    /// treated as an empty string rather than an error.
+    pub api_key_required: bool,
     /// (scheme, host) pairs allowed in CI mode for SSRF prevention.
     pub ci_allowed_hosts: &'static [(&'static str, &'static str)],
     /// Context window size in tokens.
@@ -93,6 +97,8 @@ pub fn all_providers() -> &'static [ProviderMeta] {
             default_base_url: "https://api.deepseek.com",
             default_model: "deepseek-v4-flash",
             api_key_env: "DEEPSEEK_API_KEY",
+            api_key_required: true,
+
             ci_allowed_hosts: &[("https", "api.deepseek.com")],
             context_window: 64_000,
             variants: &[
@@ -115,6 +121,8 @@ pub fn all_providers() -> &'static [ProviderMeta] {
             default_base_url: "https://api.moonshot.ai/v1",
             default_model: "kimi-k2.5",
             api_key_env: "KIMI_API_KEY",
+            api_key_required: true,
+
             ci_allowed_hosts: &[("https", "api.moonshot.ai")],
             context_window: 128_000,
             variants: &[
@@ -142,6 +150,8 @@ pub fn all_providers() -> &'static [ProviderMeta] {
             default_base_url: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
             default_model: "qwen-plus",
             api_key_env: "DASHSCOPE_API_KEY",
+            api_key_required: true,
+
             ci_allowed_hosts: &[
                 ("https", "dashscope-intl.aliyuncs.com"),
                 ("https", "dashscope.aliyuncs.com"),
@@ -156,6 +166,8 @@ pub fn all_providers() -> &'static [ProviderMeta] {
             default_base_url: "https://openrouter.ai/api/v1",
             default_model: "openai/gpt-4o-mini",
             api_key_env: "OPENROUTER_API_KEY",
+            api_key_required: true,
+
             ci_allowed_hosts: &[("https", "openrouter.ai")],
             context_window: 128_000,
             variants: &[],
@@ -171,6 +183,8 @@ pub fn all_providers() -> &'static [ProviderMeta] {
             default_base_url: "https://api.openai.com/v1",
             default_model: "gpt-4o-mini",
             api_key_env: "OPENAI_API_KEY",
+            api_key_required: true,
+
             ci_allowed_hosts: &[("https", "api.openai.com")],
             context_window: 128_000,
             variants: &[],
@@ -182,6 +196,8 @@ pub fn all_providers() -> &'static [ProviderMeta] {
             default_base_url: "https://api.x.ai/v1",
             default_model: "grok-3",
             api_key_env: "XAI_API_KEY",
+            api_key_required: true,
+
             ci_allowed_hosts: &[("https", "api.x.ai")],
             context_window: 128_000,
             variants: &[],
@@ -193,9 +209,51 @@ pub fn all_providers() -> &'static [ProviderMeta] {
             default_base_url: "https://open.bigmodel.cn/api/paas/v4",
             default_model: "glm-4",
             api_key_env: "ZHIPUAI_API_KEY",
+            api_key_required: true,
+
             ci_allowed_hosts: &[("https", "open.bigmodel.cn")],
             context_window: 128_000,
             variants: &[],
+            result_format: None,
+            default_extra_headers: &[],
+        },
+        ProviderMeta {
+            name: "ollama",
+            default_base_url: "http://127.0.0.1:11434/v1",
+            default_model: "llama3.2",
+            // Ollama does not require an API key by default; use a placeholder
+            // env var that users can set if they enable Ollama's auth proxy.
+            api_key_env: "OLLAMA_API_KEY",
+            api_key_required: false,
+            // Loopback only — rejected in CI mode by validate_provider_base_url.
+            // Users must run in local mode (unset GITHUB_ACTIONS) to use Ollama.
+            ci_allowed_hosts: &[],
+            context_window: 32_000,
+            variants: &[],
+            result_format: None,
+            default_extra_headers: &[],
+        },
+        ProviderMeta {
+            name: "gemini",
+            default_base_url: "https://generativelanguage.googleapis.com/v1beta/openai",
+            default_model: "gemini-2.5-flash",
+            api_key_env: "GEMINI_API_KEY",
+            api_key_required: true,
+
+            ci_allowed_hosts: &[("https", "generativelanguage.googleapis.com")],
+            context_window: 1_000_000,
+            variants: &[
+                ProviderVariant {
+                    name: "flash",
+                    description: "Fast, cost-effective Gemini 2.5 Flash",
+                    effect: VariantEffect::ModelAlias("gemini-2.5-flash"),
+                },
+                ProviderVariant {
+                    name: "pro",
+                    description: "Most capable Gemini 2.5 Pro for complex reasoning",
+                    effect: VariantEffect::ModelAlias("gemini-2.5-pro"),
+                },
+            ],
             result_format: None,
             default_extra_headers: &[],
         },
@@ -205,6 +263,8 @@ pub fn all_providers() -> &'static [ProviderMeta] {
             default_base_url: "https://test.example.com",
             default_model: "test-model",
             api_key_env: "TEST_API_KEY",
+            api_key_required: true,
+
             ci_allowed_hosts: &[("https", "test.example.com")],
             context_window: 128_000,
             variants: &[ProviderVariant {
@@ -374,11 +434,28 @@ mod tests {
             );
             assert!(!p.default_model.is_empty(), "{} missing model", p.name);
             assert!(!p.api_key_env.is_empty(), "{} missing api_key_env", p.name);
-            assert!(
-                !p.ci_allowed_hosts.is_empty(),
-                "{} missing ci_allowed_hosts",
-                p.name
-            );
+            // When ci_allowed_hosts is empty, the provider's default base URL
+            // must be loopback (local-only, rejected in CI mode). This is the
+            // actual security invariant — not api_key_required.
+            if p.ci_allowed_hosts.is_empty() {
+                let parsed = url::Url::parse(p.default_base_url)
+                    .unwrap_or_else(|_| panic!("{} default_base_url should be valid", p.name));
+                let host = parsed.host_str().unwrap_or("");
+                assert!(
+                    host == "127.0.0.1"
+                        || host == "localhost"
+                        || host == "[::1]"
+                        || host == "0.0.0.0"
+                        || host == "[::]",
+                    "{} has empty ci_allowed_hosts but default_base_url host '{}' is not loopback — \
+                     this would be an SSRF risk if accidentally allowed in CI",
+                    p.name,
+                    host
+                );
+            } else {
+                // Providers with CI allowed hosts must have at least one entry.
+                // (Already verified by the if-condition; no further assertion needed.)
+            }
         }
     }
 
@@ -396,8 +473,8 @@ mod tests {
 
     #[test]
     fn test_known_provider_names_count() {
-        // 5 original OpenAI-compatible providers + grok (xAI) + glm (Zhipu) + test-collision (test-only).
-        assert_eq!(known_provider_names().len(), 8);
+        // 5 original + grok + glm + ollama + gemini + test-collision (test-only).
+        assert_eq!(known_provider_names().len(), 10);
     }
 
     #[test]
@@ -405,6 +482,38 @@ mod tests {
         let names = known_provider_names();
         assert!(names.contains(&"grok"), "grok must be a known provider");
         assert!(names.contains(&"glm"), "glm must be a known provider");
+    }
+
+    #[test]
+    fn test_known_provider_names_includes_ollama_and_gemini() {
+        let names = known_provider_names();
+        assert!(names.contains(&"ollama"), "ollama must be a known provider");
+        assert!(names.contains(&"gemini"), "gemini must be a known provider");
+    }
+
+    #[test]
+    fn test_ollama_api_key_not_required() {
+        let meta = find_provider("ollama").expect("ollama must be registered");
+        assert!(
+            !meta.api_key_required,
+            "ollama should not require an API key"
+        );
+    }
+
+    #[test]
+    fn test_gemini_api_key_required() {
+        let meta = find_provider("gemini").expect("gemini must be registered");
+        assert!(meta.api_key_required, "gemini should require an API key");
+    }
+
+    #[test]
+    fn test_gemini_context_window() {
+        assert_eq!(get_provider_context_window("gemini"), Some(1_000_000));
+    }
+
+    #[test]
+    fn test_ollama_context_window() {
+        assert_eq!(get_provider_context_window("ollama"), Some(32_000));
     }
 
     #[test]
@@ -483,6 +592,12 @@ mod tests {
     #[test]
     fn test_each_provider_default_url_matches_allowed_host() {
         for p in all_providers() {
+            // Skip providers with empty ci_allowed_hosts (local-only, e.g. Ollama).
+            // Their loopback URL is intentionally not in the allowlist and is
+            // rejected in CI mode by validate_provider_base_url.
+            if p.ci_allowed_hosts.is_empty() {
+                continue;
+            }
             let parsed = url::Url::parse(p.default_base_url)
                 .unwrap_or_else(|_| panic!("{} default_base_url should be a valid URL", p.name));
             let host = parsed

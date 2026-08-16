@@ -280,6 +280,11 @@ mod tests {
         .is_ok());
         assert!(validate_provider_base_url("https://openrouter.ai/api/v1").is_ok());
         assert!(validate_provider_base_url("https://api.openai.com/v1").is_ok());
+        // Gemini (Google) — added in v1.8
+        assert!(validate_provider_base_url(
+            "https://generativelanguage.googleapis.com/v1beta/openai"
+        )
+        .is_ok());
     }
 
     #[test]
@@ -296,8 +301,50 @@ mod tests {
     }
 
     #[test]
+    fn test_provider_base_url_rejects_ollama_default_in_ci() {
+        // Ollama's default base URL is loopback — must be rejected in CI mode.
+        let ollama =
+            crate::llm::providers::find_provider("ollama").expect("ollama must be registered");
+        let result = validate_provider_base_url(ollama.default_base_url);
+        assert!(
+            result.is_err(),
+            "Ollama default URL should be rejected in CI mode: {}",
+            ollama.default_base_url
+        );
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("loopback") || err.contains("HTTPS"),
+            "error should mention loopback or HTTPS for Ollama: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_provider_base_url_rejects_non_loopback_for_empty_allowlist() {
+        // Providers with empty ci_allowed_hosts (e.g. Ollama) must reject
+        // non-loopback URLs in CI mode — deny-by-default, not allow-by-default.
+        let result = validate_provider_base_url("https://evil.example.com/v1");
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("not in the CI allowlist"),
+            "non-loopback URL should be rejected for empty allowlist: {}",
+            err
+        );
+    }
+
+    #[test]
     fn test_provider_base_url_rejects_subdomain_spoof() {
         let result = validate_provider_base_url("https://api.deepseek.com.evil.com/v1");
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("not in the CI allowlist"));
+    }
+
+    #[test]
+    fn test_provider_base_url_rejects_gemini_subdomain_spoof() {
+        let result =
+            validate_provider_base_url("https://generativelanguage.googleapis.com.evil.com/v1");
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(err.contains("not in the CI allowlist"));

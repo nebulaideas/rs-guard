@@ -607,12 +607,39 @@ fn resolve_api_key(
     toml_providers: Option<&HashMap<String, ProviderTomlConfig>>,
 ) -> Result<String, RsGuardError> {
     let api_key_env = resolve_api_key_env_var(provider, toml_providers)?;
-    std::env::var(&api_key_env).map_err(|_| {
+
+    // For providers that don't require an API key (e.g. Ollama), a missing
+    // or empty env var is treated as an empty string rather than an error.
+    let key_required = providers::find_provider(provider)
+        .map(|m| m.api_key_required)
+        .unwrap_or(true);
+
+    if !key_required {
+        return match std::env::var(&api_key_env) {
+            Ok(key) => Ok(key),
+            Err(std::env::VarError::NotPresent) => Ok(String::new()),
+            Err(e @ std::env::VarError::NotUnicode(_)) => Err(RsGuardError::Config(format!(
+                "API key env var {} for provider '{}' is not valid Unicode: {}",
+                api_key_env, provider, e
+            ))),
+        };
+    }
+
+    let key = std::env::var(&api_key_env).map_err(|_| {
         RsGuardError::Config(format!(
             "API key not found. Set {} for provider '{}'",
             api_key_env, provider
         ))
-    })
+    })?;
+
+    if key.is_empty() {
+        return Err(RsGuardError::Config(format!(
+            "API key is empty. Set {} for provider '{}'",
+            api_key_env, provider
+        )));
+    }
+
+    Ok(key)
 }
 
 /// Resolves GitHub-related fields and validates `REPO_FULL_NAME`.
@@ -1670,6 +1697,62 @@ mod tests {
         let err = result.unwrap_err().to_string();
         assert!(err.contains("Unknown provider"));
         assert!(err.contains("unknown"));
+    }
+
+    #[test]
+    fn test_resolve_api_key_ollama_missing_key_returns_empty() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        std::env::remove_var("OLLAMA_API_KEY");
+        // Ollama does not require an API key — missing env var should return
+        // an empty string, not an error.
+        let result = resolve_api_key("ollama", None);
+        assert!(
+            result.is_ok(),
+            "ollama should not require an API key: {:?}",
+            result
+        );
+        assert_eq!(result.unwrap(), "");
+    }
+
+    #[test]
+    fn test_resolve_api_key_gemini_missing_key_returns_error() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        std::env::remove_var("GEMINI_API_KEY");
+        // Gemini requires an API key — missing env var should error.
+        let result = resolve_api_key("gemini", None);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("GEMINI_API_KEY"),
+            "error should mention GEMINI_API_KEY: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_resolve_api_key_ollama_with_key_returns_key() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        std::env::set_var("OLLAMA_API_KEY", "test-ollama-key");
+        let result = resolve_api_key("ollama", None);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), "test-ollama-key");
+        std::env::remove_var("OLLAMA_API_KEY");
+    }
+
+    #[test]
+    fn test_resolve_api_key_gemini_empty_key_returns_error() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        std::env::set_var("GEMINI_API_KEY", "");
+        // Gemini requires a non-empty API key — empty string should error.
+        let result = resolve_api_key("gemini", None);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("empty"),
+            "error should mention empty key: {}",
+            err
+        );
+        std::env::remove_var("GEMINI_API_KEY");
     }
 
     #[test]
