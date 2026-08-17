@@ -1019,6 +1019,102 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_submit_review_422_own_pull_request_fallback_to_comment() {
+        use wiremock::matchers::body_partial_json;
+
+        let mock_server = MockServer::start().await;
+
+        // First call: APPROVE fails with 422 "Can not approve your own pull request"
+        Mock::given(method("POST"))
+            .and(path_regex(r"/repos/owner/repo/pulls/\d+/reviews"))
+            .and(body_partial_json(json!({"event": "APPROVE"})))
+            .respond_with(
+                ResponseTemplate::new(422).set_body_string(
+                    r#"{"message":"Unprocessable Entity","errors":["Review Can not approve your own pull request"],"documentation_url":"https://docs.github.com/rest/pulls/reviews#create-a-review-for-a-pull-request","status":"422"}"#,
+                ),
+            )
+            .up_to_n_times(1)
+            .mount(&mock_server)
+            .await;
+
+        // Second call: should be COMMENT fallback
+        Mock::given(method("POST"))
+            .and(path_regex(r"/repos/owner/repo/pulls/\d+/reviews"))
+            .and(body_partial_json(json!({
+                "event": "COMMENT",
+                "body": format!("[Bot fallback from APPROVE]\n\nmy review\n\n{}", BOT_SIGNATURE)
+            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "id": 1,
+                "state": "COMMENTED"
+            })))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        let result = submit_review(
+            &mock_server.uri(),
+            "owner",
+            "repo",
+            1,
+            ReviewState::Approve,
+            "my review",
+            "token",
+        )
+        .await;
+
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_submit_review_422_own_pull_request_request_changes_fallback_to_comment() {
+        use wiremock::matchers::body_partial_json;
+
+        let mock_server = MockServer::start().await;
+
+        // First call: REQUEST_CHANGES fails with 422 "Can not request changes on your own pull request"
+        Mock::given(method("POST"))
+            .and(path_regex(r"/repos/owner/repo/pulls/\d+/reviews"))
+            .and(body_partial_json(json!({"event": "REQUEST_CHANGES"})))
+            .respond_with(
+                ResponseTemplate::new(422).set_body_string(
+                    r#"{"message":"Unprocessable Entity","errors":["Review Can not request changes on your own pull request"],"documentation_url":"https://docs.github.com/rest/pulls/reviews#create-a-review-for-a-pull-request","status":"422"}"#,
+                ),
+            )
+            .up_to_n_times(1)
+            .mount(&mock_server)
+            .await;
+
+        // Second call: should be COMMENT fallback
+        Mock::given(method("POST"))
+            .and(path_regex(r"/repos/owner/repo/pulls/\d+/reviews"))
+            .and(body_partial_json(json!({
+                "event": "COMMENT",
+                "body": format!("[Bot fallback from REQUEST_CHANGES]\n\nmy review\n\n{}", BOT_SIGNATURE)
+            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "id": 2,
+                "state": "COMMENTED"
+            })))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        let result = submit_review(
+            &mock_server.uri(),
+            "owner",
+            "repo",
+            1,
+            ReviewState::RequestChanges,
+            "my review",
+            "token",
+        )
+        .await;
+
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
     async fn test_submit_review_oversized_body_with_fallback_still_fits_limit() {
         use wiremock::matchers::body_partial_json;
 
