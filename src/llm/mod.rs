@@ -124,47 +124,6 @@ impl TokenUsage {
     }
 }
 
-// ---------------------------------------------------------------------------
-// llm-kernel type interop (issue #142, Phase 1 — types layer)
-// ---------------------------------------------------------------------------
-//
-// rs-guard adopts llm-kernel as its provider metadata catalog (see
-// [`providers::kernel_catalog`]) and re-exports its token-usage type so that
-// callers that interop with llm-kernel can convert without going through the
-// OpenAI transport. Full `OpenAIClient` transport delegation is documented in
-// [`providers`] as gated on the reqwest-version / response-shape constraints.
-
-/// llm-kernel's token-usage type, re-exported for interoperation.
-///
-/// llm-kernel represents usage counts as non-optional `u32`. rs-guard's own
-/// [`TokenUsage`] keeps them optional (`Option<u64>`) to faithfully represent
-/// providers/tests that omit the usage block. A [`core::convert::From`] impl
-/// bridges the two.
-pub use llm_kernel::llm::TokenUsage as KernelTokenUsage;
-
-impl From<llm_kernel::llm::TokenUsage> for TokenUsage {
-    fn from(usage: llm_kernel::llm::TokenUsage) -> Self {
-        let nonzero = |v: u32| (v > 0).then_some(v as u64);
-        let prompt_tokens = nonzero(usage.prompt_tokens);
-        let completion_tokens = nonzero(usage.completion_tokens);
-        // total_tokens is present iff at least one direction reported tokens.
-        let total_tokens = if prompt_tokens.is_some() || completion_tokens.is_some() {
-            Some(
-                usage
-                    .total_tokens
-                    .max(usage.prompt_tokens + usage.completion_tokens) as u64,
-            )
-        } else {
-            None
-        };
-        TokenUsage {
-            prompt_tokens,
-            completion_tokens,
-            total_tokens,
-        }
-    }
-}
-
 /// Parsed response from a chat completion API call.
 #[derive(Debug, Deserialize)]
 pub struct ChatResponse {

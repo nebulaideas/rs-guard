@@ -9,19 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **llm-kernel adoption** (issue #142, Phase 1 + Phase 2) — rs-guard now depends on
-  the published [`llm-kernel`](https://crates.io/crates/llm-kernel) crate. The
-  embedded `ProviderIndex` catalog (20 providers, models.dev schema) is wired in
-  as a supplementary metadata source via `llm::providers::kernel_catalog()` /
-  `kernel_provider()` / `kernel_provider_id()`, mapping rs-guard's 9 providers to
-  llm-kernel catalog ids (`openrouter` and `grok` have no kernel equivalent and
-  remain rs-guard-only). llm-kernel's `TokenUsage` is re-exported as
-  `llm::KernelTokenUsage` with a `From` bridge. **MSRV bumped to 1.92**
-  (llm-kernel requires Rust 1.92). Full `OpenAIClient` transport delegation was
-  not adopted because llm-kernel's fixed request body cannot express rs-guard's
-  `result_format`, `VariantEffect::ExtraBody`, Ollama no-auth, or provider-named
-  errors without breaking the existing immutable wiremock contracts — rs-guard's
-  OpenAI-compatible transport is retained. This is tracked for Phase 3 follow-up.
+- **llm-kernel adoption** (issue #142, Phase 2) — rs-guard now depends on the
+  published [`llm-kernel`](https://crates.io/crates/llm-kernel) crate with
+  `default-features = false` and **only the `provider` feature enabled**. This pulls
+  in **no additional HTTP/TLS/transport stack** — llm-kernel's embedded
+  `ProviderIndex` catalog needs only `serde`/`serde_json`/`thiserror`/`tracing`
+  (all already in rs-guard's tree) — and the feature set is pinned against future
+  upstream default changes. The catalog
+  (20 providers, models.dev schema) is wired in as a supplementary metadata source
+  via `llm::providers::kernel_catalog()` / `kernel_provider()` /
+  `kernel_provider_id()`, mapping rs-guard's 9 providers to llm-kernel catalog ids
+  (`openrouter` and `grok` have no kernel equivalent and remain rs-guard-only).
+  **MSRV bumped to 1.92** (llm-kernel requires Rust 1.92). Full `OpenAIClient`
+  transport delegation was **not** adopted: llm-kernel's fixed request body cannot
+  express rs-guard's `result_format`, `VariantEffect::ExtraBody`, Ollama no-auth,
+  or provider-named errors without breaking the existing immutable wiremock
+  contracts, and its `client-async` feature would drag in an unused second
+  reqwest/TLS stack. rs-guard's OpenAI-compatible transport is retained. Tracked
+  for Phase 3 follow-up. (Note: an initial draft also re-exported llm-kernel's
+  `TokenUsage` as `llm::KernelTokenUsage`; that type-interop layer was dropped
+  before any release, so no public API was removed and no `[Removed]` entry is
+  needed.)
 
 ## [1.7.0] - 2026-08-15
 

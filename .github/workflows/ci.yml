@@ -90,6 +90,17 @@ jobs:
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32
       - run: cargo install cargo-deny --locked
       - run: cargo deny check
+      # Enforce the llm-kernel `provider`-only minimization (see Cargo.toml).
+      # A future `cargo update` that re-enables client-async/transport features
+      # (reqwest 0.13, rustls, aws-lc-rs, hyper, openssl) must fail this job.
+      - name: Guard llm-kernel transport minimization
+        run: |
+          set -euo pipefail
+          tree_output="$(cargo tree -p llm-kernel -e features)"
+          if grep -qE 'reqwest|rustls|aws-lc|hyper|openssl' <<<"$tree_output"; then
+            echo "::error::llm-kernel transport/TLS stack reintroduced; keep provider-only"
+            exit 1
+          fi
 
   audit:
     name: cargo-audit
