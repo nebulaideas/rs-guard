@@ -134,7 +134,13 @@ impl RsGuardError {
             RsGuardError::GitHubApi {
                 status: 422,
                 message,
-            } => message.to_lowercase().contains("not permitted"),
+            } => {
+                let msg = message.to_ascii_lowercase();
+                msg.contains("not permitted")
+                    || msg.contains("own pull request")
+                    || msg.contains("approve your own")
+                    || msg.contains("request changes on your own")
+            }
             RsGuardError::PermissionDenied { .. } => true,
             _ => false,
         }
@@ -288,6 +294,15 @@ mod tests {
         let err = RsGuardError::GitHubApi {
             status: 422,
             message: "Review not permitted for this user".to_string(),
+        };
+        assert!(err.is_permission_denied());
+    }
+
+    #[test]
+    fn test_is_permission_denied_422_own_pull_request() {
+        let err = RsGuardError::GitHubApi {
+            status: 422,
+            message: r#"{"message":"Unprocessable Entity","errors":["Review Can not approve your own pull request"]}"#.to_string(),
         };
         assert!(err.is_permission_denied());
     }

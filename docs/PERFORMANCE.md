@@ -101,13 +101,31 @@ hyperfine --warmup 1 \
 
 ### Verdict parsing microbench
 
-The structured-verdict parser is benchmarked with Criterion:
+The structured-verdict parser and findings stack are benchmarked with Criterion across 11 scenarios:
 
 ```bash
 cargo bench --bench verdict -- --quick
 ```
 
-This isolates the CPU-bound parsing path (~µs scale) from the network path.
+This isolates the CPU-bound parsing path (~ns to µs scale) from the network path.
+
+#### Parsing baselines (Criterion, Apple M-series / x86_64, August 2026)
+
+| Benchmark Target | Scope | Typical Latency |
+|---|---|---|
+| `determine_review_state` | Review state decision from structured counts | ~1.4 ns |
+| `merge_with_findings_20` | Max-rule merge of preliminary verdict + 20 findings | ~98 ns |
+| `from_findings_50` | Constructing `Verdict` from 50 structured findings | ~164 ns |
+| `evaluate_by_tags` | Tag-based fallback scanner (`[Critical]`, `[Security]`) | ~197 ns |
+| `strip_findings_json` | Proactive findings JSON stripping before truncation | ~206 ns |
+| `parse_no_metadata_fallback` | Response with no metadata block (fallback to tags) | ~258 ns |
+| `parse_metadata_block` | Standard `[RS_GUARD_VERDICT_METADATA]` block parsing | ~812 ns |
+| `parse_verdict` | Full pipeline entry point on standard response | ~983 ns |
+| `parse_large_response` | True ~10 KB response with metadata block (no findings) | ~1.06 µs |
+| `parse_findings_50` | Parsing `[RS_GUARD_VERDICT_FINDINGS]` JSON array (50 items) | ~6.7 µs |
+| `parse_large_response_with_findings` | True ~10 KB prose + 50 findings through `parse_verdict()` | ~9.0 µs |
+
+All parsing operations complete in **under 10 microseconds** even for large diff responses with 50 structured findings, making CPU overhead negligible compared to network and LLM latency.
 
 ---
 
