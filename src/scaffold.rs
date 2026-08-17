@@ -127,6 +127,15 @@ pub fn run_init(args: &InitArgs) -> Result<(), Box<dyn std::error::Error>> {
     )?;
     write_file(".reviewer.toml", &config, args.force)?;
 
+    // Create or overwrite .rs-guardignore. With --force, an existing file
+    // is regenerated (consistent with other scaffolded files). Without --force,
+    // existing files are preserved to avoid clobbering user edits.
+    let ignore_path = Path::new(".rs-guardignore");
+    let ignore_existed = ignore_path.exists();
+    let ignore_template = default_rs_guardignore_template();
+    write_file(".rs-guardignore", &ignore_template, args.force)?;
+    let ignore_created = !ignore_existed || args.force;
+
     let detected_label = match project_type {
         ProjectType::Rust => "Rust",
         ProjectType::BackendApi => "Backend/API",
@@ -148,6 +157,9 @@ pub fn run_init(args: &InitArgs) -> Result<(), Box<dyn std::error::Error>> {
     println!("  - .github/workflows/rs-guard-review.yml");
     println!("  - .github/review-prompt.md");
     println!("  - .reviewer.toml");
+    if ignore_created {
+        println!("  - .rs-guardignore");
+    }
 
     let rules = detect_project_rules(Path::new("."));
     println!();
@@ -168,7 +180,12 @@ pub fn run_init(args: &InitArgs) -> Result<(), Box<dyn std::error::Error>> {
         api_key_secret_name(provider)
     );
     println!("  2. Review and customize .github/review-prompt.md for your conventions.");
-    println!("  3. Commit these files and open a test pull request.");
+    if ignore_created {
+        println!("  3. Edit .rs-guardignore to exclude generated/vendored paths from review.");
+        println!("  4. Commit these files and open a test pull request.");
+    } else {
+        println!("  3. Commit these files and open a test pull request.");
+    }
 
     Ok(())
 }
@@ -561,6 +578,46 @@ api_key_env = "{api_key_env}"
             .map(|m| m.default_base_url)
             .unwrap_or(""),
     )
+}
+
+/// Returns the default `.rs-guardignore` template content for `rs-guard init`.
+///
+/// Includes common patterns for generated/vendored files and lockfiles that
+/// typically don't need human review.
+fn default_rs_guardignore_template() -> String {
+    r#"# .rs-guardignore — paths excluded from rs-guard review diffs.
+# Syntax follows .gitignore conventions: glob patterns, `!` negation, `/` directory suffix.
+# Lines starting with `#` are comments. Blank lines are ignored.
+#
+# WARNING: Excluding lockfiles (Cargo.lock, package-lock.json, etc.) hides
+# dependency changes from LLM review. For supply-chain security, consider
+# keeping lockfiles reviewable and only excluding generated/vendored code.
+
+# Lockfiles (uncomment to exclude — see warning above about supply-chain review)
+# Cargo.lock
+# package-lock.json
+# yarn.lock
+# pnpm-lock.yaml
+# poetry.lock
+# Gemfile.lock
+# go.sum
+# composer.lock
+
+# Generated / vendored code
+vendor/
+node_modules/
+target/
+dist/
+build/
+*.min.js
+*.min.css
+
+# Auto-generated protobuf / OpenAPI stubs
+*.pb.go
+*_pb2.py
+openapi_client/
+"#
+    .to_string()
 }
 
 /// Writes `content` to `path`, creating parent directories as needed.

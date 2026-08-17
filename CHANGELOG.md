@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`.rs-guardignore` and language-aware prompt auto-selection** (issue #114) —
+  rs-guard now supports a `.rs-guardignore` file (gitignore syntax) for excluding
+  paths from the review diff before size checks and LLM review. Patterns support
+  globs (`*`, `**`), directory suffixes (`/`), and negation (`!`). The file is
+  auto-loaded from the repo root in local mode, or via `--ignore-file` /
+  `RS_GUARD_IGNORE_FILE` / `ignore_file` TOML key. **Security: in CI mode, the
+  repo-root `.rs-guardignore` and TOML-sourced `ignore_file` are NOT loaded** —
+  only `--ignore-file` / `RS_GUARD_IGNORE_FILE` from the trusted workflow are
+  honored, preventing PR authors from suppressing review of their own changes.
+  `rs-guard init` scaffolds a starter `.rs-guardignore` with common lockfile and
+  generated-code patterns. Additionally, when no explicit `--prompt-file` is
+  loaded, rs-guard inspects changed file extensions and auto-selects a built-in
+  prompt template (frontend SPA, backend API, CLI tooling, or general). Explicit
+  prompt files always take precedence. Disable with `--no-auto-prompt` /
+  `RS_GUARD_NO_AUTO_PROMPT=1` / `auto_prompt = false`. New module:
+  `src/prompt_select.rs`. New public functions: `filter_diff_by_paths_with_ignore`
+  and `apply_path_filters_with_ignore` (the original `filter_diff_by_paths` and
+  `apply_path_filters` signatures are preserved for backward compatibility).
 - **Structured findings and parser benchmark suite expansion** (issue #141) —
   extended `benches/verdict.rs` with 6 new Criterion benchmark targets covering the
   v1.7 structured findings stack: `parse_verdict` (pipeline entry point), `parse_findings_50`

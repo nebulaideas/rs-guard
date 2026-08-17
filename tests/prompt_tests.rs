@@ -160,3 +160,149 @@ fn test_compose_prompt_layers_rules_on_top_of_custom_prompt() {
         "should include the precedence statement"
     );
 }
+
+// --- Language-aware prompt auto-selection tests ---
+
+#[test]
+fn test_auto_select_prompt_rust_diff() {
+    let diff = "diff --git a/src/main.rs b/src/main.rs\n--- a/src/main.rs\n+++ b/src/main.rs\n@@ -1 +1,2 @@\n+x\n";
+    let prompt = rs_guard::prompt_select::auto_select_prompt(diff);
+    assert!(
+        !prompt.is_empty(),
+        "auto-selected prompt should not be empty"
+    );
+    // CLI tooling prompt should differ from the default
+    assert_ne!(
+        prompt,
+        rs_guard::config::DEFAULT_PROMPT,
+        "Rust diff should select CLI tooling prompt, not the default"
+    );
+}
+
+#[test]
+fn test_auto_select_prompt_frontend_diff() {
+    let diff = "diff --git a/src/App.tsx b/src/App.tsx\n--- a/src/App.tsx\n+++ b/src/App.tsx\n@@ -1 +1,2 @@\n+x\ndiff --git a/src/index.ts b/src/index.ts\n--- a/src/index.ts\n+++ b/src/index.ts\n@@ -1 +1,2 @@\n+y\n";
+    let prompt = rs_guard::prompt_select::auto_select_prompt(diff);
+    assert_ne!(
+        prompt,
+        rs_guard::config::DEFAULT_PROMPT,
+        "Frontend diff should select frontend prompt, not the default"
+    );
+}
+
+#[test]
+fn test_auto_select_prompt_backend_diff() {
+    let diff = "diff --git a/app/models/user.rb b/app/models/user.rb\n--- a/app/models/user.rb\n+++ b/app/models/user.rb\n@@ -1 +1,2 @@\n+x\ndiff --git a/db/schema.rb b/db/schema.rb\n--- a/db/schema.rb\n+++ b/db/schema.rb\n@@ -1 +1,2 @@\n+y\n";
+    let prompt = rs_guard::prompt_select::auto_select_prompt(diff);
+    assert_ne!(
+        prompt,
+        rs_guard::config::DEFAULT_PROMPT,
+        "Backend diff should select backend prompt, not the default"
+    );
+}
+
+#[test]
+fn test_auto_select_prompt_empty_diff_returns_default() {
+    let prompt = rs_guard::prompt_select::auto_select_prompt("");
+    assert_eq!(
+        prompt,
+        rs_guard::config::DEFAULT_PROMPT,
+        "Empty diff should fall back to default prompt"
+    );
+}
+
+#[test]
+fn test_auto_select_prompt_unknown_extensions_returns_default() {
+    let diff =
+        "diff --git a/data.xyz b/data.xyz\n--- a/data.xyz\n+++ b/data.xyz\n@@ -1 +1,2 @@\n+x\n";
+    let prompt = rs_guard::prompt_select::auto_select_prompt(diff);
+    assert_eq!(
+        prompt,
+        rs_guard::config::DEFAULT_PROMPT,
+        "Unknown extensions should fall back to default prompt"
+    );
+}
+
+#[test]
+fn test_prompt_category_general_returns_default_prompt() {
+    assert_eq!(
+        rs_guard::prompt_select::PromptCategory::General.prompt(),
+        rs_guard::config::DEFAULT_PROMPT,
+        "General category should return the built-in DEFAULT_PROMPT"
+    );
+}
+
+#[test]
+fn test_default_extension_map_covers_rust_tsx_rb() {
+    let map = rs_guard::prompt_select::default_extension_map();
+    assert!(map.contains_key("rs"));
+    assert!(map.contains_key("tsx"));
+    assert!(map.contains_key("rb"));
+    assert!(map.contains_key("go"));
+    assert!(map.contains_key("py"));
+}
+
+#[test]
+fn test_all_prompt_templates_contain_verdict_contract() {
+    // Every built-in prompt template must contain the exact verdict metadata
+    // block so the verdict parser can extract the review state.
+    let categories = [
+        rs_guard::prompt_select::PromptCategory::General,
+        rs_guard::prompt_select::PromptCategory::BackendApi,
+        rs_guard::prompt_select::PromptCategory::FrontendSpa,
+        rs_guard::prompt_select::PromptCategory::CliTooling,
+    ];
+    for cat in categories {
+        let prompt = cat.prompt();
+        assert!(
+            prompt.contains("[RS_GUARD_VERDICT_METADATA]"),
+            "Prompt category {:?} must contain [RS_GUARD_VERDICT_METADATA] block",
+            cat
+        );
+        assert!(
+            prompt.contains("Verdict:"),
+            "Prompt category {:?} must contain 'Verdict:' field",
+            cat
+        );
+        assert!(
+            prompt.contains("CriticalIssues:"),
+            "Prompt category {:?} must contain 'CriticalIssues:' field",
+            cat
+        );
+        assert!(
+            prompt.contains("SecurityIssues:"),
+            "Prompt category {:?} must contain 'SecurityIssues:' field",
+            cat
+        );
+        assert!(
+            prompt.contains("ImportantIssues:"),
+            "Prompt category {:?} must contain 'ImportantIssues:' field",
+            cat
+        );
+        assert!(
+            prompt.contains("Suggestions:"),
+            "Prompt category {:?} must contain 'Suggestions:' field",
+            cat
+        );
+    }
+}
+
+#[test]
+fn test_all_prompt_templates_contain_severity_taxonomy() {
+    // Every built-in prompt template must reference the severity labels
+    // so findings are categorized correctly.
+    let categories = [
+        rs_guard::prompt_select::PromptCategory::General,
+        rs_guard::prompt_select::PromptCategory::BackendApi,
+        rs_guard::prompt_select::PromptCategory::FrontendSpa,
+        rs_guard::prompt_select::PromptCategory::CliTooling,
+    ];
+    for cat in categories {
+        let prompt = cat.prompt();
+        assert!(
+            prompt.contains("Critical") || prompt.contains("critical"),
+            "Prompt category {:?} must reference Critical severity",
+            cat
+        );
+    }
+}

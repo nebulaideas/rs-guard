@@ -7,8 +7,8 @@ use crate::cache::{CacheConfig, DiffCache};
 use crate::cli::OutputFormat;
 use crate::config::{CiConfig, Config, THINKING_MIN_MAX_TOKENS};
 use crate::diff::{
-    apply_path_filters, chunk_diff_with_params, fetch_file_diff, fetch_local_diff, fetch_pr_diff,
-    fetch_range_diff, DiffLimits, DiffResult,
+    apply_path_filters_with_ignore, chunk_diff_with_params, fetch_file_diff, fetch_local_diff,
+    fetch_pr_diff, fetch_range_diff, DiffLimits, DiffResult,
 };
 use crate::error::RsGuardError;
 use crate::github::{
@@ -866,8 +866,13 @@ pub async fn run_pipeline(
     };
 
     let limits = config_diff_limits(&config);
-    let diff = match apply_path_filters(diff, &config.include_paths, &config.exclude_paths, limits)
-    {
+    let diff = match apply_path_filters_with_ignore(
+        diff,
+        &config.include_paths,
+        &config.exclude_paths,
+        &config.ignore_patterns,
+        limits,
+    ) {
         Ok(d) => d,
         Err(e) => {
             let source = if let Some(path) = diff_file {
@@ -908,9 +913,26 @@ pub async fn run_pipeline(
     }
 
     // Compose the final prompt with project rules layering (before token estimation)
+    // Auto-select a language-aware prompt when enabled and no custom prompt was loaded.
+    let effective_prompt = if config.auto_prompt && config.prompt == crate::config::DEFAULT_PROMPT {
+        let selected = crate::prompt_select::auto_select_prompt(&diff_content);
+        if selected != crate::config::DEFAULT_PROMPT {
+            log::info!("Auto-selected language-aware prompt template based on diff content");
+            if !config.is_ci {
+                eprintln!(
+                    "info: auto-selected prompt template based on detected languages in diff"
+                );
+            }
+            selected
+        } else {
+            config.prompt.as_str()
+        }
+    } else {
+        config.prompt.as_str()
+    };
     let rules_path = config.project_rules_file.as_deref();
     let composed_prompt = compose_prompt(
-        &config.prompt,
+        effective_prompt,
         config.project_rules.as_deref(),
         rules_path,
         config.findings,

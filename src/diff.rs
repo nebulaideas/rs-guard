@@ -230,6 +230,54 @@ pub fn path_allowed(path: &str, include: &[String], exclude: &[String]) -> bool 
     true
 }
 
+/// Parses `.rs-guardignore` file content into a list of patterns.
+///
+/// Lines starting with `#` are comments and ignored. Blank lines are ignored.
+/// Patterns follow gitignore syntax: directory patterns ending with `/`,
+/// glob patterns (`*`, `**`), and negation patterns starting with `!`.
+pub fn parse_rs_guard_ignore(content: &str) -> Vec<String> {
+    content
+        .lines()
+        .map(|line| line.trim())
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .map(|line| line.to_string())
+        .collect()
+}
+
+/// Checks if a path matches any pattern in the `.rs-guardignore` patterns.
+///
+/// Supports **simplified** gitignore semantics:
+/// - Directory patterns (ending with `/`) match the directory and all contents
+/// - `*` matches any characters except `/`
+/// - `**` matches any characters including `/`
+/// - Negation patterns (`!pattern`) un-ignore previously ignored paths
+/// - Patterns are evaluated in order; last match wins
+///
+/// **Note:** Unlike full gitignore, a negated pattern can re-include a file
+/// even if its parent directory was ignored by a prior pattern. This is
+/// intentional simplification — rs-guard evaluates each file path independently
+/// against the full pattern list, rather than traversing the directory tree.
+pub fn match_rs_guard_ignore(patterns: &[String], path: &str) -> bool {
+    let mut ignored = false;
+    for pattern in patterns {
+        let negated = pattern.starts_with('!');
+        let pattern = if negated { &pattern[1..] } else { pattern };
+
+        // Handle directory patterns (ending with /) - match directory and all contents
+        let matched = if pattern.ends_with('/') {
+            let dir_pat = pattern.trim_end_matches('/');
+            path == dir_pat || path.starts_with(&format!("{}/", dir_pat))
+        } else {
+            path_matches_glob(pattern, path)
+        };
+
+        if matched {
+            ignored = !negated;
+        }
+    }
+    ignored
+}
+
 /// Extracts the `b/` path from a `diff --git a/... b/...` header line.
 fn path_from_diff_git_header(line: &str) -> Option<String> {
     let rest = line.strip_prefix("diff --git ")?;
@@ -251,7 +299,26 @@ fn path_from_diff_git_header(line: &str) -> Option<String> {
 /// allowed are dropped. When both include and exclude are empty, returns the
 /// original content unchanged.
 pub fn filter_diff_by_paths(content: &str, include: &[String], exclude: &[String]) -> String {
-    if include.is_empty() && exclude.is_empty() {
+    filter_diff_by_paths_with_ignore(content, include, exclude, &[])
+}
+
+/// Filters a unified diff by include/exclude path patterns and `.rs-guardignore`
+/// patterns.
+///
+/// File sections are split on `diff --git` headers. Sections whose path is not
+/// allowed are dropped. When all three pattern lists are empty, returns the
+/// original content unchanged.
+///
+/// The `ignore` patterns are applied after include/exclude and follow
+/// simplified gitignore semantics (last-match-wins per path). See
+/// [`match_rs_guard_ignore`] for details.
+pub fn filter_diff_by_paths_with_ignore(
+    content: &str,
+    include: &[String],
+    exclude: &[String],
+    ignore: &[String],
+) -> String {
+    if include.is_empty() && exclude.is_empty() && ignore.is_empty() {
         return content.to_string();
     }
 
@@ -265,12 +332,19 @@ pub fn filter_diff_by_paths(content: &str, include: &[String], exclude: &[String
         path: &Option<String>,
         include: &[String],
         exclude: &[String],
+        ignore: &[String],
     ) {
         if current.is_empty() {
             return;
         }
         let keep = match path {
-            Some(p) => path_allowed(p, include, exclude),
+            Some(p) => {
+                let included =
+                    include.is_empty() || include.iter().any(|inc| path_matches_glob(inc, p));
+                let excluded = exclude.iter().any(|exc| path_matches_glob(exc, p));
+                let ignored = !ignore.is_empty() && match_rs_guard_ignore(ignore, p);
+                included && !excluded && !ignored
+            }
             None => true,
         };
         if keep {
@@ -281,14 +355,28 @@ pub fn filter_diff_by_paths(content: &str, include: &[String], exclude: &[String
 
     for line in content.split_inclusive('\n') {
         if line.starts_with("diff --git ") {
-            flush(&mut out, &mut current, &current_path, include, exclude);
+            flush(
+                &mut out,
+                &mut current,
+                &current_path,
+                include,
+                exclude,
+                ignore,
+            );
             current_path = path_from_diff_git_header(line.trim_end());
             current.push_str(line);
         } else {
             current.push_str(line);
         }
     }
-    flush(&mut out, &mut current, &current_path, include, exclude);
+    flush(
+        &mut out,
+        &mut current,
+        &current_path,
+        include,
+        exclude,
+        ignore,
+    );
     out
 }
 
@@ -662,7 +750,21 @@ pub fn apply_path_filters(
     exclude: &[String],
     limits: DiffLimits,
 ) -> Result<DiffResult, RsGuardError> {
-    let filtered = filter_diff_by_paths(&diff.content, include, exclude);
+    apply_path_filters_with_ignore(diff, include, exclude, &[], limits)
+}
+
+/// Applies path filters and `.rs-guardignore` patterns then re-validates size
+/// limits.
+///
+/// Returns [`RsGuardError::EmptyDiff`] when every file section is filtered out.
+pub fn apply_path_filters_with_ignore(
+    diff: DiffResult,
+    include: &[String],
+    exclude: &[String],
+    ignore: &[String],
+    limits: DiffLimits,
+) -> Result<DiffResult, RsGuardError> {
+    let filtered = filter_diff_by_paths_with_ignore(&diff.content, include, exclude, ignore);
     if filtered.trim().is_empty() {
         return Err(RsGuardError::EmptyDiff);
     }
@@ -1330,6 +1432,7 @@ diff --git a/README.md b/README.md\n--- a/README.md\n+++ b/README.md\n@@ -1 +1,2
         let filtered = filter_diff_by_paths(content, &["src/**".into()], &[]);
         assert!(!filtered.contains("README.md"));
         assert!(filtered.contains("src/lib.rs"));
+        assert!(filtered.contains("+code"));
     }
 
     #[test]
@@ -1463,5 +1566,67 @@ diff --git a/README.md b/README.md\n--- a/README.md\n+++ b/README.md\n@@ -1 +1,2
         );
         assert!(diff.line_count > 0);
         assert!(diff.size_bytes > 0);
+    }
+
+    // --- .rs-guardignore parsing and matching tests ---
+
+    #[test]
+    fn test_parse_rs_guard_ignore_empty_file() {
+        let content = "";
+        let patterns = parse_rs_guard_ignore(content);
+        assert!(patterns.is_empty());
+    }
+
+    #[test]
+    fn test_parse_rs_guard_ignore_comments_and_blank_lines() {
+        let content = "# This is a comment\n\n# Another comment\n\n";
+        let patterns = parse_rs_guard_ignore(content);
+        assert!(patterns.is_empty());
+    }
+
+    #[test]
+    fn test_parse_rs_guard_ignore_simple_patterns() {
+        let content = "target/\n*.log\n";
+        let patterns = parse_rs_guard_ignore(content);
+        assert_eq!(patterns.len(), 2);
+        assert!(patterns.contains(&"target/".to_string()));
+        assert!(patterns.contains(&"*.log".to_string()));
+    }
+
+    #[test]
+    fn test_parse_rs_guard_ignore_negation_patterns() {
+        let content = "*.log\n!important.log\n";
+        let patterns = parse_rs_guard_ignore(content);
+        assert_eq!(patterns.len(), 2);
+        assert!(patterns.contains(&"*.log".to_string()));
+        assert!(patterns.contains(&"!important.log".to_string()));
+    }
+
+    #[test]
+    fn test_match_rs_guard_ignore_patterns_basic() {
+        let patterns = vec![
+            "target/".to_string(),
+            "*.log".to_string(),
+            "!important.log".to_string(),
+        ];
+        // target/ should match
+        assert!(match_rs_guard_ignore(&patterns, "target/debug"));
+        assert!(match_rs_guard_ignore(&patterns, "target/release/foo"));
+        // *.log should match
+        assert!(match_rs_guard_ignore(&patterns, "app.log"));
+        assert!(match_rs_guard_ignore(&patterns, "debug.log"));
+        // !important.log should override *.log
+        assert!(!match_rs_guard_ignore(&patterns, "important.log"));
+        // non-matching
+        assert!(!match_rs_guard_ignore(&patterns, "src/main.rs"));
+    }
+
+    #[test]
+    fn test_match_rs_guard_ignore_directory_patterns() {
+        let patterns = vec!["node_modules/".to_string(), "dist/".to_string()];
+        assert!(match_rs_guard_ignore(&patterns, "node_modules/lodash"));
+        assert!(match_rs_guard_ignore(&patterns, "node_modules/@scope/pkg"));
+        assert!(match_rs_guard_ignore(&patterns, "dist/bundle.js"));
+        assert!(!match_rs_guard_ignore(&patterns, "src/index.js"));
     }
 }

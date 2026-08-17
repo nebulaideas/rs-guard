@@ -249,6 +249,23 @@ pub struct TomlConfig {
     /// `RS_GUARD_CHECK_RUN_NAME` env var.
     #[serde(default)]
     pub check_run_name: Option<String>,
+    /// Path to the `.rs-guardignore` file (default: `.rs-guardignore` in repo root).
+    ///
+    /// When set, rs-guard loads ignore patterns from this file and excludes
+    /// matching paths from the diff before size checks and LLM review.
+    /// Can be overridden by the `--ignore-file` CLI flag or
+    /// `RS_GUARD_IGNORE_FILE` env var.
+    #[serde(default)]
+    pub ignore_file: Option<String>,
+    /// Whether language-aware prompt auto-selection is enabled (default: `true`).
+    ///
+    /// When `true` and no explicit `--prompt-file` is provided, rs-guard
+    /// inspects the changed file extensions in the diff and selects a
+    /// built-in prompt template matching the dominant language/domain.
+    /// Can be disabled with `--no-auto-prompt` or
+    /// `RS_GUARD_NO_AUTO_PROMPT=1`.
+    #[serde(default)]
+    pub auto_prompt: Option<bool>,
 }
 
 /// Returns `None` when `result_format` is unset or blank so static provider
@@ -284,6 +301,8 @@ const KNOWN_TOP_LEVEL_KEYS: &[&str] = &[
     "output_format",
     "check_run",
     "check_run_name",
+    "ignore_file",
+    "auto_prompt",
 ];
 
 /// Returns the closest known top-level key to `unknown`, or `None` if no
@@ -896,6 +915,48 @@ fn resolve_diff_base_from_toml(toml: Option<&TomlConfig>) -> Option<String> {
         .and_then(normalize_diff_base)
 }
 
+/// Resolves the optional `.rs-guardignore` file path from env > TOML.
+///
+/// `RS_GUARD_IGNORE_FILE` env var takes precedence over TOML `ignore_file`.
+/// CLI `--ignore-file` is applied later via [`Config::apply_args`].
+///
+/// **Security:** In CI mode, TOML-sourced `ignore_file` is ignored because
+/// `.reviewer.toml` is PR-controlled. Only the env var (set by the trusted
+/// workflow) and CLI flag are honored in CI.
+fn resolve_ignore_file(toml: Option<&TomlConfig>, is_ci: bool) -> Option<PathBuf> {
+    std::env::var("RS_GUARD_IGNORE_FILE")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| {
+            if is_ci {
+                None
+            } else {
+                toml.and_then(|t| t.ignore_file.clone()).map(PathBuf::from)
+            }
+        })
+}
+
+/// Resolves the auto-prompt flag from env > TOML.
+///
+/// `RS_GUARD_NO_AUTO_PROMPT=true` (or `1`) disables auto-selection.
+/// `RS_GUARD_NO_AUTO_PROMPT=false` (or `0`) explicitly enables it, overriding
+/// a TOML `auto_prompt = false`. TOML `auto_prompt = false` also disables it.
+/// Defaults to `true`.
+fn resolve_auto_prompt(toml: Option<&TomlConfig>) -> bool {
+    if let Ok(val) = std::env::var("RS_GUARD_NO_AUTO_PROMPT") {
+        match parse_bool_env("RS_GUARD_NO_AUTO_PROMPT", &val) {
+            Ok(true) => return false,
+            Ok(false) => return true,
+            Err(e) => {
+                log::warn!("{}", e);
+                // Fall through to TOML/default on invalid value
+            }
+        }
+    }
+    toml.and_then(|t| t.auto_prompt).unwrap_or(true)
+}
+
 /// Resolves and validates the provider base URL from TOML.
 fn resolve_base_url(
     toml_provider: Option<&ProviderTomlConfig>,
@@ -1101,6 +1162,23 @@ pub struct Config {
     /// When `None`, the SHA is resolved from `GITHUB_EVENT_PATH`
     /// (`pull_request.head.sha`) for PR events, falling back to `GITHUB_SHA`.
     pub check_run_sha: Option<String>,
+    /// Parsed `.rs-guardignore` patterns applied to the diff after
+    /// include/exclude filtering.
+    ///
+    /// Empty when no ignore file was found or loaded. Patterns follow
+    /// gitignore semantics (negation with `!`, directory patterns with `/`).
+    pub ignore_patterns: Vec<String>,
+    /// Path to the `.rs-guardignore` file (explicit override).
+    ///
+    /// When `None`, rs-guard looks for `.rs-guardignore` in the repo root
+    /// or current directory. When set, only the specified file is loaded.
+    pub ignore_file: Option<PathBuf>,
+    /// Whether language-aware prompt auto-selection is enabled.
+    ///
+    /// When `true` and no explicit `--prompt-file` is given, the pipeline
+    /// inspects changed file extensions and selects a built-in prompt
+    /// template. Explicit prompt files always take precedence.
+    pub auto_prompt: bool,
 }
 
 impl Config {
@@ -1157,6 +1235,9 @@ impl Config {
             check_run: false,
             check_run_name: "rs-guard".to_string(),
             check_run_sha: None,
+            ignore_patterns: Vec::new(),
+            ignore_file: None,
+            auto_prompt: true,
         }
     }
 
@@ -1248,6 +1329,9 @@ impl Config {
             .unwrap_or_else(|| "rs-guard".to_string());
         validate_check_run_name(&check_run_name)?;
 
+        let ignore_file = resolve_ignore_file(toml.as_ref(), is_ci);
+        let auto_prompt = resolve_auto_prompt(toml.as_ref());
+
         Ok(Config {
             provider,
             model,
@@ -1289,6 +1373,9 @@ impl Config {
             check_run,
             check_run_name,
             check_run_sha: None,
+            ignore_patterns: Vec::new(),
+            ignore_file,
+            auto_prompt,
         })
     }
 
@@ -1453,6 +1540,16 @@ impl Config {
             self.check_run_name = name.clone();
         }
 
+        // --ignore-file overrides env/TOML ignore_file path.
+        if let Some(ref ignore_path) = args.ignore_file {
+            self.ignore_file = Some(ignore_path.clone());
+        }
+
+        // --no-auto-prompt disables language-aware prompt auto-selection.
+        if args.no_auto_prompt {
+            self.auto_prompt = false;
+        }
+
         Ok(())
     }
 
@@ -1468,6 +1565,51 @@ impl Config {
             let content = std::fs::read_to_string(path)
                 .map_err(|e| RsGuardError::Config(format!("Failed to read prompt file: {}", e)))?;
             self.prompt = content;
+        }
+        Ok(())
+    }
+
+    /// Loads `.rs-guardignore` patterns from the configured ignore file path,
+    /// or from `.rs-guardignore` in the repository root if no explicit path
+    /// was set.
+    ///
+    /// When the file does not exist, `ignore_patterns` remains empty (no error).
+    /// Patterns are parsed via [`crate::diff::parse_rs_guard_ignore`].
+    ///
+    /// # Arguments
+    ///
+    /// * `repo_root` — The repository root directory. In local mode, when no
+    ///   explicit `ignore_file` is set, rs-guard looks for `.rs-guardignore`
+    ///   in this directory. In CI mode, auto-loading is skipped for security.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RsGuardError::Config`] if the file exists but cannot be read.
+    pub fn load_ignore_file(&mut self, repo_root: &Path) -> Result<(), RsGuardError> {
+        // Security: in CI mode, do NOT auto-load .rs-guardignore from the
+        // PR-controlled working tree — a PR author could add patterns that
+        // suppress review of their own changes. Only honor an explicit
+        // --ignore-file / RS_GUARD_IGNORE_FILE path, which is expected to
+        // point to a trusted location outside the PR diff.
+        let path = match &self.ignore_file {
+            Some(p) => p.clone(),
+            None if !self.is_ci => repo_root.join(".rs-guardignore"),
+            None => return Ok(()),
+        };
+        if path.exists() {
+            let content = std::fs::read_to_string(&path).map_err(|e| {
+                RsGuardError::Config(format!(
+                    "Failed to read ignore file {}: {}",
+                    path.display(),
+                    e
+                ))
+            })?;
+            self.ignore_patterns = crate::diff::parse_rs_guard_ignore(&content);
+            log::info!(
+                "Loaded {} ignore pattern(s) from {}",
+                self.ignore_patterns.len(),
+                path.display()
+            );
         }
         Ok(())
     }
@@ -2066,6 +2208,95 @@ mod tests {
     fn test_config_empty_has_dry_run_false() {
         let config = Config::empty();
         assert!(!config.dry_run);
+    }
+
+    #[test]
+    fn test_config_empty_has_ignore_patterns_empty() {
+        let config = Config::empty();
+        assert!(config.ignore_patterns.is_empty());
+        assert!(config.ignore_file.is_none());
+    }
+
+    #[test]
+    fn test_config_empty_has_auto_prompt_true() {
+        let config = Config::empty();
+        assert!(config.auto_prompt);
+    }
+
+    #[test]
+    fn test_load_ignore_file_existing() {
+        let dir = tempfile::tempdir().unwrap();
+        let ignore_path = dir.path().join(".rs-guardignore");
+        std::fs::write(&ignore_path, "# comment\n*.lock\nnode_modules/\n!keep.me\n").unwrap();
+
+        let mut config = Config::empty();
+        config.ignore_file = Some(ignore_path);
+        config.load_ignore_file(Path::new(".")).unwrap();
+        assert_eq!(config.ignore_patterns.len(), 3);
+        assert!(config.ignore_patterns.contains(&"*.lock".to_string()));
+        assert!(config
+            .ignore_patterns
+            .contains(&"node_modules/".to_string()));
+        assert!(config.ignore_patterns.contains(&"!keep.me".to_string()));
+    }
+
+    #[test]
+    fn test_load_ignore_file_missing_is_noop() {
+        let mut config = Config::empty();
+        config.ignore_file = Some(std::path::PathBuf::from("/nonexistent/.rs-guardignore"));
+        config.load_ignore_file(Path::new(".")).unwrap();
+        assert!(config.ignore_patterns.is_empty());
+    }
+
+    #[test]
+    fn test_load_ignore_file_default_path_local_mode() {
+        // Verify that in local mode (is_ci = false), load_ignore_file
+        // looks for .rs-guardignore in the repo root directory.
+        let dir = tempfile::tempdir().unwrap();
+        let ignore_path = dir.path().join(".rs-guardignore");
+        std::fs::write(&ignore_path, "target/\n").unwrap();
+
+        let mut config = Config::empty();
+        config.is_ci = false;
+        // With ignore_file=None and is_ci=false, load_ignore_file falls back
+        // to repo_root.join(".rs-guardignore").
+        config.ignore_file = None;
+        config.load_ignore_file(dir.path()).unwrap();
+        assert_eq!(config.ignore_patterns, vec!["target/".to_string()]);
+    }
+
+    #[test]
+    fn test_load_ignore_file_ci_mode_no_auto_load() {
+        // Security: in CI mode, .rs-guardignore must NOT be auto-loaded
+        // from the PR-controlled working tree when no explicit path is set.
+        let dir = tempfile::tempdir().unwrap();
+        let ignore_path = dir.path().join(".rs-guardignore");
+        std::fs::write(&ignore_path, "malicious.rs\n").unwrap();
+
+        // With is_ci=true and ignore_file=None, load_ignore_file
+        // should be a no-op regardless of what files exist in repo_root.
+        let mut config = Config::empty();
+        config.is_ci = true;
+        config.ignore_file = None;
+        config.load_ignore_file(dir.path()).unwrap();
+        assert!(
+            config.ignore_patterns.is_empty(),
+            "CI mode must not auto-load .rs-guardignore from the working tree"
+        );
+    }
+
+    #[test]
+    fn test_load_ignore_file_ci_mode_explicit_path_allowed() {
+        // In CI mode, an explicit --ignore-file path IS honored (trusted source).
+        let dir = tempfile::tempdir().unwrap();
+        let ignore_path = dir.path().join(".rs-guardignore");
+        std::fs::write(&ignore_path, "*.lock\n").unwrap();
+
+        let mut config = Config::empty();
+        config.is_ci = true;
+        config.ignore_file = Some(ignore_path);
+        config.load_ignore_file(Path::new(".")).unwrap();
+        assert_eq!(config.ignore_patterns, vec!["*.lock".to_string()]);
     }
 
     #[test]

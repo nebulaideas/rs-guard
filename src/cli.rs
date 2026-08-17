@@ -283,6 +283,28 @@ pub struct ReviewArgs {
         help = "Commit SHA for the GitHub Check Run (overrides auto-detection)"
     )]
     pub check_run_sha: Option<String>,
+
+    /// Path to the `.rs-guardignore` file (gitignore-style patterns).
+    ///
+    /// When set, rs-guard loads ignore patterns from this file and excludes
+    /// matching paths from the diff before size checks and LLM review.
+    /// Defaults to `.rs-guardignore` in the repo root when present.
+    /// Overrides `RS_GUARD_IGNORE_FILE` env var and `ignore_file` TOML key.
+    #[arg(
+        long,
+        env = "RS_GUARD_IGNORE_FILE",
+        help = "Path to .rs-guardignore file (gitignore-style diff exclusions)"
+    )]
+    pub ignore_file: Option<PathBuf>,
+
+    /// Disable language-aware prompt auto-selection.
+    ///
+    /// When set, rs-guard always uses the built-in `DEFAULT_PROMPT` (or the
+    /// explicit `--prompt-file` if given) instead of auto-selecting a prompt
+    /// template based on changed file extensions. Overrides
+    /// `RS_GUARD_NO_AUTO_PROMPT` env var and `auto_prompt` TOML key.
+    #[arg(long, help = "Disable language-aware prompt auto-selection")]
+    pub no_auto_prompt: bool,
 }
 
 /// Project type used by `rs-guard init` to select appropriate templates.

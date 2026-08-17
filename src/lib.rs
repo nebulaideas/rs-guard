@@ -17,6 +17,7 @@
 //! - [`llm`] — LLM provider abstraction and implementations
 //! - [`output`] — Terminal output and artifact writing
 //! - [`pipeline`] — Orchestration of the full review workflow
+//! - [`prompt_select`] — Language-aware prompt auto-selection
 //! - [`redact`] — Secret redaction and content filtering
 //! - [`retry`] — Transient failure retry logic and circuit breaker
 //! - [`rules`] — Project rules file detection and loading
@@ -32,6 +33,7 @@ pub mod http;
 pub mod llm;
 pub mod output;
 pub mod pipeline;
+pub mod prompt_select;
 pub mod redact;
 pub mod repo;
 pub mod retry;
