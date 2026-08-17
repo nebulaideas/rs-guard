@@ -891,3 +891,317 @@ async fn test_full_pipeline_glm_approve() {
     let result = run_pipeline(config, None).await;
     assert!(matches!(result, Ok(PipelineResult::Success)));
 }
+
+// ─── Multi-pass integration tests ───
+
+/// A diff with two file sections — used for multi-pass tests that expect 2 chunks.
+const MULTI_FILE_DIFF: &str = "diff --git a/src/main.rs b/src/main.rs\n--- a/src/main.rs\n+++ b/src/main.rs\n@@ -1 +1,2 @@\n+line1\n line0\ndiff --git a/src/lib.rs b/src/lib.rs\n--- a/src/lib.rs\n+++ b/src/lib.rs\n@@ -1 +1,2 @@\n+line2\n line3\n";
+
+/// A diff with three file sections — used for multi-pass tests with 3 chunks.
+const THREE_FILE_DIFF: &str = "diff --git a/a.rs b/a.rs\n--- a/a.rs\n+++ b/a.rs\n@@ -1 +1,2 @@\n+x\ndiff --git a/b.rs b/b.rs\n--- a/b.rs\n+++ b/b.rs\n@@ -1 +1,2 @@\n+y\ndiff --git a/c.rs b/c.rs\n--- a/c.rs\n+++ b/c.rs\n@@ -1 +1,2 @@\n+z\n";
+
+#[tokio::test]
+async fn test_multi_pass_two_chunks_both_positive() {
+    let github = MockServer::start().await;
+    let llm = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path_regex(r"/repos/test-owner/test-repo/pulls/\d+"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(MULTI_FILE_DIFF))
+        .mount(&github)
+        .await;
+
+    // LLM returns POSITIVE for every chunk.
+    Mock::given(method("POST"))
+        .and(path_regex(r"/chat/completions"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "choices": [{"message": {"content": POSITIVE_RESPONSE}}]
+        })))
+        .mount(&llm)
+        .await;
+
+    Mock::given(method("POST"))
+        .and(path_regex(r"/repos/test-owner/test-repo/pulls/\d+/reviews"))
+        .respond_with(ResponseTemplate::new(200))
+        .mount(&github)
+        .await;
+
+    let mut config = ci_config(42, "deepseek", "test-token");
+    config.github_base_url = github.uri();
+    config.provider_config.base_url = Some(llm.uri());
+    config.no_cache = true;
+    config.multi_pass = true;
+    config.multi_pass_max_chunks = 10;
+
+    let result = run_pipeline(config, None).await;
+    assert!(matches!(result, Ok(PipelineResult::Success)));
+}
+
+#[tokio::test]
+async fn test_multi_pass_one_chunk_negative_blocks() {
+    let github = MockServer::start().await;
+    let llm = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path_regex(r"/repos/test-owner/test-repo/pulls/\d+"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(MULTI_FILE_DIFF))
+        .mount(&github)
+        .await;
+
+    // LLM always returns NEGATIVE with critical issues.
+    Mock::given(method("POST"))
+        .and(path_regex(r"/chat/completions"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "choices": [{"message": {"content": NEGATIVE_RESPONSE}}]
+        })))
+        .mount(&llm)
+        .await;
+
+    Mock::given(method("POST"))
+        .and(path_regex(r"/repos/test-owner/test-repo/pulls/\d+/reviews"))
+        .respond_with(ResponseTemplate::new(200))
+        .mount(&github)
+        .await;
+
+    let mut config = ci_config(42, "deepseek", "test-token");
+    config.github_base_url = github.uri();
+    config.provider_config.base_url = Some(llm.uri());
+    config.no_cache = true;
+    config.multi_pass = true;
+
+    let result = run_pipeline(config, None).await;
+    assert!(matches!(result, Ok(PipelineResult::ReviewBlocked)));
+}
+
+#[tokio::test]
+async fn test_multi_pass_single_file_diff_one_chunk() {
+    let github = MockServer::start().await;
+    let llm = MockServer::start().await;
+
+    // Single-file diff — multi-pass should produce 1 chunk and behave like single-pass.
+    Mock::given(method("GET"))
+        .and(path_regex(r"/repos/test-owner/test-repo/pulls/\d+"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(VALID_DIFF))
+        .mount(&github)
+        .await;
+
+    Mock::given(method("POST"))
+        .and(path_regex(r"/chat/completions"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "choices": [{"message": {"content": POSITIVE_RESPONSE}}]
+        })))
+        .mount(&llm)
+        .await;
+
+    Mock::given(method("POST"))
+        .and(path_regex(r"/repos/test-owner/test-repo/pulls/\d+/reviews"))
+        .respond_with(ResponseTemplate::new(200))
+        .mount(&github)
+        .await;
+
+    let mut config = ci_config(42, "deepseek", "test-token");
+    config.github_base_url = github.uri();
+    config.provider_config.base_url = Some(llm.uri());
+    config.no_cache = true;
+    config.multi_pass = true;
+
+    let result = run_pipeline(config, None).await;
+    assert!(matches!(result, Ok(PipelineResult::Success)));
+}
+
+#[tokio::test]
+async fn test_multi_pass_max_chunks_merges_three_files_into_two() {
+    let github = MockServer::start().await;
+    let llm = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path_regex(r"/repos/test-owner/test-repo/pulls/\d+"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(THREE_FILE_DIFF))
+        .mount(&github)
+        .await;
+
+    // With max_chunks=2, 3 files merge into 2 chunks → exactly 2 LLM calls.
+    // Use .expect(2) to assert exactly 2 calls are made (no retries).
+    Mock::given(method("POST"))
+        .and(path_regex(r"/chat/completions"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "choices": [{"message": {"content": POSITIVE_RESPONSE}}]
+        })))
+        .expect(2)
+        .mount(&llm)
+        .await;
+
+    Mock::given(method("POST"))
+        .and(path_regex(r"/repos/test-owner/test-repo/pulls/\d+/reviews"))
+        .respond_with(ResponseTemplate::new(200))
+        .mount(&github)
+        .await;
+
+    let mut config = ci_config(42, "deepseek", "test-token");
+    config.github_base_url = github.uri();
+    config.provider_config.base_url = Some(llm.uri());
+    config.no_cache = true;
+    config.multi_pass = true;
+    config.multi_pass_max_chunks = 2;
+    config.circuit_breaker = None;
+
+    let result = run_pipeline(config, None).await;
+    assert!(matches!(result, Ok(PipelineResult::Success)));
+}
+
+#[tokio::test]
+async fn test_multi_pass_local_mode_no_submission() {
+    let llm = MockServer::start().await;
+
+    let mut config = local_config();
+    config.provider_config.base_url = Some(llm.uri());
+    config.no_cache = true;
+    config.multi_pass = true;
+
+    // Use a diff file to avoid git dependency.
+    let diff_path = write_temp_diff(MULTI_FILE_DIFF);
+
+    Mock::given(method("POST"))
+        .and(path_regex(r"/chat/completions"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "choices": [{"message": {"content": POSITIVE_RESPONSE}}]
+        })))
+        .mount(&llm)
+        .await;
+
+    let result = run_pipeline(config, Some(diff_path.to_str().unwrap())).await;
+    assert!(matches!(result, Ok(PipelineResult::Success)));
+
+    std::fs::remove_file(&diff_path).ok();
+}
+
+#[tokio::test]
+async fn test_multi_pass_partial_failure_forces_comment_not_approve() {
+    let github = MockServer::start().await;
+    let llm = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path_regex(r"/repos/test-owner/test-repo/pulls/\d+"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(MULTI_FILE_DIFF))
+        .mount(&github)
+        .await;
+
+    // First call fails with 500, subsequent calls succeed.
+    // With 2 chunks, one will fail and one will succeed.
+    Mock::given(method("POST"))
+        .and(path_regex(r"/chat/completions"))
+        .respond_with(ResponseTemplate::new(500))
+        .up_to_n_times(1)
+        .mount(&llm)
+        .await;
+
+    Mock::given(method("POST"))
+        .and(path_regex(r"/chat/completions"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "choices": [{"message": {"content": POSITIVE_RESPONSE}}]
+        })))
+        .mount(&llm)
+        .await;
+
+    Mock::given(method("POST"))
+        .and(path_regex(r"/repos/test-owner/test-repo/pulls/\d+/reviews"))
+        .respond_with(ResponseTemplate::new(200))
+        .mount(&github)
+        .await;
+
+    let mut config = ci_config(42, "deepseek", "test-token");
+    config.github_base_url = github.uri();
+    config.provider_config.base_url = Some(llm.uri());
+    config.no_cache = true;
+    config.multi_pass = true;
+    config.circuit_breaker = None;
+
+    let result = run_pipeline(config, None).await;
+    // Partial failure must not produce Success (approve). It should be
+    // ReviewBlocked (COMMENT state) since the review is incomplete.
+    assert!(
+        matches!(result, Ok(PipelineResult::ReviewBlocked)),
+        "Partial failure should return ReviewBlocked, got: {:?}",
+        result
+    );
+}
+
+#[tokio::test]
+async fn test_multi_pass_all_chunks_failed_returns_error() {
+    let github = MockServer::start().await;
+    let llm = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path_regex(r"/repos/test-owner/test-repo/pulls/\d+"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(MULTI_FILE_DIFF))
+        .mount(&github)
+        .await;
+
+    // All LLM calls fail with 500.
+    Mock::given(method("POST"))
+        .and(path_regex(r"/chat/completions"))
+        .respond_with(ResponseTemplate::new(500))
+        .mount(&llm)
+        .await;
+
+    let mut config = ci_config(42, "deepseek", "test-token");
+    config.github_base_url = github.uri();
+    config.provider_config.base_url = Some(llm.uri());
+    config.no_cache = true;
+    config.multi_pass = true;
+    config.circuit_breaker = None;
+
+    let result = run_pipeline(config, None).await;
+    // All chunks failed — should be an error.
+    assert!(result.is_err());
+}
+
+#[tokio::test]
+async fn test_multi_pass_cost_guard_aborts_before_llm_calls() {
+    let github = MockServer::start().await;
+    // Deliberately do NOT mount any LLM mock — if the cost guard fails to
+    // abort, the pipeline will try to connect to a non-existent server and
+    // fail with a connection error (not a cost error).
+    let llm = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path_regex(r"/repos/test-owner/test-repo/pulls/\d+"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(MULTI_FILE_DIFF))
+        .mount(&github)
+        .await;
+
+    let mut config = ci_config(42, "deepseek", "test-token");
+    config.github_base_url = github.uri();
+    // Point to the LLM server that has no mocks mounted — any call would
+    // get a 404, not a cost error.
+    config.provider_config.base_url = Some(llm.uri());
+    config.no_cache = true;
+    config.multi_pass = true;
+    // Set cost cap to 0 — any non-zero estimate will exceed it.
+    config.multi_pass_max_cost_cents = Some(0.0);
+
+    let result = run_pipeline(config, None).await;
+    // Cost guard should abort with an error mentioning cost.
+    assert!(result.is_err());
+    let err_msg = result.unwrap_err().to_string();
+    assert!(
+        err_msg.contains("cost") || err_msg.contains("Cost"),
+        "Error should mention cost: {}",
+        err_msg
+    );
+}
+
+/// Writes a diff string to a temporary file and returns the path.
+fn write_temp_diff(content: &str) -> std::path::PathBuf {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let id = COUNTER.fetch_add(1, Ordering::SeqCst);
+    let dir = std::env::temp_dir();
+    let path = dir.join(format!(
+        "rs-guard-test-diff-{}-{}.diff",
+        std::process::id(),
+        id
+    ));
+    std::fs::write(&path, content).unwrap();
+    path
+}

@@ -266,6 +266,22 @@ pub struct TomlConfig {
     /// `RS_GUARD_NO_AUTO_PROMPT=1`.
     #[serde(default)]
     pub auto_prompt: Option<bool>,
+    /// Whether multi-pass review is enabled (default: `false`).
+    ///
+    /// When `true`, the diff is split by file sections into chunks, each
+    /// reviewed independently, and verdicts are aggregated. Equivalent to
+    /// `--multi-pass` / `RS_GUARD_MULTI_PASS=1`.
+    #[serde(default)]
+    pub multi_pass: Option<bool>,
+    /// Maximum number of chunks for multi-pass review (default: `10`).
+    #[serde(default)]
+    pub multi_pass_max_chunks: Option<usize>,
+    /// Maximum concurrent LLM calls for multi-pass review (default: `3`).
+    #[serde(default)]
+    pub multi_pass_max_concurrent: Option<usize>,
+    /// Optional cost cap in cents (USD) for multi-pass review.
+    #[serde(default)]
+    pub multi_pass_max_cost_cents: Option<f64>,
 }
 
 /// Returns `None` when `result_format` is unset or blank so static provider
@@ -303,6 +319,10 @@ const KNOWN_TOP_LEVEL_KEYS: &[&str] = &[
     "check_run_name",
     "ignore_file",
     "auto_prompt",
+    "multi_pass",
+    "multi_pass_max_chunks",
+    "multi_pass_max_concurrent",
+    "multi_pass_max_cost_cents",
 ];
 
 /// Returns the closest known top-level key to `unknown`, or `None` if no
@@ -957,6 +977,127 @@ fn resolve_auto_prompt(toml: Option<&TomlConfig>) -> bool {
     toml.and_then(|t| t.auto_prompt).unwrap_or(true)
 }
 
+/// Resolves the multi-pass flag from env > TOML.
+///
+/// `RS_GUARD_MULTI_PASS=true` (or `1`) enables multi-pass review.
+/// `RS_GUARD_MULTI_PASS=false` (or `0`) explicitly disables it.
+/// TOML `multi_pass = true` also enables it. Defaults to `false`.
+fn resolve_multi_pass(toml: Option<&TomlConfig>) -> bool {
+    if let Ok(val) = std::env::var("RS_GUARD_MULTI_PASS") {
+        match parse_bool_env("RS_GUARD_MULTI_PASS", &val) {
+            Ok(true) => return true,
+            Ok(false) => return false,
+            Err(e) => {
+                log::warn!("{}", e);
+            }
+        }
+    }
+    toml.and_then(|t| t.multi_pass).unwrap_or(false)
+}
+
+/// Maximum allowed value for `multi_pass_max_chunks`. Prevents excessive
+/// chunk splitting from a typo or misconfiguration.
+const MULTI_PASS_MAX_CHUNKS_LIMIT: usize = 100;
+
+/// Maximum allowed value for `multi_pass_max_concurrent`. Prevents burst
+/// load on the provider API from a typo or misconfiguration.
+const MULTI_PASS_MAX_CONCURRENT_LIMIT: usize = 20;
+
+/// Resolves the max chunks for multi-pass from env > TOML.
+///
+/// `RS_GUARD_MULTI_PASS_MAX_CHUNKS` env var takes precedence. Defaults to `10`.
+/// Values above `MULTI_PASS_MAX_CHUNKS_LIMIT` (100) are clamped with a warning.
+fn resolve_multi_pass_max_chunks(toml: Option<&TomlConfig>) -> usize {
+    if let Ok(val) = std::env::var("RS_GUARD_MULTI_PASS_MAX_CHUNKS") {
+        if let Ok(n) = val.trim().parse::<usize>() {
+            if n > 0 {
+                return clamp_max_chunks(n);
+            }
+        }
+        log::warn!(
+            "Invalid RS_GUARD_MULTI_PASS_MAX_CHUNKS value {:?}, using default",
+            val
+        );
+    }
+    let toml_val = toml
+        .and_then(|t| t.multi_pass_max_chunks)
+        .filter(|&n| n > 0);
+    clamp_max_chunks(toml_val.unwrap_or(10))
+}
+
+/// Clamps the max chunks value to the safety limit, logging a warning if clamped.
+fn clamp_max_chunks(n: usize) -> usize {
+    if n > MULTI_PASS_MAX_CHUNKS_LIMIT {
+        log::warn!(
+            "multi_pass_max_chunks {} exceeds safety limit {}, clamping",
+            n,
+            MULTI_PASS_MAX_CHUNKS_LIMIT
+        );
+        MULTI_PASS_MAX_CHUNKS_LIMIT
+    } else {
+        n
+    }
+}
+
+/// Resolves the max concurrent LLM calls for multi-pass from env > TOML.
+///
+/// `RS_GUARD_MULTI_PASS_MAX_CONCURRENT` env var takes precedence. Defaults to `3`.
+/// Values above `MULTI_PASS_MAX_CONCURRENT_LIMIT` (20) are clamped with a warning.
+fn resolve_multi_pass_max_concurrent(toml: Option<&TomlConfig>) -> usize {
+    if let Ok(val) = std::env::var("RS_GUARD_MULTI_PASS_MAX_CONCURRENT") {
+        if let Ok(n) = val.trim().parse::<usize>() {
+            if n > 0 {
+                return clamp_max_concurrent(n);
+            }
+        }
+        log::warn!(
+            "Invalid RS_GUARD_MULTI_PASS_MAX_CONCURRENT value {:?}, using default",
+            val
+        );
+    }
+    let toml_val = toml
+        .and_then(|t| t.multi_pass_max_concurrent)
+        .filter(|&n| n > 0);
+    clamp_max_concurrent(toml_val.unwrap_or(3))
+}
+
+/// Clamps the max concurrent value to the safety limit, logging a warning if clamped.
+fn clamp_max_concurrent(n: usize) -> usize {
+    if n > MULTI_PASS_MAX_CONCURRENT_LIMIT {
+        log::warn!(
+            "multi_pass_max_concurrent {} exceeds safety limit {}, clamping",
+            n,
+            MULTI_PASS_MAX_CONCURRENT_LIMIT
+        );
+        MULTI_PASS_MAX_CONCURRENT_LIMIT
+    } else {
+        n
+    }
+}
+
+/// Resolves the optional cost cap for multi-pass from env > TOML.
+///
+/// `RS_GUARD_MULTI_PASS_MAX_COST_CENTS` env var takes precedence. `None`
+/// disables the cost guard.
+fn resolve_multi_pass_max_cost_cents(toml: Option<&TomlConfig>) -> Option<f64> {
+    if let Ok(val) = std::env::var("RS_GUARD_MULTI_PASS_MAX_COST_CENTS") {
+        if val.trim().is_empty() {
+            return None;
+        }
+        if let Ok(n) = val.trim().parse::<f64>() {
+            if n.is_finite() && n >= 0.0 {
+                return Some(n);
+            }
+        }
+        log::warn!(
+            "Invalid RS_GUARD_MULTI_PASS_MAX_COST_CENTS value {:?}, ignoring",
+            val
+        );
+    }
+    toml.and_then(|t| t.multi_pass_max_cost_cents)
+        .filter(|&n| n.is_finite() && n >= 0.0)
+}
+
 /// Resolves and validates the provider base URL from TOML.
 fn resolve_base_url(
     toml_provider: Option<&ProviderTomlConfig>,
@@ -1179,6 +1320,30 @@ pub struct Config {
     /// inspects changed file extensions and selects a built-in prompt
     /// template. Explicit prompt files always take precedence.
     pub auto_prompt: bool,
+    /// Whether multi-pass review is enabled.
+    ///
+    /// When `true`, the diff is split by file sections into chunks, each
+    /// chunk is reviewed independently, and the per-chunk verdicts are
+    /// aggregated into a single review. Opt-in — default is `false` to
+    /// avoid exploding CI cost.
+    pub multi_pass: bool,
+    /// Maximum number of chunks to split the diff into for multi-pass review.
+    ///
+    /// When the number of file sections exceeds this value, sections are
+    /// merged round-robin into fewer chunks. Default: `10`.
+    pub multi_pass_max_chunks: usize,
+    /// Maximum number of concurrent LLM calls during multi-pass review.
+    ///
+    /// Controls the concurrency of chunk reviews. Default: `3`. Higher
+    /// values reduce wall-clock time but increase burst load on the
+    /// provider API.
+    pub multi_pass_max_concurrent: usize,
+    /// Optional cost cap in cents (USD) for multi-pass review.
+    ///
+    /// When set, rs-guard estimates the total cost of all chunk reviews
+    /// before making any calls and aborts with an error if the estimate
+    /// exceeds this value. `None` disables the cost guard.
+    pub multi_pass_max_cost_cents: Option<f64>,
 }
 
 impl Config {
@@ -1238,6 +1403,10 @@ impl Config {
             ignore_patterns: Vec::new(),
             ignore_file: None,
             auto_prompt: true,
+            multi_pass: false,
+            multi_pass_max_chunks: 10,
+            multi_pass_max_concurrent: 3,
+            multi_pass_max_cost_cents: None,
         }
     }
 
@@ -1331,6 +1500,10 @@ impl Config {
 
         let ignore_file = resolve_ignore_file(toml.as_ref(), is_ci);
         let auto_prompt = resolve_auto_prompt(toml.as_ref());
+        let multi_pass = resolve_multi_pass(toml.as_ref());
+        let multi_pass_max_chunks = resolve_multi_pass_max_chunks(toml.as_ref());
+        let multi_pass_max_concurrent = resolve_multi_pass_max_concurrent(toml.as_ref());
+        let multi_pass_max_cost_cents = resolve_multi_pass_max_cost_cents(toml.as_ref());
 
         Ok(Config {
             provider,
@@ -1376,6 +1549,10 @@ impl Config {
             ignore_patterns: Vec::new(),
             ignore_file,
             auto_prompt,
+            multi_pass,
+            multi_pass_max_chunks,
+            multi_pass_max_concurrent,
+            multi_pass_max_cost_cents,
         })
     }
 
@@ -1548,6 +1725,27 @@ impl Config {
         // --no-auto-prompt disables language-aware prompt auto-selection.
         if args.no_auto_prompt {
             self.auto_prompt = false;
+        }
+
+        // Multi-pass CLI overrides.
+        // --multi-pass and --no-multi-pass are mutually exclusive flags (clap
+        // overrides_with). The last one wins. When neither is set, the
+        // TOML/env value is preserved.
+        if args.no_multi_pass {
+            self.multi_pass = false;
+        } else if args.multi_pass {
+            self.multi_pass = true;
+        }
+        // clap value_parser constraints ensure these are > 0 (or >= 0 for cost),
+        // so we can apply them directly. Clamp to safety limits.
+        if let Some(max_chunks) = args.multi_pass_max_chunks {
+            self.multi_pass_max_chunks = clamp_max_chunks(max_chunks);
+        }
+        if let Some(max_concurrent) = args.multi_pass_max_concurrent {
+            self.multi_pass_max_concurrent = clamp_max_concurrent(max_concurrent);
+        }
+        if let Some(max_cost) = args.multi_pass_max_cost_cents {
+            self.multi_pass_max_cost_cents = Some(max_cost);
         }
 
         Ok(())

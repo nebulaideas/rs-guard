@@ -530,3 +530,46 @@ Posts each structured finding as an inline comment on the diff. Implies `--findi
 | TOML | `check_run = true` / `check_run_name = "rs-guard"` |
 
 Creates a GitHub Check Run in addition to the PR review. Conclusion mapping: `APPROVE` → `success`, `REQUEST_CHANGES` → `failure`, `COMMENT` → `neutral`. Requires `checks: write` on the GitHub token.
+
+## Multi-pass review (v1.8)
+
+Multi-pass review splits the diff by file sections into chunks, reviews each chunk independently with bounded concurrency, and aggregates the per-chunk verdicts into a single review. This improves review quality for large diffs that would otherwise be truncated by head/tail chunking.
+
+| Source | Key | Default |
+|--------|-----|---------|
+| CLI | `--multi-pass` | `false` |
+| Environment | `RS_GUARD_MULTI_PASS=1` | `false` |
+| TOML | `multi_pass = true` | `false` |
+| CLI | `--multi-pass-max-chunks <N>` | `10` |
+| Environment | `RS_GUARD_MULTI_PASS_MAX_CHUNKS` | `10` |
+| TOML | `multi_pass_max_chunks = 10` | `10` |
+| CLI | `--multi-pass-max-concurrent <N>` | `3` |
+| Environment | `RS_GUARD_MULTI_PASS_MAX_CONCURRENT` | `3` |
+| TOML | `multi_pass_max_concurrent = 3` | `3` |
+| CLI | `--multi-pass-max-cost-cents <N>` | (disabled) |
+| Environment | `RS_GUARD_MULTI_PASS_MAX_COST_CENTS` | (disabled) |
+| TOML | `multi_pass_max_cost_cents = 50.0` | (disabled) |
+
+### How it works
+
+1. The filtered diff is split by `diff --git` file sections into chunks.
+2. If the number of file sections exceeds `max_chunks`, sections are merged round-robin into fewer chunks.
+3. Each chunk is reviewed independently using the same composed prompt.
+4. LLM calls run concurrently, bounded by `max_concurrent`.
+5. Per-chunk verdicts are aggregated: severity counts are summed, findings are concatenated, and the final verdict is `NEGATIVE` if any chunk is blocking.
+6. A single aggregated review is submitted to GitHub.
+
+### Cost guard
+
+When `multi_pass_max_cost_cents` is set, rs-guard estimates the total cost of all chunk reviews before making any LLM calls. If the estimate exceeds the cap, the review aborts with an error. This prevents unexpected cost spikes on large PRs.
+
+### Partial failure
+
+If some chunks fail (LLM error, parse error, etc.), rs-guard continues with the successful chunks and notes the failure count in the review body. If all chunks fail, the pipeline returns an error.
+
+### Metrics
+
+The `rs-guard-metrics.json` file includes two multi-pass fields:
+
+- `multi_pass_chunk_count` — Number of chunks reviewed (1 for single-pass).
+- `multi_pass_failed_chunks` — Number of chunks that failed (0 for single-pass or full success).
