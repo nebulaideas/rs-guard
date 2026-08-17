@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Structured findings and parser benchmark suite expansion** (issue #141) —
+  extended `benches/verdict.rs` with 6 new Criterion benchmark targets covering the
+  v1.7 structured findings stack: `parse_verdict` (pipeline entry point), `parse_findings_50`
+  (JSON array parsing), `strip_findings_json` (proactive truncation helper),
+  `merge_with_findings_20` (max-rule merge invariant), `from_findings_50` (verdict constructor),
+  and `parse_large_response_with_findings` (10 KB prose + 50 structured findings). All parsing
+  operations benchmark under 10 µs. Baselines documented in `docs/PERFORMANCE.md`.
 - **llm-kernel adoption** (issue #142, Phase 2) — rs-guard now depends on the
   published [`llm-kernel`](https://crates.io/crates/llm-kernel) crate with
   `default-features = false` and **only the `provider` feature enabled**. This pulls

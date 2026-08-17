@@ -89,7 +89,7 @@ rs-guard/
 │   ├── scaffold.rs                # init / generate-prompt / generate-workflow / validate-config
 │   └── verdict.rs                 # Verdict parsing + review state
 ├── benches/
-│   └── verdict.rs                 # Criterion benchmarks (5 scenarios)
+│   └── verdict.rs                 # Criterion benchmarks (11 scenarios)
 ├── tests/
 │   ├── test_data/                 # Sample diffs + LLM responses
 │   ├── config_tests.rs            # 21 config tests
