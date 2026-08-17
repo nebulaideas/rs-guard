@@ -135,3 +135,55 @@ async fn test_fetch_diff_rejects_json_body() {
         .to_string()
         .contains("not appear to be a diff"));
 }
+
+// --- .rs-guardignore integration tests ---
+
+#[test]
+fn test_filter_diff_by_paths_with_ignore_patterns() {
+    use rs_guard::diff::filter_diff_by_paths_with_ignore;
+    let content = "diff --git a/Cargo.lock b/Cargo.lock\n--- a/Cargo.lock\n+++ b/Cargo.lock\n@@ -1 +1,2 @@\n+foo\ndiff --git a/src/main.rs b/src/main.rs\n--- a/src/main.rs\n+++ b/src/main.rs\n@@ -1 +1,2 @@\n+bar\n";
+    let ignore = vec!["Cargo.lock".to_string()];
+    let filtered = filter_diff_by_paths_with_ignore(content, &[], &[], &ignore);
+    assert!(!filtered.contains("Cargo.lock"));
+    assert!(filtered.contains("src/main.rs"));
+}
+
+#[test]
+fn test_filter_diff_by_paths_with_ignore_directory_pattern() {
+    use rs_guard::diff::filter_diff_by_paths_with_ignore;
+    let content = "diff --git a/vendor/lib.rs b/vendor/lib.rs\n--- a/vendor/lib.rs\n+++ b/vendor/lib.rs\n@@ -1 +1,2 @@\n+x\ndiff --git a/src/main.rs b/src/main.rs\n--- a/src/main.rs\n+++ b/src/main.rs\n@@ -1 +1,2 @@\n+y\n";
+    let ignore = vec!["vendor/".to_string()];
+    let filtered = filter_diff_by_paths_with_ignore(content, &[], &[], &ignore);
+    assert!(!filtered.contains("vendor/lib.rs"));
+    assert!(filtered.contains("src/main.rs"));
+}
+
+#[test]
+fn test_filter_diff_by_paths_with_ignore_negation() {
+    use rs_guard::diff::filter_diff_by_paths_with_ignore;
+    let content = "diff --git a/vendor/lib.rs b/vendor/lib.rs\n--- a/vendor/lib.rs\n+++ b/vendor/lib.rs\n@@ -1 +1,2 @@\n+x\ndiff --git a/vendor/keep.rs b/vendor/keep.rs\n--- a/vendor/keep.rs\n+++ b/vendor/keep.rs\n@@ -1 +1,2 @@\n+y\n";
+    // Ignore vendor/ but un-ignore vendor/keep.rs
+    let ignore = vec!["vendor/".to_string(), "!vendor/keep.rs".to_string()];
+    let filtered = filter_diff_by_paths_with_ignore(content, &[], &[], &ignore);
+    assert!(!filtered.contains("vendor/lib.rs"));
+    assert!(filtered.contains("vendor/keep.rs"));
+}
+
+#[test]
+fn test_filter_diff_by_paths_ignore_empty_is_noop() {
+    use rs_guard::diff::filter_diff_by_paths_with_ignore;
+    let content = "diff --git a/src/main.rs b/src/main.rs\n--- a/src/main.rs\n+++ b/src/main.rs\n@@ -1 +1,2 @@\n+x\n";
+    let filtered = filter_diff_by_paths_with_ignore(content, &[], &[], &[]);
+    assert_eq!(filtered, content);
+}
+
+#[test]
+fn test_parse_rs_guard_ignore_integration() {
+    use rs_guard::diff::parse_rs_guard_ignore;
+    let content = "# This is a comment\n\nCargo.lock\nnode_modules/\n!keep.me\n  \n";
+    let patterns = parse_rs_guard_ignore(content);
+    assert_eq!(patterns.len(), 3);
+    assert_eq!(patterns[0], "Cargo.lock");
+    assert_eq!(patterns[1], "node_modules/");
+    assert_eq!(patterns[2], "!keep.me");
+}

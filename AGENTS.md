@@ -67,14 +67,14 @@ All 9 providers are served by a single `GenericOpenAiCompatibleClient` (pub(crat
 
 ```text
 rs-guard/
-├── src/                           # Single crate source (16 modules)
+├── src/                           # Single crate source (17 modules)
 │   ├── main.rs                    # CLI entry point (thin)
 │   ├── lib.rs                     # Library root
 │   ├── pipeline.rs                # Orchestration + PipelineResult
 │   ├── cache.rs                   # LLM response caching (SHA-256 keyed)
 │   ├── cli.rs                     # Clap argument parsing
 │   ├── config.rs                  # Env vars + .reviewer.toml parsing
-│   ├── diff.rs                    # PR diff fetching + local diff + chunking
+│   ├── diff.rs                    # PR diff fetching + local diff + chunking + .rs-guardignore
 │   ├── error.rs                   # RsGuardError enum
 │   ├── github.rs                  # GitHub API review submission
 │   ├── http.rs                    # HTTP utilities + URL validation
@@ -84,8 +84,11 @@ rs-guard/
 │   │   ├── factory.rs             # Provider factory (metadata-driven)
 │   │   └── providers.rs           # Centralized provider metadata + variants
 │   ├── output.rs                  # Terminal output + artifact + metrics writing
+│   ├── prompt_select.rs           # Language-aware prompt auto-selection
 │   ├── redact.rs                  # Secret redaction
+│   ├── repo.rs                    # Repository root resolution
 │   ├── retry.rs                   # Retry logic + circuit breaker
+│   ├── rules.rs                   # Project rules file detection and loading
 │   ├── scaffold.rs                # init / generate-prompt / generate-workflow / validate-config
 │   └── verdict.rs                 # Verdict parsing + review state
 ├── benches/

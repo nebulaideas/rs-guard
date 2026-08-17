@@ -118,6 +118,8 @@ base_url = "https://generativelanguage.googleapis.com/v1beta/openai"
 | `output_format` | string | `\"text\"` | Output format: `\"text\"` or `\"json\"`. Equivalent to `--format` / `RS_GUARD_FORMAT`. |
 | `check_run` | boolean | `false` | Create a GitHub Check Run in addition to the PR review. Requires `checks: write` permission. Equivalent to `--check-run` / `RS_GUARD_CHECK_RUN`. |
 | `check_run_name` | string | `\"rs-guard\"` | Custom name for the GitHub Check Run. Equivalent to `--check-run-name` / `RS_GUARD_CHECK_RUN_NAME`. |
+| `ignore_file` | string | `.rs-guardignore` | Path to a `.rs-guardignore` file with gitignore-style patterns for excluding paths from the review diff. Equivalent to `--ignore-file` / `RS_GUARD_IGNORE_FILE`. **In CI mode, the default repo-root path is NOT auto-loaded** — an explicit path must be provided to prevent PR-controlled ignore patterns from bypassing review. |
+| `auto_prompt` | boolean | `true` | Whether to auto-select a language-aware prompt template based on changed file extensions. Disabled via `--no-auto-prompt` / `RS_GUARD_NO_AUTO_PROMPT=1`. Explicit `--prompt-file` always wins. |
 
 #### Provider Section Fields
 
@@ -277,6 +279,8 @@ review state: `APPROVE`→`success`, `REQUEST_CHANGES`→`failure`, `COMMENT`→
 | `--check-run` / `RS_GUARD_CHECK_RUN` / `check_run` | Create a GitHub Check Run after submitting the review. Check Run failure is non-blocking (logged as a warning). Requires `checks: write` permission. |
 | `--check-run-name` / `RS_GUARD_CHECK_RUN_NAME` / `check_run_name` | Name for the Check Run (default: `rs-guard`). Validated non-empty and ≤ 255 chars. |
 | `--check-run-sha` / `RS_GUARD_CHECK_RUN_SHA` | Explicit commit SHA for the Check Run. When omitted, rs-guard resolves the SHA from `GITHUB_EVENT_PATH` (`pull_request.head.sha`) for PR events, falling back to `GITHUB_SHA`. |
+| `--ignore-file` / `RS_GUARD_IGNORE_FILE` / `ignore_file` | Path to a `.rs-guardignore` file with gitignore-style patterns. Matching paths are excluded from the review diff before size checks and LLM review. Defaults to `.rs-guardignore` in the repo root. |
+| `--no-auto-prompt` / `RS_GUARD_NO_AUTO_PROMPT=1` / `auto_prompt` | Disable language-aware prompt auto-selection. When enabled (default), rs-guard inspects changed file extensions and selects a built-in prompt template (frontend, backend, CLI, or general). Explicit `--prompt-file` always takes precedence. |
 
 ### SHA resolution
 

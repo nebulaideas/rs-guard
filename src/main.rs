@@ -72,16 +72,22 @@ async fn main() {
 
     exit_on_error(config.apply_args(&args), "Failed to apply CLI arguments");
 
+    let repo_root = resolve_repo_root();
+
     exit_on_error(
         config.load_prompt_file(&args.prompt_file),
         "Failed to load prompt file",
+    );
+
+    exit_on_error(
+        config.load_ignore_file(&repo_root),
+        "Failed to load ignore file",
     );
 
     // Resolve and load project rules (AGENTS.md, CLAUDE.md, etc.)
     let project_rules_enabled =
         Config::resolve_project_rules_enabled(args.no_project_rules, toml_project_rules_enabled);
 
-    let repo_root = resolve_repo_root();
     let mut rules_file = config.rules_file.clone();
 
     // In local mode with multiple detected rules files, prompt the user to pick
