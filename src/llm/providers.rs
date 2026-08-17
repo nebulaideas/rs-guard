@@ -412,6 +412,53 @@ pub fn all_ci_allowed_hosts() -> Vec<(&'static str, &'static str)> {
         .collect()
 }
 
+// ---------------------------------------------------------------------------
+// llm-kernel catalog cross-reference (issue #142, Phase 2)
+// ---------------------------------------------------------------------------
+//
+// [`all_providers`] above remains the authoritative source of the connection
+// metadata rs-guard actually uses (OpenAI-compatible base URLs, default models,
+// env vars, SSRF allowlists, variants). llm-kernel's embedded catalog is
+// layered on as a supplementary metadata source: it offers pricing, model
+// lists, capabilities and 20 providers, but it is Anthropic-oriented and does
+// not cover every rs-guard endpoint (notably openrouter and grok/xai are
+// absent, and base URLs for deepseek/kimi/qwen/glm point at Anthropic-coding
+// endpoints rather than OpenAI-compatible ones). The functions below map
+// rs-guard's provider ids to llm-kernel's catalog ids and expose the matching
+// [`ServiceDescriptor`] for enrichment (e.g. pricing, model lists).
+
+use llm_kernel::provider::{ProviderIndex, ServiceDescriptor};
+
+/// Returns the embedded llm-kernel provider catalog (20 providers, models.dev
+/// schema). Shared by every rs-guard module that wants llm-kernel metadata.
+pub fn kernel_catalog() -> &'static ProviderIndex {
+    ProviderIndex::embedded()
+}
+
+/// Maps an rs-guard provider name to its llm-kernel catalog id, or `None` when
+/// llm-kernel has no equivalent entry (currently `openrouter` and `grok`).
+pub fn kernel_provider_id(provider_name: &str) -> Option<&'static str> {
+    match provider_name {
+        "deepseek" => Some("deepseek"),
+        "kimi" => Some("kimi"),
+        "qwen" => Some("alibaba"),
+        "openai" => Some("openai"),
+        "glm" => Some("zai-cn"),
+        "ollama" => Some("ollama"),
+        "gemini" => Some("gemini"),
+        _ => None,
+    }
+}
+
+/// Returns the llm-kernel [`ServiceDescriptor`] for an rs-guard provider, if a
+/// mapping exists. The returned descriptor's base URL / default model reflect
+/// llm-kernel's (Anthropic-oriented) catalog and must **not** be used to
+/// override rs-guard's [`ProviderMeta`]; it is a source for capabilities,
+/// pricing and model lists only.
+pub fn kernel_provider(provider_name: &str) -> Option<&'static ServiceDescriptor> {
+    kernel_provider_id(provider_name).and_then(|id| kernel_catalog().get(id))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -711,5 +758,72 @@ mod tests {
             msg.contains("bad-variant"),
             "error should mention the variant name"
         );
+    }
+
+    // --- llm-kernel catalog cross-reference tests (issue #142, Phase 2) ---
+
+    #[test]
+    fn test_kernel_catalog_provides_embedded_index() {
+        // ProviderIndex::embedded() must load llm-kernel's catalog and expose ids.
+        let catalog = kernel_catalog();
+        let ids = catalog.ids();
+        assert!(!ids.is_empty(), "llm-kernel catalog must not be empty");
+        assert!(
+            ids.contains(&"openai".to_string()),
+            "catalog should contain openai"
+        );
+        assert!(
+            ids.contains(&"ollama".to_string()),
+            "catalog should contain ollama"
+        );
+    }
+
+    #[test]
+    fn test_kernel_provider_mapping_resolves_in_catalog() {
+        // Every mapped rs-guard provider must resolve to a ServiceDescriptor.
+        for name in [
+            "deepseek", "kimi", "qwen", "openai", "glm", "ollama", "gemini",
+        ] {
+            let id = kernel_provider_id(name)
+                .unwrap_or_else(|| panic!("no llm-kernel id mapped for '{}'", name));
+            assert!(
+                kernel_catalog().get(id).is_some(),
+                "llm-kernel catalog should contain id '{}' for provider '{}'",
+                id,
+                name
+            );
+            assert!(
+                kernel_provider(name).is_some(),
+                "kernel_provider('{}') should resolve",
+                name
+            );
+        }
+    }
+
+    #[test]
+    fn test_kernel_mapping_documents_unsupported_providers() {
+        // These rs-guard providers have no llm-kernel catalog entry (documented gap).
+        assert_eq!(kernel_provider_id("openrouter"), None);
+        assert_eq!(kernel_provider_id("grok"), None);
+        assert_eq!(kernel_provider("openrouter"), None);
+        assert_eq!(kernel_provider("grok"), None);
+    }
+
+    #[test]
+    fn test_every_provider_has_kernel_mapping_or_is_documented() {
+        // Every non-test rs-guard provider either maps into llm-kernel or is a
+        // known gap (openrouter/grok). Guards against adding a provider without
+        // considering the llm-kernel cross-reference.
+        let documented_gaps = ["openrouter", "grok"];
+        for p in all_providers() {
+            if p.name == "test-collision" {
+                continue;
+            }
+            assert!(
+                kernel_provider_id(p.name).is_some() || documented_gaps.contains(&p.name),
+                "provider '{}' has neither a llm-kernel mapping nor is a documented gap",
+                p.name
+            );
+        }
     }
 }

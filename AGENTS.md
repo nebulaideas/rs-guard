@@ -23,7 +23,7 @@
 - **Repository:** `git@github.com:nebulaideas/rs-guard.git`
 - **Current Branch:** `feature/77-dynamic-result-format` (v1.3.0); `main` for releases
 - **License:** MIT License (Copyright 2026 Nebula Ideas)
-- **Language:** Rust (edition 2021, MSRV 1.88)
+- **Language:** Rust (edition 2021, MSRV 1.92)
 - **Crate:** [rs-guard on crates.io](https://crates.io/crates/rs-guard) | [docs.rs](https://docs.rs/rs-guard)
 
 ---
@@ -32,7 +32,7 @@
 
 | Layer           | Technology                                        |
 | --------------- | ------------------------------------------------- |
-| Language        | Rust (edition 2021, MSRV 1.88)                    |
+| Language        | Rust (edition 2021, MSRV 1.92)                    |
 | Build Tool      | Cargo (single crate)                              |
 | Async Runtime   | Tokio                                             |
 | HTTP Client     | reqwest (rustls-tls)                              |

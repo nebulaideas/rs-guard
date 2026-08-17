@@ -49,7 +49,7 @@ cargo build --release
 ls -lh target/release/rs-guard
 ```
 
-### Baseline (v1.2, macOS arm64, Rust 1.82 at time of measurement; MSRV now 1.88)
+### Baseline (v1.2, macOS arm64, Rust 1.82 at time of measurement; MSRV now 1.92)
 
 **Machine:** Apple M1 Max, 32GB RAM, macOS 26.5.1
 
