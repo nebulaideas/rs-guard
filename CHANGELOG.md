@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **llm-kernel adoption** (issue #142, Phase 1 + Phase 2) — rs-guard now depends on
+  the published [`llm-kernel`](https://crates.io/crates/llm-kernel) crate. The
+  embedded `ProviderIndex` catalog (20 providers, models.dev schema) is wired in
+  as a supplementary metadata source via `llm::providers::kernel_catalog()` /
+  `kernel_provider()` / `kernel_provider_id()`, mapping rs-guard's 9 providers to
+  llm-kernel catalog ids (`openrouter` and `grok` have no kernel equivalent and
+  remain rs-guard-only). llm-kernel's `TokenUsage` is re-exported as
+  `llm::KernelTokenUsage` with a `From` bridge. **MSRV bumped to 1.92**
+  (llm-kernel requires Rust 1.92). Full `OpenAIClient` transport delegation was
+  not adopted because llm-kernel's fixed request body cannot express rs-guard's
+  `result_format`, `VariantEffect::ExtraBody`, Ollama no-auth, or provider-named
+  errors without breaking the existing immutable wiremock contracts — rs-guard's
+  OpenAI-compatible transport is retained. This is tracked for Phase 3 follow-up.
+
 ## [1.7.0] - 2026-08-15
 
 ### Added
