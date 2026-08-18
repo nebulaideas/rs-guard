@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **llm-kernel adoption for standard providers** (issue #142) —
+  7 of 9 LLM providers (deepseek, openai, grok, glm, ollama, gemini, openrouter)
+  are now backed by `llm_kernel::llm::OpenAIClient` via a new
+  `KernelBackedClient` wrapper. This gives us reasoning-content promotion
+  (GLM-4.7, DeepSeek-R1), standardized error handling with HTTP status
+  preservation, and future compatibility with llm-kernel's decorator stack
+  (RetryClient, CacheClient, RouterClient). Qwen and Kimi remain on
+  `GenericOpenAiCompatibleClient` because they need custom request fields
+  (`result_format` and `extra_body`) not exposed by `llm_kernel::LLMRequest`.
+  The factory routes automatically based on provider metadata and config.
+  Upgraded reqwest from 0.12 to 0.13 (shared with llm-kernel, no duplicate
+  TLS stack).
+
 - **Multi-pass large-diff review with aggregated verdict** (issue #113) —
   rs-guard can now split large diffs by file sections into chunks, review each
   chunk independently with bounded concurrency, and aggregate the per-chunk

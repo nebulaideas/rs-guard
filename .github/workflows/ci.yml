@@ -90,17 +90,30 @@ jobs:
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32
       - run: cargo install cargo-deny --locked
       - run: cargo deny check
-      # Enforce the llm-kernel `provider`-only minimization (see Cargo.toml).
-      # A future `cargo update` that re-enables client-async/transport features
-      # (reqwest 0.13, rustls, aws-lc-rs, hyper, openssl) must fail this job.
-      - name: Guard llm-kernel transport minimization
+      # Verify rs-guard and llm-kernel share the same reqwest version (no
+      # duplicate TLS stack). With reqwest 0.13 and client-async enabled,
+      # both crates should resolve to the same reqwest crate.
+      - name: Verify shared reqwest version (no duplicate TLS stacks)
         run: |
           set -euo pipefail
-          tree_output="$(cargo tree -p llm-kernel -e features)"
-          if grep -qE 'reqwest|rustls|aws-lc|hyper|openssl' <<<"$tree_output"; then
-            echo "::error::llm-kernel transport/TLS stack reintroduced; keep provider-only"
+          # 1. Check for duplicate reqwest versions.
+          reqwest_dup="$(cargo tree -d | grep -c '^reqwest v' || true)"
+          if [ "$reqwest_dup" -gt 0 ]; then
+            echo "::error::Multiple reqwest versions detected ($reqwest_dup duplicates)"
+            cargo tree -d | grep -A2 'reqwest v'
             exit 1
           fi
+          # 2. Check for duplicate TLS backend crates that would indicate
+          #    multiple TLS stacks compiled into the binary.
+          for crate in rustls tokio-rustls hyper-rustls native-tls openssl-sys; do
+            dup="$(cargo tree -d | grep -c "^${crate} v" || true)"
+            if [ "$dup" -gt 0 ]; then
+              echo "::error::Duplicate ${crate} versions detected ($dup duplicates)"
+              cargo tree -d | grep -A2 "^${crate} v"
+              exit 1
+            fi
+          done
+          echo "✓ Single reqwest version, no duplicate TLS backends"
 
   audit:
     name: cargo-audit

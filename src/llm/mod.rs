@@ -16,6 +16,7 @@ use std::collections::HashMap;
 
 pub mod factory;
 mod generic_client;
+mod kernel_client;
 pub mod providers;
 
 pub use providers::VariantEffect;

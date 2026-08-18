@@ -21,7 +21,7 @@ dialoguer = "0.11"
 env_logger = "0.11"
 log = "0.4"
 regex = "1.11"
-reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+reqwest = { version = "0.13", features = ["json", "rustls"], default-features = false }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 thiserror = "2.0"
@@ -32,13 +32,11 @@ url = "2.5"
 sha2 = "0.10"
 hex = "0.4"
 rand = "0.8"
-# llm-kernel is used only as a serde_json metadata catalog. The `provider`
-# feature enables the static `ProviderIndex` catalog used by
-# `llm::providers::kernel_*`. Do not re-enable the transport feature
-# (`client-async`): it drags in a second reqwest/TLS stack (and heavy build deps)
-# duplicating rs-guard's own transport. CI enforces this: a `cargo tree` guard
-# fails the build if reqwest/rustls/aws-lc/hyper/openssl appear under llm-kernel.
-llm-kernel = { version = "0.25", default-features = false, features = ["provider"] }
+# llm-kernel provides the provider catalog (`provider` feature) and the async
+# LLM client (`client-async` feature) used by `KernelBackedClient` for the 7
+# standard OpenAI-compatible providers. rs-guard and llm-kernel share the same
+# reqwest 0.13 stack, avoiding duplicate TLS dependencies.
+llm-kernel = { version = "0.25", default-features = false, features = ["provider", "client-async"] }
 
 [dev-dependencies]
 serial_test = "3.5.0"

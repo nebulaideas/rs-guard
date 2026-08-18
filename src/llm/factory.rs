@@ -1,15 +1,49 @@
 //! Provider factory for creating LLM provider instances by name.
 //!
-//! Every OpenAI-compatible provider is backed by a single
-//! `GenericOpenAiCompatibleClient`, configured entirely from the provider's
-//! `ProviderMeta` entry plus the resolved [`ProviderConfig`]. Adding a new
-//! provider therefore requires only a metadata entry (and, optionally, tests
-//! and documentation) — no per-provider client code.
+//! The factory routes each provider to the appropriate client implementation:
+//!
+//! - **7 standard providers** (deepseek, openai, grok, glm, ollama, gemini,
+//!   openrouter) are backed by [`KernelBackedClient`], which wraps
+//!   `llm_kernel::llm::OpenAIClient`. These providers need only the standard
+//!   OpenAI chat completions fields (`model`, `messages`, `temperature`,
+//!   `max_tokens`).
+//!
+//! - **2 custom-field providers** (qwen, kimi) are backed by
+//!   [`GenericOpenAiCompatibleClient`], which supports `result_format`
+//!   (Qwen/DashScope) and `extra_body` (Kimi thinking variants) — fields that
+//!   `llm_kernel::LLMRequest` does not expose.
+//!
+//! Adding a new standard provider requires only a metadata entry in
+//! [`providers`] (and, optionally, tests and documentation). Adding a provider
+//! that needs custom request fields requires using `GenericOpenAiCompatibleClient`.
 
 use crate::error::RsGuardError;
 use crate::llm::{
-    generic_client::GenericOpenAiCompatibleClient, providers, Provider, ProviderConfig,
+    generic_client::GenericOpenAiCompatibleClient, kernel_client::KernelBackedClient, providers,
+    Provider, ProviderConfig,
 };
+
+/// Returns `true` if the provider requires custom request fields (`result_format`
+/// or `extra_body`) that `llm_kernel::LLMRequest` does not expose, and therefore
+/// must use [`GenericOpenAiCompatibleClient`] instead of [`KernelBackedClient`].
+///
+/// Currently: `qwen` (needs `result_format`) and `kimi` (needs `extra_body` for
+/// thinking variants).
+fn needs_custom_client(meta: &providers::ProviderMeta) -> bool {
+    // Providers with a non-None result_format need the generic client.
+    if meta.result_format.is_some() {
+        return true;
+    }
+    // Providers with ExtraBody variants need the generic client.
+    if meta
+        .variants
+        .iter()
+        .any(|v| matches!(v.effect, providers::VariantEffect::ExtraBody(..)))
+    {
+        return true;
+    }
+    false
+}
 
 /// Creates an LLM provider instance based on the given provider name.
 ///
@@ -53,19 +87,49 @@ pub fn create_provider(
         _ => Vec::new(),
     };
 
-    let mut client =
-        GenericOpenAiCompatibleClient::new(meta, api_key, &header_overrides, config.timeout_secs)?;
+    // Route to the appropriate client based on whether the provider needs
+    // custom request fields (result_format or extra_body). A config-level
+    // result_format override also forces the generic client, since
+    // KernelBackedClient cannot send result_format.
+    let needs_custom = needs_custom_client(meta) || config.result_format.is_some();
 
-    if let Some(ref url) = config.base_url {
-        client = client.with_base_url(url.clone());
-    }
-    client = client
-        .with_model(config.model.clone())
+    if needs_custom {
+        // Qwen, Kimi — use GenericOpenAiCompatibleClient.
+        let mut client = GenericOpenAiCompatibleClient::new(
+            meta,
+            api_key,
+            &header_overrides,
+            config.timeout_secs,
+        )?;
+
+        if let Some(ref url) = config.base_url {
+            client = client.with_base_url(url.clone());
+        }
+        client = client
+            .with_model(config.model.clone())
+            .with_variant(config.variant.clone())
+            .with_max_tokens(config.max_tokens)
+            .with_result_format(config.result_format.clone());
+
+        Ok(Box::new(client))
+    } else {
+        // deepseek, openai, grok, glm, ollama, gemini, openrouter — use
+        // KernelBackedClient (wraps llm_kernel::OpenAIClient).
+        let base_url = config.base_url.as_deref().unwrap_or(meta.default_base_url);
+
+        let client = KernelBackedClient::new(
+            meta,
+            api_key,
+            base_url,
+            &config.model,
+            &header_overrides,
+            config.timeout_secs,
+        )?
         .with_variant(config.variant.clone())
-        .with_max_tokens(config.max_tokens)
-        .with_result_format(config.result_format.clone());
+        .with_max_tokens(config.max_tokens);
 
-    Ok(Box::new(client))
+        Ok(Box::new(client))
+    }
 }
 
 #[cfg(test)]
@@ -103,7 +167,67 @@ mod tests {
     }
 
     #[test]
+    fn test_factory_creates_qwen() {
+        let p = create_provider("qwen", "k", &default_config()).unwrap();
+        assert_eq!(p.name(), "qwen");
+    }
+
+    #[test]
+    fn test_factory_creates_kimi() {
+        let p = create_provider("kimi", "k", &default_config()).unwrap();
+        assert_eq!(p.name(), "kimi");
+    }
+
+    #[test]
+    fn test_factory_creates_openrouter() {
+        let p = create_provider("openrouter", "k", &default_config()).unwrap();
+        assert_eq!(p.name(), "openrouter");
+    }
+
+    #[test]
+    fn test_factory_creates_ollama() {
+        let p = create_provider("ollama", "", &default_config()).unwrap();
+        assert_eq!(p.name(), "ollama");
+    }
+
+    #[test]
+    fn test_factory_creates_gemini() {
+        let p = create_provider("gemini", "k", &default_config()).unwrap();
+        assert_eq!(p.name(), "gemini");
+    }
+
+    #[test]
+    fn test_factory_creates_openai() {
+        let p = create_provider("openai", "k", &default_config()).unwrap();
+        assert_eq!(p.name(), "openai");
+    }
+
+    #[test]
     fn test_factory_unknown_provider() {
         assert!(create_provider("nope", "k", &default_config()).is_err());
+    }
+
+    #[test]
+    fn test_needs_custom_client_qwen() {
+        let meta = providers::find_provider("qwen").unwrap();
+        assert!(needs_custom_client(meta));
+    }
+
+    #[test]
+    fn test_needs_custom_client_kimi() {
+        let meta = providers::find_provider("kimi").unwrap();
+        assert!(needs_custom_client(meta));
+    }
+
+    #[test]
+    fn test_needs_custom_client_deepseek() {
+        let meta = providers::find_provider("deepseek").unwrap();
+        assert!(!needs_custom_client(meta));
+    }
+
+    #[test]
+    fn test_needs_custom_client_openrouter() {
+        let meta = providers::find_provider("openrouter").unwrap();
+        assert!(!needs_custom_client(meta));
     }
 }

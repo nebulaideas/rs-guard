@@ -55,7 +55,8 @@ async fn mount_success(mock_server: &MockServer, content: &str) {
     Mock::given(method("POST"))
         .and(path("/chat/completions"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-            "choices": [{ "message": { "content": content } }]
+            "choices": [{ "message": { "content": content } }],
+            "model": "test-model"
         })))
         .mount(mock_server)
         .await;
@@ -246,7 +247,8 @@ async fn test_gemini_pro_variant_maps_to_pro_model() {
             "model": "gemini-2.5-pro"
         })))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-            "choices": [{ "message": { "content": "pro ok" } }]
+            "choices": [{ "message": { "content": "pro ok" } }],
+            "model": "test-model"
         })))
         .mount(&mock_server)
         .await;
@@ -331,7 +333,8 @@ async fn test_factory_applies_result_format_override() {
             "result_format": "json_object"
         })))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-            "choices": [{ "message": { "content": "result_format override ok" } }]
+            "choices": [{ "message": { "content": "result_format override ok" } }],
+            "model": "test-model"
         })))
         .mount(&mock_server)
         .await;
@@ -359,7 +362,8 @@ async fn test_deepseek_variant_flash_maps_to_model_id() {
             "model": "deepseek-v4-flash"
         })))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-            "choices": [{ "message": { "content": "Flash OK" } }]
+            "choices": [{ "message": { "content": "Flash OK" } }],
+            "model": "test-model"
         })))
         .mount(&mock_server)
         .await;
@@ -385,7 +389,8 @@ async fn test_deepseek_variant_pro_maps_to_model_id() {
             "model": "deepseek-v4-pro"
         })))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-            "choices": [{ "message": { "content": "Pro OK" } }]
+            "choices": [{ "message": { "content": "Pro OK" } }],
+            "model": "test-model"
         })))
         .mount(&mock_server)
         .await;
@@ -429,7 +434,8 @@ async fn test_openai_variant_ignored_sends_configured_model() {
             "model": "gpt-4o-mini"
         })))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-            "choices": [{ "message": { "content": "OpenAI ignore variant OK" } }]
+            "choices": [{ "message": { "content": "OpenAI ignore variant OK" } }],
+            "model": "test-model"
         })))
         .mount(&mock_server)
         .await;
@@ -473,7 +479,8 @@ async fn test_kimi_variant_thinking_on_sends_thinking_enabled() {
             "thinking": { "type": "enabled" }
         })))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-            "choices": [{ "message": { "content": "Kimi thinking-on OK" } }]
+            "choices": [{ "message": { "content": "Kimi thinking-on OK" } }],
+            "model": "test-model"
         })))
         .mount(&mock_server)
         .await;
@@ -498,7 +505,8 @@ async fn test_kimi_variant_thinking_off_sends_thinking_disabled() {
             "thinking": { "type": "disabled" }
         })))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-            "choices": [{ "message": { "content": "Kimi thinking-off OK" } }]
+            "choices": [{ "message": { "content": "Kimi thinking-off OK" } }],
+            "model": "test-model"
         })))
         .mount(&mock_server)
         .await;
@@ -525,7 +533,8 @@ async fn test_openrouter_default_referer_header_sent() {
         ))
         .and(header("X-Title", "rs-guard"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-            "choices": [{ "message": { "content": "default referer ok" } }]
+            "choices": [{ "message": { "content": "default referer ok" } }],
+            "model": "test-model"
         })))
         .mount(&mock_server)
         .await;
@@ -551,7 +560,8 @@ async fn test_openrouter_custom_referer_override() {
         .and(header("HTTP-Referer", "https://my-bot.example.com"))
         .and(header("X-Title", "rs-guard"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-            "choices": [{ "message": { "content": "override referer ok" } }]
+            "choices": [{ "message": { "content": "override referer ok" } }],
+            "model": "test-model"
         })))
         .mount(&mock_server)
         .await;
@@ -576,7 +586,8 @@ async fn test_qwen_result_format_sent() {
             "result_format": "message"
         })))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-            "choices": [{ "message": { "content": "qwen result_format ok" } }]
+            "choices": [{ "message": { "content": "qwen result_format ok" } }],
+            "model": "test-model"
         })))
         .mount(&mock_server)
         .await;
