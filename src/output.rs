@@ -50,6 +50,11 @@ pub struct ReviewMetrics {
     pub project_rules_file: Option<String>,
     /// Number of secret patterns redacted from the outbound diff before the LLM call.
     pub secrets_redacted_count: u32,
+    /// Number of chunks reviewed in multi-pass mode (1 for single-pass).
+    pub multi_pass_chunk_count: u32,
+    /// Number of chunks that failed during multi-pass (0 for single-pass or
+    /// full success).
+    pub multi_pass_failed_chunks: u32,
 }
 
 /// Machine-readable review result for `--format json`.
@@ -353,6 +358,8 @@ mod tests {
             state: "APPROVE".to_string(),
             project_rules_file: None,
             secrets_redacted_count: 0,
+            multi_pass_chunk_count: 1,
+            multi_pass_failed_chunks: 0,
         };
 
         write_metrics(&metrics, path_str).unwrap();

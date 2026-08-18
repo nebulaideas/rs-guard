@@ -70,11 +70,11 @@ rs-guard/
 ├── src/                           # Single crate source (17 modules)
 │   ├── main.rs                    # CLI entry point (thin)
 │   ├── lib.rs                     # Library root
-│   ├── pipeline.rs                # Orchestration + PipelineResult
+│   ├── pipeline.rs                # Orchestration + PipelineResult + multi-pass review
 │   ├── cache.rs                   # LLM response caching (SHA-256 keyed)
 │   ├── cli.rs                     # Clap argument parsing
 │   ├── config.rs                  # Env vars + .reviewer.toml parsing
-│   ├── diff.rs                    # PR diff fetching + local diff + chunking + .rs-guardignore
+│   ├── diff.rs                    # PR diff fetching + local diff + chunking + .rs-guardignore + split_diff_by_files
 │   ├── error.rs                   # RsGuardError enum
 │   ├── github.rs                  # GitHub API review submission
 │   ├── http.rs                    # HTTP utilities + URL validation
@@ -90,7 +90,7 @@ rs-guard/
 │   ├── retry.rs                   # Retry logic + circuit breaker
 │   ├── rules.rs                   # Project rules file detection and loading
 │   ├── scaffold.rs                # init / generate-prompt / generate-workflow / validate-config
-│   └── verdict.rs                 # Verdict parsing + review state
+│   └── verdict.rs                 # Verdict parsing + review state + Verdict::merge_multi
 ├── benches/
 │   └── verdict.rs                 # Criterion benchmarks (11 scenarios)
 ├── tests/

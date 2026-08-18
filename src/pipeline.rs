@@ -8,7 +8,7 @@ use crate::cli::OutputFormat;
 use crate::config::{CiConfig, Config, THINKING_MIN_MAX_TOKENS};
 use crate::diff::{
     apply_path_filters_with_ignore, chunk_diff_with_params, fetch_file_diff, fetch_local_diff,
-    fetch_pr_diff, fetch_range_diff, DiffLimits, DiffResult,
+    fetch_pr_diff, fetch_range_diff, split_diff_by_files, DiffLimits, DiffResult,
 };
 use crate::error::RsGuardError;
 use crate::github::{
@@ -22,7 +22,9 @@ use crate::output::{
 };
 use crate::redact::{log_redacted, redact_secrets};
 use crate::retry::with_retry_predicated;
-use crate::verdict::{parse_metadata_block, parse_verdict, strip_findings_json, ReviewState};
+use crate::verdict::{
+    parse_metadata_block, parse_verdict, strip_findings_json, ReviewState, Verdict,
+};
 use anyhow::Context;
 use std::path::PathBuf;
 
@@ -497,6 +499,8 @@ fn write_review_outputs(
         state: state.to_string(),
         project_rules_file: config.project_rules_file.clone(),
         secrets_redacted_count,
+        multi_pass_chunk_count: 1,
+        multi_pass_failed_chunks: 0,
     };
 
     let metrics_path =
@@ -844,6 +848,520 @@ fn handle_local_output(
     }
 }
 
+/// Result of reviewing a single chunk in multi-pass mode.
+#[allow(dead_code)]
+struct ChunkResult {
+    /// The chunk index (0-based).
+    index: usize,
+    /// The LLM response text.
+    response: String,
+    /// The parsed verdict.
+    verdict: Verdict,
+    /// The review state derived from the verdict.
+    state: ReviewState,
+    /// Token usage from the API (if available).
+    usage: Option<crate::llm::TokenUsage>,
+    /// Whether this chunk was a cache hit.
+    cache_hit: bool,
+    /// Latency for this chunk's LLM call.
+    latency: std::time::Duration,
+}
+
+/// Runs the multi-pass review pipeline.
+///
+/// Splits the diff by file sections into chunks, reviews each chunk
+/// independently with bounded concurrency, aggregates the per-chunk verdicts,
+/// and submits a single GitHub review.
+///
+/// # Arguments
+///
+/// * `config` — Resolved configuration (must have `multi_pass = true`).
+/// * `diff` — The filtered diff to review.
+/// * `cache` — Response cache.
+/// * `composed_prompt` — The composed system prompt (same for all chunks).
+/// * `secrets_redacted_count` — Count of secrets redacted across all chunks.
+async fn run_multi_pass_pipeline(
+    config: &Config,
+    diff: &DiffResult,
+    cache: &DiffCache,
+    composed_prompt: &str,
+    secrets_redacted_count: u32,
+) -> anyhow::Result<PipelineResult> {
+    let chunks = split_diff_by_files(&diff.content, config.multi_pass_max_chunks);
+    let chunk_count = chunks.len();
+
+    log::info!(
+        "Multi-pass: split diff into {} chunk(s) (max_chunks={})",
+        chunk_count,
+        config.multi_pass_max_chunks
+    );
+    if !config.is_ci {
+        eprintln!(
+            "info: multi-pass review — {} chunk(s), max {} concurrent",
+            chunk_count, config.multi_pass_max_concurrent
+        );
+    }
+
+    // Cost guard: estimate total cost before making any calls.
+    if let Some(max_cost) = config.multi_pass_max_cost_cents {
+        let total_estimated_tokens: usize = chunks
+            .iter()
+            .map(|c| estimate_tokens(composed_prompt) + estimate_tokens(&c.content))
+            .sum();
+        // Rough cost estimate: assume 1:1 input/output ratio for estimation.
+        let estimated_cost = estimate_cost_cents(
+            &config.provider,
+            total_estimated_tokens as u64,
+            total_estimated_tokens as u64 / 4,
+            config.pricing.as_ref(),
+        )
+        .unwrap_or(0.0);
+        if estimated_cost > max_cost {
+            anyhow::bail!(
+                "Multi-pass cost estimate {:.2}¢ exceeds cap {:.2}¢ — aborting before any LLM calls \
+                 (use --multi-pass-max-cost-cents to raise the cap)",
+                estimated_cost,
+                max_cost
+            );
+        }
+        log::info!(
+            "Multi-pass cost estimate: {:.2}¢ (cap: {:.2}¢)",
+            estimated_cost,
+            max_cost
+        );
+    }
+
+    let max_concurrent = config.multi_pass_max_concurrent.max(1);
+    let start = std::time::Instant::now();
+
+    // Use a semaphore to bound concurrency.
+    let semaphore = std::sync::Arc::new(tokio::sync::Semaphore::new(max_concurrent));
+    let mut join_set = tokio::task::JoinSet::new();
+
+    for chunk in &chunks {
+        let chunk_content = chunk.content.clone();
+        let chunk_index = chunk.index;
+        let prompt = composed_prompt.to_string();
+        let permit_sem = semaphore.clone();
+        let config_clone = config.clone();
+        let cache_ref = cache.clone();
+
+        join_set.spawn(async move {
+            let _permit = permit_sem
+                .acquire()
+                .await
+                .map_err(|e| anyhow::anyhow!("Semaphore closed: {}", e))?;
+            let chunk_start = std::time::Instant::now();
+
+            // Redact secrets from the chunk.
+            let (redacted_content, _) = crate::redact::redact_secrets_with_count(&chunk_content);
+
+            // Check cache.
+            let base_url = config_clone
+                .provider_config
+                .base_url
+                .as_deref()
+                .unwrap_or("");
+            let cached = cache_ref.get_with_project_rules(
+                &redacted_content,
+                &prompt,
+                config_clone.project_rules.as_deref(),
+                &config_clone.provider,
+                &config_clone.model,
+                config_clone.variant.as_deref(),
+                config_clone.temperature,
+                base_url,
+                config_clone.provider_config.max_tokens,
+                config_clone.provider_config.result_format.as_deref(),
+                config_clone.findings,
+            );
+
+            if let Some(cached_response) = cached {
+                log::info!("Chunk {} — cache hit", chunk_index);
+                let (verdict, state) =
+                    parse_verdict(&cached_response, config_clone.important_threshold)
+                        .context("Failed to parse verdict from cached chunk response")?;
+                return Ok::<_, anyhow::Error>(ChunkResult {
+                    index: chunk_index,
+                    response: cached_response,
+                    verdict,
+                    state,
+                    usage: None,
+                    cache_hit: true,
+                    latency: chunk_start.elapsed(),
+                });
+            }
+
+            if !config_clone.is_ci {
+                eprintln!(
+                    "🤖 Chunk {} — calling {} ({})...",
+                    chunk_index, config_clone.provider, config_clone.model
+                );
+            }
+
+            let result = call_llm_with_budget_escalation(&config_clone, &prompt, &redacted_content)
+                .await
+                .context("LLM API call failed for chunk")?;
+
+            // Cache the response.
+            if !config_clone.no_cache {
+                cache_ref.set_with_project_rules(
+                    &redacted_content,
+                    &prompt,
+                    config_clone.project_rules.as_deref(),
+                    &config_clone.provider,
+                    &config_clone.model,
+                    config_clone.variant.as_deref(),
+                    config_clone.temperature,
+                    base_url,
+                    config_clone.provider_config.max_tokens,
+                    config_clone.provider_config.result_format.as_deref(),
+                    config_clone.findings,
+                    &result.content,
+                )?;
+            }
+
+            let (verdict, state) = parse_verdict(&result.content, config_clone.important_threshold)
+                .context("Failed to parse verdict from chunk response")?;
+
+            Ok(ChunkResult {
+                index: chunk_index,
+                response: result.content,
+                verdict,
+                state,
+                usage: result.usage,
+                cache_hit: false,
+                latency: chunk_start.elapsed(),
+            })
+        });
+    }
+
+    // Collect results, tolerating partial failures.
+    let mut results: Vec<ChunkResult> = Vec::new();
+    let mut failed_count = 0u32;
+
+    while let Some(res) = join_set.join_next().await {
+        match res {
+            Ok(Ok(chunk_result)) => results.push(chunk_result),
+            Ok(Err(e)) => {
+                failed_count += 1;
+                log::warn!("Multi-pass chunk failed: {}", e);
+            }
+            Err(e) => {
+                failed_count += 1;
+                log::warn!("Multi-pass chunk task panicked: {}", e);
+            }
+        }
+    }
+
+    let total_latency = start.elapsed();
+
+    // Sort by index for deterministic ordering.
+    results.sort_by_key(|r| r.index);
+
+    if results.is_empty() {
+        anyhow::bail!(
+            "Multi-pass review failed — all {} chunk(s) failed",
+            failed_count
+        );
+    }
+
+    if failed_count > 0 {
+        log::warn!(
+            "Multi-pass: {} of {} chunk(s) failed — reviewing with {} successful chunk(s)",
+            failed_count,
+            chunk_count,
+            results.len()
+        );
+    }
+
+    // Aggregate verdicts.
+    let verdicts: Vec<Verdict> = results.iter().map(|r| r.verdict.clone()).collect();
+    let aggregated_verdict = Verdict::merge_multi(&verdicts, config.important_threshold);
+    let mut aggregated_state =
+        crate::verdict::determine_review_state(&aggregated_verdict, config.important_threshold);
+
+    // Security: when chunks failed, the review is incomplete. Force a
+    // non-approving state so unreviewed code cannot pass the gate.
+    if failed_count > 0 {
+        log::warn!(
+            "Multi-pass: forcing COMMENT state due to {} failed chunk(s) — review incomplete",
+            failed_count
+        );
+        aggregated_state = ReviewState::Comment;
+    }
+
+    // Aggregate token usage.
+    let total_tokens_in: u64 = results
+        .iter()
+        .map(|r| {
+            r.usage
+                .as_ref()
+                .and_then(|u| u.prompt_tokens)
+                .unwrap_or_else(|| {
+                    estimate_tokens(composed_prompt) as u64
+                        + estimate_tokens(&chunks[r.index].content) as u64
+                })
+        })
+        .sum();
+    let total_tokens_out: u64 = results
+        .iter()
+        .map(|r| {
+            r.usage
+                .as_ref()
+                .and_then(|u| u.completion_tokens)
+                .unwrap_or_else(|| estimate_tokens(&r.response) as u64)
+        })
+        .sum();
+    let has_api_usage = results
+        .iter()
+        .any(|r| r.usage.as_ref().map(|u| u.has_any()).unwrap_or(false));
+    let token_source = if has_api_usage { "api" } else { "estimate" };
+
+    let estimated_cost_cents = estimate_cost_cents(
+        &config.provider,
+        total_tokens_in,
+        total_tokens_out,
+        config.pricing.as_ref(),
+    );
+
+    // Compose review body from all chunk responses.
+    let review_body =
+        compose_multi_pass_review_body(&results, &aggregated_verdict, chunk_count, failed_count);
+
+    log::info!(
+        "Multi-pass aggregated verdict: {} (CriticalIssues: {}, SecurityIssues: {}, \
+         ImportantIssues: {}, Suggestions: {}) -> State: {} ({} of {} chunks succeeded)",
+        aggregated_verdict.verdict,
+        aggregated_verdict.critical_issues,
+        aggregated_verdict.security_issues,
+        aggregated_verdict.important_issues,
+        aggregated_verdict.suggestions,
+        aggregated_state,
+        results.len(),
+        chunk_count
+    );
+
+    // Write outputs (artifact + metrics).
+    let review_config = ReviewConfig {
+        provider: config.provider.clone(),
+        model: config.model.clone(),
+        variant: config.variant.clone(),
+        temperature: config.temperature,
+        pr_number: config.pr_number,
+        diff_size_bytes: diff.size_bytes,
+        diff_line_count: diff.line_count,
+    };
+
+    // Use the first chunk's response for the artifact (or concatenate).
+    let combined_response: String = results
+        .iter()
+        .map(|r| format!("--- Chunk {} ---\n{}\n", r.index + 1, r.response))
+        .collect();
+
+    write_review_outputs(
+        config,
+        diff,
+        &combined_response,
+        &aggregated_verdict,
+        &aggregated_state,
+        &review_config,
+        total_tokens_in,
+        total_tokens_out,
+        token_source,
+        total_latency,
+        estimated_cost_cents,
+        secrets_redacted_count,
+    )?;
+
+    // Write metrics with multi-pass fields.
+    let metrics = ReviewMetrics {
+        provider: config.provider.clone(),
+        model: config.model.clone(),
+        variant: config.variant.clone(),
+        estimated_tokens_in: total_tokens_in as usize,
+        estimated_tokens_out: total_tokens_out as usize,
+        token_source: token_source.to_string(),
+        latency_secs: total_latency.as_secs_f64(),
+        estimated_cost_cents,
+        diff_lines: diff.line_count,
+        verdict: aggregated_verdict.verdict.clone(),
+        state: aggregated_state.to_string(),
+        project_rules_file: config.project_rules_file.clone(),
+        secrets_redacted_count,
+        multi_pass_chunk_count: chunk_count as u32,
+        multi_pass_failed_chunks: failed_count,
+    };
+
+    let metrics_path =
+        std::env::var("RS_GUARD_METRICS_PATH").unwrap_or_else(|_| METRICS_FILENAME.to_string());
+    if let Err(e) = write_metrics(&metrics, &metrics_path) {
+        log::warn!("Failed to write metrics: {}", e);
+    }
+
+    // JSON output.
+    if config.output_format == OutputFormat::Json {
+        let json = ReviewResultJson {
+            verdict: aggregated_verdict.verdict.clone(),
+            critical_issues: aggregated_verdict.critical_issues,
+            security_issues: aggregated_verdict.security_issues,
+            important_issues: aggregated_verdict.important_issues,
+            suggestions: aggregated_verdict.suggestions,
+            state: aggregated_state.to_string(),
+            provider: config.provider.clone(),
+            model: config.model.clone(),
+            variant: config.variant.clone(),
+            estimated_tokens_in: total_tokens_in as usize,
+            estimated_tokens_out: total_tokens_out as usize,
+            token_source: token_source.to_string(),
+            latency_secs: total_latency.as_secs_f64(),
+            estimated_cost_cents,
+            diff_lines: diff.line_count,
+            project_rules_file: config.project_rules_file.clone(),
+            dry_run: config.dry_run,
+        };
+        write_json_result(&json, &mut std::io::stdout())
+            .context("Failed to write JSON review result")?;
+    }
+
+    // Submit review (CI mode) or print summary (local mode).
+    if config.is_ci {
+        handle_ci_output_multi_pass(
+            config,
+            diff,
+            &aggregated_verdict,
+            &aggregated_state,
+            &review_body,
+            total_tokens_in,
+            total_tokens_out,
+            token_source,
+            total_latency,
+            estimated_cost_cents,
+            chunk_count,
+            failed_count,
+        )
+        .await
+    } else {
+        handle_local_output(
+            config,
+            &combined_response,
+            &aggregated_verdict,
+            &aggregated_state,
+            &review_config,
+            false, // was_chunked — multi-pass doesn't use head/tail chunking
+            0,     // removed_lines
+        )
+    }
+}
+
+/// Composes the review body for a multi-pass review, summarizing per-chunk
+/// results and the aggregated verdict.
+fn compose_multi_pass_review_body(
+    results: &[ChunkResult],
+    aggregated: &Verdict,
+    chunk_count: usize,
+    failed_count: u32,
+) -> String {
+    let mut body = String::new();
+
+    body.push_str(&format!("## Multi-pass Review ({} chunk(s)", chunk_count));
+    if failed_count > 0 {
+        body.push_str(&format!(", {} failed", failed_count));
+    }
+    body.push_str(")\n\n");
+
+    body.push_str(&format!("**Aggregated Verdict:** {}\n\n", aggregated));
+
+    for result in results {
+        body.push_str(&format!(
+            "### Chunk {} — {}\n\n",
+            result.index + 1,
+            result.verdict
+        ));
+        // Include a trimmed version of the chunk response.
+        let trimmed = if result.response.len() > 4000 {
+            format!("{}...\n[truncated]", &result.response[..4000])
+        } else {
+            result.response.clone()
+        };
+        body.push_str(&trimmed);
+        body.push_str("\n\n");
+    }
+
+    if failed_count > 0 {
+        body.push_str(&format!(
+            "⚠️ {} chunk(s) failed during review. The aggregated verdict covers \
+             only the successful chunk(s).\n",
+            failed_count
+        ));
+    }
+
+    body
+}
+
+/// Handles CI output for multi-pass review (submits the aggregated review).
+#[allow(clippy::too_many_arguments)]
+async fn handle_ci_output_multi_pass(
+    config: &Config,
+    _diff: &DiffResult,
+    _verdict: &Verdict,
+    state: &ReviewState,
+    review_body: &str,
+    _tokens_in: u64,
+    _tokens_out: u64,
+    _token_source: &str,
+    _latency: std::time::Duration,
+    _estimated_cost_cents: Option<f64>,
+    chunk_count: usize,
+    failed_count: u32,
+) -> anyhow::Result<PipelineResult> {
+    let ci_config = config
+        .validate_for_ci()
+        .context("CI configuration validation failed")?;
+
+    let mut full_body = review_body.to_string();
+    if failed_count > 0 {
+        full_body = format!(
+            "⚠️ Multi-pass: {} of {} chunk(s) failed.\n\n{}",
+            failed_count, chunk_count, full_body
+        );
+    }
+
+    submit_ci_review(config, state, &full_body).await?;
+
+    // Check Run (non-blocking).
+    if config.check_run {
+        let sha = resolve_check_run_sha(config.check_run_sha.as_deref())
+            .map_err(|e| anyhow::anyhow!("Failed to resolve Check Run SHA: {}", e))?;
+        let conclusion = review_state_to_conclusion(state);
+        if let Err(e) = create_check_run(
+            &ci_config.github_base_url,
+            &ci_config.repo_owner,
+            &ci_config.repo_name,
+            &config.check_run_name,
+            &sha,
+            state,
+            conclusion,
+            &full_body,
+            &ci_config.github_token,
+        )
+        .await
+        {
+            log::warn!("Failed to create Check Run: {}", e);
+        }
+    }
+
+    if *state == ReviewState::RequestChanges {
+        Ok(PipelineResult::ReviewBlocked)
+    } else if failed_count > 0 {
+        // Partial failure forces COMMENT state — treat as blocked so the
+        // gate does not pass with unreviewed code.
+        Ok(PipelineResult::ReviewBlocked)
+    } else {
+        Ok(PipelineResult::Success)
+    }
+}
+
 /// Runs the full review pipeline with the given configuration.
 ///
 /// This function is separated from `main` to enable integration testing
@@ -937,6 +1455,19 @@ pub async fn run_pipeline(
         rules_path,
         config.findings,
     );
+
+    // Multi-pass branch: split diff by files and review each chunk independently.
+    if config.multi_pass {
+        log::info!("Multi-pass review enabled — splitting diff by file sections");
+        return run_multi_pass_pipeline(
+            &config,
+            &diff,
+            &cache,
+            &composed_prompt,
+            u32::try_from(secrets_redacted_count).unwrap_or(u32::MAX),
+        )
+        .await;
+    }
 
     let start = std::time::Instant::now();
     let estimated_tokens_in = estimate_tokens(&composed_prompt) + estimate_tokens(&diff_content);

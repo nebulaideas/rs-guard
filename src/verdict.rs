@@ -320,6 +320,83 @@ impl Verdict {
     pub fn has_findings(&self) -> bool {
         !self.findings.is_empty()
     }
+
+    /// Merges multiple per-chunk verdicts into a single aggregated verdict
+    /// for multi-pass review.
+    ///
+    /// **Aggregation rules:**
+    ///
+    /// - Severity counts are **summed** across all chunk verdicts (e.g. if
+    ///   chunk A has 2 critical issues and chunk B has 1, the merged verdict
+    ///   has 3 critical issues).
+    /// - All structured findings from all chunks are concatenated.
+    /// - The final verdict string is `"NEGATIVE"` if **any** chunk verdict is
+    ///   blocking (i.e. has `Critical`/`Security` issues, or `Important` issues
+    ///   ≥ `important_threshold`). Otherwise it is `"POSITIVE"` only if **all**
+    ///   chunk verdicts are `"POSITIVE"`.
+    /// - An empty slice returns a default `POSITIVE` verdict with zero counts.
+    ///
+    /// **Precondition:** Each input verdict should come from [`parse_verdict`],
+    /// which already reconciles metadata counts with structured findings using
+    /// the max-rule (`merge_with_findings`). This ensures the severity counts
+    /// and findings in each input are consistent. Passing manually constructed
+    /// verdicts with mismatched counts and findings will produce an aggregate
+    /// with the same inconsistency.
+    ///
+    /// # Arguments
+    ///
+    /// * `verdicts` — The per-chunk verdicts to merge.
+    /// * `important_threshold` — The `Important` issue count that triggers a
+    ///   blocking review. `0` disables blocking on important issues.
+    pub fn merge_multi(verdicts: &[Verdict], important_threshold: u32) -> Self {
+        if verdicts.is_empty() {
+            return Verdict {
+                verdict: "POSITIVE".to_string(),
+                critical_issues: 0,
+                security_issues: 0,
+                important_issues: 0,
+                suggestions: 0,
+                findings: Vec::new(),
+            };
+        }
+
+        let mut critical_issues = 0u32;
+        let mut security_issues = 0u32;
+        let mut important_issues = 0u32;
+        let mut suggestions = 0u32;
+        let mut all_findings = Vec::new();
+        let mut all_positive = true;
+
+        for v in verdicts {
+            critical_issues = critical_issues.saturating_add(v.critical_issues);
+            security_issues = security_issues.saturating_add(v.security_issues);
+            important_issues = important_issues.saturating_add(v.important_issues);
+            suggestions = suggestions.saturating_add(v.suggestions);
+            all_findings.extend(v.findings.clone());
+            if v.verdict != "POSITIVE" {
+                all_positive = false;
+            }
+        }
+
+        let blocks = critical_issues > 0
+            || security_issues > 0
+            || (important_threshold > 0 && important_issues >= important_threshold);
+
+        let verdict = if blocks || !all_positive {
+            "NEGATIVE".to_string()
+        } else {
+            "POSITIVE".to_string()
+        };
+
+        Verdict {
+            verdict,
+            critical_issues,
+            security_issues,
+            important_issues,
+            suggestions,
+            findings: all_findings,
+        }
+    }
 }
 
 impl std::fmt::Display for Verdict {
@@ -687,6 +764,185 @@ pub fn strip_findings_json(response: &str) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ─── Verdict::merge_multi tests ───
+
+    fn make_verdict(
+        verdict: &str,
+        critical: u32,
+        security: u32,
+        important: u32,
+        suggestions: u32,
+    ) -> Verdict {
+        Verdict {
+            verdict: verdict.to_string(),
+            critical_issues: critical,
+            security_issues: security,
+            important_issues: important,
+            suggestions,
+            findings: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn test_merge_multi_empty_returns_positive() {
+        let merged = Verdict::merge_multi(&[], 3);
+        assert_eq!(merged.verdict, "POSITIVE");
+        assert_eq!(merged.critical_issues, 0);
+        assert_eq!(merged.security_issues, 0);
+        assert_eq!(merged.important_issues, 0);
+        assert_eq!(merged.suggestions, 0);
+    }
+
+    #[test]
+    fn test_merge_multi_all_positive_stays_positive() {
+        let v1 = make_verdict("POSITIVE", 0, 0, 0, 2);
+        let v2 = make_verdict("POSITIVE", 0, 0, 0, 1);
+        let merged = Verdict::merge_multi(&[v1, v2], 3);
+        assert_eq!(merged.verdict, "POSITIVE");
+        assert_eq!(merged.suggestions, 3);
+    }
+
+    #[test]
+    fn test_merge_multi_one_negative_makes_negative() {
+        let v1 = make_verdict("POSITIVE", 0, 0, 0, 0);
+        let v2 = make_verdict("NEGATIVE", 0, 0, 0, 0);
+        let merged = Verdict::merge_multi(&[v1, v2], 3);
+        assert_eq!(merged.verdict, "NEGATIVE");
+    }
+
+    #[test]
+    fn test_merge_multi_sums_severity_counts() {
+        let v1 = make_verdict("NEGATIVE", 2, 1, 3, 5);
+        let v2 = make_verdict("NEGATIVE", 1, 0, 2, 3);
+        let merged = Verdict::merge_multi(&[v1, v2], 3);
+        assert_eq!(merged.critical_issues, 3);
+        assert_eq!(merged.security_issues, 1);
+        assert_eq!(merged.important_issues, 5);
+        assert_eq!(merged.suggestions, 8);
+    }
+
+    #[test]
+    fn test_merge_multi_critical_blocks_regardless_of_threshold() {
+        let v1 = make_verdict("POSITIVE", 0, 0, 0, 0);
+        let v2 = make_verdict("POSITIVE", 1, 0, 0, 0);
+        let merged = Verdict::merge_multi(&[v1, v2], 3);
+        assert_eq!(merged.verdict, "NEGATIVE");
+        assert_eq!(merged.critical_issues, 1);
+    }
+
+    #[test]
+    fn test_merge_multi_important_meets_threshold_blocks() {
+        let v1 = make_verdict("POSITIVE", 0, 0, 1, 0);
+        let v2 = make_verdict("POSITIVE", 0, 0, 2, 0);
+        let merged = Verdict::merge_multi(&[v1, v2], 3);
+        assert_eq!(merged.verdict, "NEGATIVE");
+        assert_eq!(merged.important_issues, 3);
+    }
+
+    #[test]
+    fn test_merge_multi_important_below_threshold_stays_positive() {
+        let v1 = make_verdict("POSITIVE", 0, 0, 1, 0);
+        let v2 = make_verdict("POSITIVE", 0, 0, 1, 0);
+        let merged = Verdict::merge_multi(&[v1, v2], 3);
+        assert_eq!(merged.verdict, "POSITIVE");
+        assert_eq!(merged.important_issues, 2);
+    }
+
+    #[test]
+    fn test_merge_multi_threshold_zero_disables_important_blocking() {
+        let v1 = make_verdict("POSITIVE", 0, 0, 10, 0);
+        let merged = Verdict::merge_multi(&[v1], 0);
+        assert_eq!(merged.verdict, "POSITIVE");
+        assert_eq!(merged.important_issues, 10);
+    }
+
+    #[test]
+    fn test_merge_multi_security_blocks() {
+        let v1 = make_verdict("POSITIVE", 0, 0, 0, 0);
+        let v2 = make_verdict("POSITIVE", 0, 1, 0, 0);
+        let merged = Verdict::merge_multi(&[v1, v2], 3);
+        assert_eq!(merged.verdict, "NEGATIVE");
+        assert_eq!(merged.security_issues, 1);
+    }
+
+    #[test]
+    fn test_merge_multi_saturating_add_on_overflow() {
+        let v1 = make_verdict("NEGATIVE", u32::MAX, 0, 0, 0);
+        let v2 = make_verdict("NEGATIVE", 1, 0, 0, 0);
+        let merged = Verdict::merge_multi(&[v1, v2], 3);
+        assert_eq!(merged.critical_issues, u32::MAX);
+    }
+
+    #[test]
+    fn test_merge_multi_concatenates_findings() {
+        let f1 = Finding {
+            path: "a.rs".to_string(),
+            line: 10,
+            severity: FindingSeverity::Critical,
+            message: "Issue in chunk 1".to_string(),
+            suggestion: None,
+        };
+        let f2 = Finding {
+            path: "b.rs".to_string(),
+            line: 42,
+            severity: FindingSeverity::Suggestion,
+            message: "Issue in chunk 2".to_string(),
+            suggestion: Some("fix it".to_string()),
+        };
+        let v1 = Verdict {
+            verdict: "NEGATIVE".to_string(),
+            critical_issues: 1,
+            security_issues: 0,
+            important_issues: 0,
+            suggestions: 0,
+            findings: vec![f1],
+        };
+        let v2 = Verdict {
+            verdict: "POSITIVE".to_string(),
+            critical_issues: 0,
+            security_issues: 0,
+            important_issues: 0,
+            suggestions: 1,
+            findings: vec![f2],
+        };
+        let merged = Verdict::merge_multi(&[v1, v2], 3);
+        assert_eq!(merged.findings.len(), 2);
+        assert_eq!(merged.critical_issues, 1);
+        assert_eq!(merged.suggestions, 1);
+    }
+
+    #[test]
+    fn test_merge_multi_single_verdict_returns_equivalent() {
+        let v = make_verdict("NEGATIVE", 1, 2, 3, 4);
+        let merged = Verdict::merge_multi(std::slice::from_ref(&v), 3);
+        assert_eq!(merged.verdict, "NEGATIVE");
+        assert_eq!(merged.critical_issues, 1);
+        assert_eq!(merged.security_issues, 2);
+        assert_eq!(merged.important_issues, 3);
+        assert_eq!(merged.suggestions, 4);
+    }
+
+    #[test]
+    fn test_merge_multi_explicit_negative_with_zero_counts_stays_negative() {
+        // An LLM may emit Verdict: NEGATIVE without filling in numeric counts.
+        // The merge must preserve the explicit NEGATIVE — it must not be
+        // downgraded to POSITIVE by zero counts.
+        let v = make_verdict("NEGATIVE", 0, 0, 0, 0);
+        let merged = Verdict::merge_multi(std::slice::from_ref(&v), 3);
+        assert_eq!(merged.verdict, "NEGATIVE");
+    }
+
+    #[test]
+    fn test_merge_multi_one_explicit_negative_makes_all_negative() {
+        let v1 = make_verdict("POSITIVE", 0, 0, 0, 0);
+        let v2 = make_verdict("NEGATIVE", 0, 0, 0, 0);
+        let v3 = make_verdict("POSITIVE", 0, 0, 0, 0);
+        let merged = Verdict::merge_multi(&[v1, v2, v3], 3);
+        assert_eq!(merged.verdict, "NEGATIVE");
+    }
+
+    // ─── existing tests ───
 
     #[test]
     fn test_parse_valid_positive() {

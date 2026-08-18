@@ -380,6 +380,95 @@ pub fn filter_diff_by_paths_with_ignore(
     out
 }
 
+/// A single file-section chunk produced by [`split_diff_by_files`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[must_use = "DiffChunk should be used for multi-pass review"]
+pub struct DiffChunk {
+    /// 0-based index of this chunk in the split sequence.
+    pub index: usize,
+    /// The diff content for this chunk (one or more `diff --git` sections).
+    pub content: String,
+    /// Number of lines in this chunk.
+    pub line_count: usize,
+}
+
+/// Splits a unified diff into chunks, each containing one or more `diff --git`
+/// file sections.
+///
+/// This is the primary split strategy for multi-pass review: each file section
+/// becomes a chunk (or multiple file sections are merged into a chunk when the
+/// total number of files exceeds `max_chunks`).
+///
+/// # Arguments
+///
+/// * `content` — The full unified diff content.
+/// * `max_chunks` — Upper bound on the number of chunks to produce. When the
+///   number of file sections exceeds this value, sections are merged into
+///   fewer chunks (round-robin distribution). A value of `0` is treated as
+///   `1`.
+///
+/// # Returns
+///
+/// A vector of [`DiffChunk`] values. Returns a single chunk containing the
+/// entire diff when the content has no `diff --git` headers or when
+/// `max_chunks` is `1`.
+#[must_use]
+pub fn split_diff_by_files(content: &str, max_chunks: usize) -> Vec<DiffChunk> {
+    let max_chunks = max_chunks.max(1);
+
+    // Collect individual file sections.
+    let mut sections: Vec<String> = Vec::new();
+    let mut current = String::new();
+
+    for line in content.split_inclusive('\n') {
+        if line.starts_with("diff --git ") && !current.is_empty() {
+            sections.push(std::mem::take(&mut current));
+        }
+        current.push_str(line);
+    }
+    if !current.is_empty() {
+        sections.push(current);
+    }
+
+    // No file sections — return the whole content as one chunk.
+    if sections.is_empty() {
+        return vec![DiffChunk {
+            index: 0,
+            content: content.to_string(),
+            line_count: content.lines().count(),
+        }];
+    }
+
+    // If we have fewer sections than max_chunks, each section is its own chunk.
+    // If more, merge round-robin into max_chunks buckets.
+    if sections.len() <= max_chunks {
+        sections
+            .into_iter()
+            .enumerate()
+            .map(|(i, s)| DiffChunk {
+                index: i,
+                line_count: s.lines().count(),
+                content: s,
+            })
+            .collect()
+    } else {
+        let mut buckets: Vec<String> = vec![String::new(); max_chunks];
+        for (i, section) in sections.into_iter().enumerate() {
+            buckets[i % max_chunks].push_str(&section);
+        }
+        buckets
+            .into_iter()
+            .filter(|b| !b.is_empty())
+            .enumerate()
+            .map(|(i, s)| DiffChunk {
+                index: i,
+                line_count: s.lines().count(),
+                content: s,
+            })
+            .collect()
+    }
+}
+
 /// Validates that the response body looks like a diff and not a JSON error.
 ///
 /// Checks for common diff markers (`diff --git`, `@@`, `---`, `+++`) and
@@ -784,6 +873,100 @@ mod tests {
     use super::*;
     use wiremock::matchers::{header, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    // ─── split_diff_by_files tests ───
+
+    #[test]
+    fn test_split_diff_by_files_single_file() {
+        let diff = "diff --git a/src/main.rs b/src/main.rs\n--- a/src/main.rs\n+++ b/src/main.rs\n@@ -1 +1,2 @@\n+x\n";
+        let chunks = split_diff_by_files(diff, 10);
+        assert_eq!(chunks.len(), 1);
+        assert_eq!(chunks[0].index, 0);
+        assert!(chunks[0].content.contains("src/main.rs"));
+    }
+
+    #[test]
+    fn test_split_diff_by_files_multiple_files() {
+        let diff = "diff --git a/src/main.rs b/src/main.rs\n--- a/src/main.rs\n+++ b/src/main.rs\n@@ -1 +1,2 @@\n+x\ndiff --git a/src/lib.rs b/src/lib.rs\n--- a/src/lib.rs\n+++ b/src/lib.rs\n@@ -1 +1,2 @@\n+y\n";
+        let chunks = split_diff_by_files(diff, 10);
+        assert_eq!(chunks.len(), 2);
+        assert!(chunks[0].content.contains("main.rs"));
+        assert!(!chunks[0].content.contains("lib.rs"));
+        assert!(chunks[1].content.contains("lib.rs"));
+        assert!(!chunks[1].content.contains("main.rs"));
+    }
+
+    #[test]
+    fn test_split_diff_by_files_merges_when_exceeds_max_chunks() {
+        let diff = "diff --git a/a.rs b/a.rs\n--- a/a.rs\n+++ b/a.rs\n@@ -1 +1,2 @@\n+x\ndiff --git a/b.rs b/b.rs\n--- a/b.rs\n+++ b/b.rs\n@@ -1 +1,2 @@\n+y\ndiff --git a/c.rs b/c.rs\n--- a/c.rs\n+++ b/c.rs\n@@ -1 +1,2 @@\n+z\ndiff --git a/d.rs b/d.rs\n--- a/d.rs\n+++ b/d.rs\n@@ -1 +1,2 @@\n+w\n";
+        let chunks = split_diff_by_files(diff, 2);
+        assert_eq!(chunks.len(), 2);
+        // Round-robin: chunk 0 gets a.rs + c.rs, chunk 1 gets b.rs + d.rs
+        assert!(chunks[0].content.contains("a.rs"));
+        assert!(chunks[0].content.contains("c.rs"));
+        assert!(chunks[1].content.contains("b.rs"));
+        assert!(chunks[1].content.contains("d.rs"));
+    }
+
+    #[test]
+    fn test_split_diff_by_files_max_chunks_one_returns_single_chunk() {
+        let diff = "diff --git a/a.rs b/a.rs\n--- a/a.rs\n+++ b/a.rs\n@@ -1 +1,2 @@\n+x\ndiff --git a/b.rs b/b.rs\n--- a/b.rs\n+++ b/b.rs\n@@ -1 +1,2 @@\n+y\n";
+        let chunks = split_diff_by_files(diff, 1);
+        assert_eq!(chunks.len(), 1);
+        assert!(chunks[0].content.contains("a.rs"));
+        assert!(chunks[0].content.contains("b.rs"));
+    }
+
+    #[test]
+    fn test_split_diff_by_files_max_chunks_zero_treated_as_one() {
+        let diff = "diff --git a/a.rs b/a.rs\n--- a/a.rs\n+++ b/a.rs\n@@ -1 +1,2 @@\n+x\n";
+        let chunks = split_diff_by_files(diff, 0);
+        assert_eq!(chunks.len(), 1);
+    }
+
+    #[test]
+    fn test_split_diff_by_files_no_diff_headers_returns_single_chunk() {
+        let content = "just some text\nwithout diff headers\n";
+        let chunks = split_diff_by_files(content, 10);
+        assert_eq!(chunks.len(), 1);
+        assert_eq!(chunks[0].content, content);
+    }
+
+    #[test]
+    fn test_split_diff_by_files_empty_content() {
+        let chunks = split_diff_by_files("", 10);
+        assert_eq!(chunks.len(), 1);
+        assert!(chunks[0].content.is_empty());
+    }
+
+    #[test]
+    fn test_split_diff_by_files_chunk_indices_are_sequential() {
+        let diff = "diff --git a/a.rs b/a.rs\n--- a/a.rs\n+++ b/a.rs\n@@ -1 +1,2 @@\n+x\ndiff --git a/b.rs b/b.rs\n--- a/b.rs\n+++ b/b.rs\n@@ -1 +1,2 @@\n+y\ndiff --git a/c.rs b/c.rs\n--- a/c.rs\n+++ b/c.rs\n@@ -1 +1,2 @@\n+z\n";
+        let chunks = split_diff_by_files(diff, 10);
+        for (i, chunk) in chunks.iter().enumerate() {
+            assert_eq!(chunk.index, i);
+        }
+    }
+
+    #[test]
+    fn test_split_diff_by_files_line_counts() {
+        let diff = "diff --git a/a.rs b/a.rs\n--- a/a.rs\n+++ b/a.rs\n@@ -1 +1,2 @@\n+x\ndiff --git a/b.rs b/b.rs\n--- a/b.rs\n+++ b/b.rs\n@@ -1 +1,2 @@\n+y\n";
+        let chunks = split_diff_by_files(diff, 10);
+        assert_eq!(chunks.len(), 2);
+        // Each file section has 5 lines: diff --git, ---, +++, @@, +x
+        assert_eq!(chunks[0].line_count, 5);
+        assert_eq!(chunks[1].line_count, 5);
+    }
+
+    #[test]
+    fn test_split_diff_by_files_preserves_all_content() {
+        let diff = "diff --git a/a.rs b/a.rs\n--- a/a.rs\n+++ b/a.rs\n@@ -1 +1,2 @@\n+x\ndiff --git a/b.rs b/b.rs\n--- a/b.rs\n+++ b/b.rs\n@@ -1 +1,2 @@\n+y\n";
+        let chunks = split_diff_by_files(diff, 10);
+        let recombined: String = chunks.iter().map(|c| c.content.as_str()).collect();
+        assert_eq!(recombined, diff);
+    }
+
+    // ─── existing tests ───
 
     #[tokio::test]
     async fn test_fetch_pr_diff_success() {

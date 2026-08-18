@@ -305,6 +305,69 @@ pub struct ReviewArgs {
     /// `RS_GUARD_NO_AUTO_PROMPT` env var and `auto_prompt` TOML key.
     #[arg(long, help = "Disable language-aware prompt auto-selection")]
     pub no_auto_prompt: bool,
+
+    /// Enable multi-pass review for large diffs.
+    ///
+    /// When set, the diff is split by file sections into chunks, each chunk
+    /// is reviewed independently, and per-chunk verdicts are aggregated into
+    /// a single review. The `RS_GUARD_MULTI_PASS` env var is handled by the
+    /// config resolver (which correctly parses `false`/`0` as disabling).
+    #[arg(
+        long,
+        help = "Enable multi-pass review (split diff by files, review each chunk)",
+        overrides_with = "no_multi_pass"
+    )]
+    pub multi_pass: bool,
+
+    /// Disable multi-pass review.
+    ///
+    /// When set, overrides `multi_pass = true` from TOML or env. Useful for
+    /// temporarily disabling multi-pass on a specific run without editing
+    /// `.reviewer.toml`.
+    #[arg(
+        long,
+        help = "Disable multi-pass review (overrides TOML/env)",
+        overrides_with = "multi_pass"
+    )]
+    pub no_multi_pass: bool,
+
+    /// Maximum number of chunks for multi-pass review.
+    ///
+    /// When the number of file sections exceeds this value, sections are
+    /// merged into fewer chunks. Default: `10`. The
+    /// `RS_GUARD_MULTI_PASS_MAX_CHUNKS` env var is handled by the config
+    /// resolver.
+    #[arg(
+        long,
+        help = "Maximum chunks for multi-pass review (default: 10)",
+        value_parser = parse_positive_usize
+    )]
+    pub multi_pass_max_chunks: Option<usize>,
+
+    /// Maximum concurrent LLM calls during multi-pass review.
+    ///
+    /// Controls the concurrency of chunk reviews. Default: `3`. The
+    /// `RS_GUARD_MULTI_PASS_MAX_CONCURRENT` env var is handled by the config
+    /// resolver.
+    #[arg(
+        long,
+        help = "Max concurrent LLM calls for multi-pass (default: 3)",
+        value_parser = parse_positive_usize
+    )]
+    pub multi_pass_max_concurrent: Option<usize>,
+
+    /// Optional cost cap in cents (USD) for multi-pass review.
+    ///
+    /// When set, rs-guard estimates the total cost before making any calls
+    /// and aborts if the estimate exceeds this value. The
+    /// `RS_GUARD_MULTI_PASS_MAX_COST_CENTS` env var is handled by the config
+    /// resolver.
+    #[arg(
+        long,
+        help = "Abort multi-pass if estimated total cost exceeds this (cents USD)",
+        value_parser = parse_nonneg_f64
+    )]
+    pub multi_pass_max_cost_cents: Option<f64>,
 }
 
 /// Project type used by `rs-guard init` to select appropriate templates.
@@ -423,6 +486,31 @@ fn parse_temperature(s: &str) -> Result<f32, String> {
             "Temperature must be between 0.0 and 2.0, got: {}",
             v
         ));
+    }
+    Ok(v)
+}
+
+/// Parses a positive (>= 1) usize for multi-pass chunk/concurrency limits.
+fn parse_positive_usize(s: &str) -> Result<usize, String> {
+    let v: usize = s
+        .parse()
+        .map_err(|e| format!("Invalid value '{}': {}", s, e))?;
+    if v == 0 {
+        return Err("Value must be at least 1, got: 0".to_string());
+    }
+    Ok(v)
+}
+
+/// Parses a non-negative f64 for the multi-pass cost cap.
+fn parse_nonneg_f64(s: &str) -> Result<f64, String> {
+    let v: f64 = s
+        .parse()
+        .map_err(|e| format!("Invalid cost '{}': {}", s, e))?;
+    if !v.is_finite() {
+        return Err(format!("Cost must be a finite number, got: {}", v));
+    }
+    if v < 0.0 {
+        return Err(format!("Cost must be non-negative, got: {}", v));
     }
     Ok(v)
 }

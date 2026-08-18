@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Multi-pass large-diff review with aggregated verdict** (issue #113) —
+  rs-guard can now split large diffs by file sections into chunks, review each
+  chunk independently with bounded concurrency, and aggregate the per-chunk
+  verdicts into a single GitHub review. This improves review quality for PRs
+  that touch many files or exceed the head/tail chunking threshold. Opt-in via
+  `--multi-pass` / `RS_GUARD_MULTI_PASS=1` / `multi_pass = true` TOML key.
+  Controls: `--multi-pass-max-chunks` (default 10), `--multi-pass-max-concurrent`
+  (default 3), and `--multi-pass-max-cost-cents` (optional cost guard that
+  aborts before LLM calls if the estimated total exceeds the cap). Aggregation
+  sums severity counts, concatenates findings, and produces a `NEGATIVE`
+  verdict if any chunk is blocking. Partial failures are tolerated — successful
+  chunks are reviewed and the failure count is noted in the review body. New
+  public functions: `split_diff_by_files` (diff.rs) and `Verdict::merge_multi`
+  (verdict.rs). New `DiffChunk` struct. Metrics include `multi_pass_chunk_count`
+  and `multi_pass_failed_chunks` fields.
 - **`.rs-guardignore` and language-aware prompt auto-selection** (issue #114) —
   rs-guard now supports a `.rs-guardignore` file (gitignore syntax) for excluding
   paths from the review diff before size checks and LLM review. Patterns support
