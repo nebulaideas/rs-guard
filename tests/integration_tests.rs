@@ -63,7 +63,7 @@ async fn test_full_pipeline_ci_approve() {
     Mock::given(method("POST"))
         .and(path_regex(r"/chat/completions"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "choices": [{"message": {"content": POSITIVE_RESPONSE}}]
+            "choices": [{"message": {"content": POSITIVE_RESPONSE}}], "model": "test-model"
         })))
         .mount(&llm)
         .await;
@@ -97,7 +97,7 @@ async fn test_full_pipeline_ci_request_changes() {
     Mock::given(method("POST"))
         .and(path_regex(r"/chat/completions"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "choices": [{"message": {"content": NEGATIVE_RESPONSE}}]
+            "choices": [{"message": {"content": NEGATIVE_RESPONSE}}], "model": "test-model"
         })))
         .mount(&llm)
         .await;
@@ -132,7 +132,7 @@ async fn test_full_pipeline_ci_dismisses_previous_reviews() {
     Mock::given(method("POST"))
         .and(path_regex(r"/chat/completions"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "choices": [{"message": {"content": POSITIVE_RESPONSE}}]
+            "choices": [{"message": {"content": POSITIVE_RESPONSE}}], "model": "test-model"
         })))
         .mount(&llm)
         .await;
@@ -180,7 +180,7 @@ async fn test_full_pipeline_local_approve() {
     Mock::given(method("POST"))
         .and(path_regex(r"/chat/completions"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "choices": [{"message": {"content": POSITIVE_RESPONSE}}]
+            "choices": [{"message": {"content": POSITIVE_RESPONSE}}], "model": "test-model"
         })))
         .mount(&llm)
         .await;
@@ -207,7 +207,7 @@ async fn test_full_pipeline_json_format_success() {
     Mock::given(method("POST"))
         .and(path_regex(r"/chat/completions"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "choices": [{"message": {"content": POSITIVE_RESPONSE}}]
+            "choices": [{"message": {"content": POSITIVE_RESPONSE}}], "model": "test-model"
         })))
         .mount(&llm)
         .await;
@@ -343,7 +343,7 @@ async fn test_full_pipeline_with_variant_deepseek_pro() {
         .and(path_regex(r"/chat/completions"))
         .and(body_partial_json(json!({"model": "deepseek-v4-pro"})))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "choices": [{"message": {"content": POSITIVE_RESPONSE}}]
+            "choices": [{"message": {"content": POSITIVE_RESPONSE}}], "model": "test-model"
         })))
         .mount(&llm)
         .await;
@@ -393,7 +393,7 @@ async fn test_full_pipeline_cache_hit() {
     Mock::given(method("POST"))
         .and(path_regex(r"/chat/completions"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "choices": [{"message": {"content": POSITIVE_RESPONSE}}]
+            "choices": [{"message": {"content": POSITIVE_RESPONSE}}], "model": "test-model"
         })))
         .expect(1) // Should only be called once (first run)
         .mount(&llm)
@@ -451,7 +451,7 @@ async fn test_full_pipeline_chunked_diff() {
     Mock::given(method("POST"))
         .and(path_regex(r"/chat/completions"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "choices": [{"message": {"content": POSITIVE_RESPONSE}}]
+            "choices": [{"message": {"content": POSITIVE_RESPONSE}}], "model": "test-model"
         })))
         .mount(&llm)
         .await;
@@ -490,7 +490,7 @@ async fn test_full_pipeline_metrics_file_created() {
     Mock::given(method("POST"))
         .and(path_regex(r"/chat/completions"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "choices": [{"message": {"content": POSITIVE_RESPONSE}}]
+            "choices": [{"message": {"content": POSITIVE_RESPONSE}}], "model": "test-model"
         })))
         .mount(&llm)
         .await;
@@ -533,7 +533,7 @@ async fn test_full_pipeline_local_blocked() {
     Mock::given(method("POST"))
         .and(path_regex(r"/chat/completions"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "choices": [{"message": {"content": NEGATIVE_RESPONSE}}]
+            "choices": [{"message": {"content": NEGATIVE_RESPONSE}}], "model": "test-model"
         })))
         .mount(&llm)
         .await;
@@ -594,7 +594,7 @@ async fn test_full_pipeline_ci_important_issues_yield_comment_not_blocked() {
     Mock::given(method("POST"))
         .and(path_regex(r"/chat/completions"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "choices": [{"message": {"content": IMPORTANT_ISSUES_RESPONSE}}]
+            "choices": [{"message": {"content": IMPORTANT_ISSUES_RESPONSE}}], "model": "test-model"
         })))
         .mount(&llm)
         .await;
@@ -653,7 +653,7 @@ async fn test_full_pipeline_grok_approve() {
     Mock::given(method("POST"))
         .and(path_regex(r"/chat/completions"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "choices": [{"message": {"content": POSITIVE_RESPONSE}}]
+            "choices": [{"message": {"content": POSITIVE_RESPONSE}}], "model": "test-model"
         })))
         .mount(&llm)
         .await;
@@ -693,7 +693,8 @@ async fn test_full_pipeline_empty_content_retried_then_succeeds() {
                     "content": null,
                     "reasoning_content": "long internal reasoning"
                 }
-            }]
+            }],
+            "model": "test-model"
         })))
         .up_to_n_times(1)
         .mount(&llm)
@@ -703,7 +704,7 @@ async fn test_full_pipeline_empty_content_retried_then_succeeds() {
     Mock::given(method("POST"))
         .and(path_regex(r"/chat/completions"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "choices": [{"message": {"content": POSITIVE_RESPONSE}}]
+            "choices": [{"message": {"content": POSITIVE_RESPONSE}}], "model": "test-model"
         })))
         .mount(&llm)
         .await;
@@ -748,7 +749,8 @@ async fn test_full_pipeline_empty_content_escalates_max_tokens() {
                     "content": null,
                     "reasoning_content": "long internal reasoning that exhausted the budget"
                 }
-            }]
+            }],
+            "model": "test-model"
         })))
         .up_to_n_times(1)
         .expect(1)
@@ -760,7 +762,7 @@ async fn test_full_pipeline_empty_content_escalates_max_tokens() {
         .and(path_regex(r"/chat/completions"))
         .and(body_partial_json(json!({ "max_tokens": 32768 })))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "choices": [{"message": {"content": POSITIVE_RESPONSE}}]
+            "choices": [{"message": {"content": POSITIVE_RESPONSE}}], "model": "test-model"
         })))
         .expect(1)
         .mount(&llm)
@@ -816,7 +818,8 @@ async fn test_full_pipeline_empty_content_not_cached_on_failure() {
                     "content": null,
                     "reasoning_content": "reasoning only"
                 }
-            }]
+            }],
+            "model": "test-model"
         })))
         .mount(&llm)
         .await;
@@ -872,7 +875,7 @@ async fn test_full_pipeline_glm_approve() {
     Mock::given(method("POST"))
         .and(path_regex(r"/chat/completions"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "choices": [{"message": {"content": POSITIVE_RESPONSE}}]
+            "choices": [{"message": {"content": POSITIVE_RESPONSE}}], "model": "test-model"
         })))
         .mount(&llm)
         .await;
@@ -915,7 +918,7 @@ async fn test_multi_pass_two_chunks_both_positive() {
     Mock::given(method("POST"))
         .and(path_regex(r"/chat/completions"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "choices": [{"message": {"content": POSITIVE_RESPONSE}}]
+            "choices": [{"message": {"content": POSITIVE_RESPONSE}}], "model": "test-model"
         })))
         .mount(&llm)
         .await;
@@ -952,7 +955,7 @@ async fn test_multi_pass_one_chunk_negative_blocks() {
     Mock::given(method("POST"))
         .and(path_regex(r"/chat/completions"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "choices": [{"message": {"content": NEGATIVE_RESPONSE}}]
+            "choices": [{"message": {"content": NEGATIVE_RESPONSE}}], "model": "test-model"
         })))
         .mount(&llm)
         .await;
@@ -988,7 +991,7 @@ async fn test_multi_pass_single_file_diff_one_chunk() {
     Mock::given(method("POST"))
         .and(path_regex(r"/chat/completions"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "choices": [{"message": {"content": POSITIVE_RESPONSE}}]
+            "choices": [{"message": {"content": POSITIVE_RESPONSE}}], "model": "test-model"
         })))
         .mount(&llm)
         .await;
@@ -1025,7 +1028,7 @@ async fn test_multi_pass_max_chunks_merges_three_files_into_two() {
     Mock::given(method("POST"))
         .and(path_regex(r"/chat/completions"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "choices": [{"message": {"content": POSITIVE_RESPONSE}}]
+            "choices": [{"message": {"content": POSITIVE_RESPONSE}}], "model": "test-model"
         })))
         .expect(2)
         .mount(&llm)
@@ -1064,7 +1067,7 @@ async fn test_multi_pass_local_mode_no_submission() {
     Mock::given(method("POST"))
         .and(path_regex(r"/chat/completions"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "choices": [{"message": {"content": POSITIVE_RESPONSE}}]
+            "choices": [{"message": {"content": POSITIVE_RESPONSE}}], "model": "test-model"
         })))
         .mount(&llm)
         .await;
@@ -1098,7 +1101,7 @@ async fn test_multi_pass_partial_failure_forces_comment_not_approve() {
     Mock::given(method("POST"))
         .and(path_regex(r"/chat/completions"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "choices": [{"message": {"content": POSITIVE_RESPONSE}}]
+            "choices": [{"message": {"content": POSITIVE_RESPONSE}}], "model": "test-model"
         })))
         .mount(&llm)
         .await;

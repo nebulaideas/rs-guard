@@ -59,7 +59,14 @@
 | Ollama (local)       | ✅ v1.7    | `llama3.2`           | `OLLAMA_API_KEY` (optional) |
 | Gemini (Google)      | ✅ v1.7    | `gemini-2.5-flash`   | `GEMINI_API_KEY`     |
 
-All 9 providers are served by a single `GenericOpenAiCompatibleClient` (pub(crate)) parameterized by `ProviderMeta`. Per-provider differences (Qwen `result_format`, OpenRouter attribution headers, Ollama no-auth) are expressed as metadata fields, not per-client code. Ollama is local-mode only (loopback rejected in CI).
+All 9 providers are served by two client implementations:
+
+- **`KernelBackedClient`** (7 providers: deepseek, openai, grok, glm, ollama, gemini, openrouter) — wraps `llm_kernel::llm::OpenAIClient` from the `llm-kernel` crate (v0.25, `client-async` feature). This gives us reasoning-content promotion, standardized error handling, and future compatibility with llm-kernel's decorator stack (RetryClient, CacheClient, RouterClient).
+- **`GenericOpenAiCompatibleClient`** (2 providers: qwen, kimi) — the original data-driven client parameterized by `ProviderMeta`. Used for providers that need custom request fields not exposed by `llm_kernel::LLMRequest`: Qwen's `result_format` and Kimi's `extra_body` (thinking variants).
+
+The factory (`create_provider`) routes automatically based on provider metadata and config: providers with `result_format` or `ExtraBody` variants, or with a config-level `result_format` override, use `GenericOpenAiCompatibleClient`; all others use `KernelBackedClient`. Both implement the `LlmProvider` trait, so the pipeline is agnostic to the underlying client.
+
+rs-guard and llm-kernel share the same reqwest 0.13 stack (no duplicate TLS dependencies). Ollama is local-mode only (loopback rejected in CI).
 
 ---
 
@@ -80,9 +87,10 @@ rs-guard/
 │   ├── http.rs                    # HTTP utilities + URL validation
 │   ├── llm/                       # LLM provider modules
 │   │   ├── mod.rs                 # LlmProvider trait + shared types
-│   │   ├── generic_client.rs      # GenericOpenAiCompatibleClient (all providers)
-│   │   ├── factory.rs             # Provider factory (metadata-driven)
-│   │   └── providers.rs           # Centralized provider metadata + variants
+│   │   ├── generic_client.rs      # GenericOpenAiCompatibleClient (qwen, kimi)
+│   │   ├── kernel_client.rs       # KernelBackedClient (7 standard providers, wraps llm-kernel)
+│   │   ├── factory.rs             # Provider factory (routes to kernel or generic client)
+│   │   └── providers.rs           # Centralized provider metadata + variants + llm-kernel catalog
 │   ├── output.rs                  # Terminal output + artifact + metrics writing
 │   ├── prompt_select.rs           # Language-aware prompt auto-selection
 │   ├── redact.rs                  # Secret redaction
@@ -136,7 +144,7 @@ rs-guard/
 | ------------------------ | ------------------------------------------------------------------------------------------ |
 | Crate structure          | Single crate (workspace deferred until library demand emerges)                             |
 | Provider dispatch        | `Box<dyn LlmProvider>` trait objects (refactored from enum dispatch in Phase 1)            |
-| Provider client        | Single `GenericOpenAiCompatibleClient` (pub(crate)) parameterized by `ProviderMeta`; per-provider differences are metadata (v1.2) |
+| Provider client        | Hybrid: `KernelBackedClient` (wraps `llm_kernel::OpenAIClient`) for 7 standard providers; `GenericOpenAiCompatibleClient` for Qwen/Kimi (custom fields). Factory routes automatically (v1.8 #142) |
 | Exit signal              | `PipelineResult` enum (Success / ReviewBlocked) — not `process::exit()` in library code    |
 | SSRF protection          | URL allowlist per provider in CI mode; loopback allowed in local mode                      |
 | Print functions          | Accept `impl Write` for testability                                                        |
