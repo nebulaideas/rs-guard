@@ -429,8 +429,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_variant_without_temperature_override_preserves_caller_temperature() {
-        // A variant with temperature_override: None (e.g. DeepSeek flash) must
-        // preserve the caller-supplied temperature in the request body.
+        // A provider with no variants (e.g. Qwen, routed through
+        // GenericOpenAiCompatibleClient) must preserve the caller-supplied
+        // temperature in the request body — no override should be applied.
         let mock_server = MockServer::start().await;
         Mock::given(method("POST"))
             .and(path("/chat/completions"))
@@ -440,7 +441,7 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let client = build("deepseek", &mock_server.uri()).with_variant(Some("flash".to_string()));
+        let client = build("qwen", &mock_server.uri());
         let _ = client.chat_completion("system", "user", 0.1).await.unwrap();
 
         let requests = mock_server.received_requests().await.unwrap();
@@ -449,7 +450,7 @@ mod tests {
         assert_eq!(
             body["temperature"].as_f64(),
             Some(0.1),
-            "variant without temperature_override should preserve caller temperature; got: {}",
+            "provider without temperature_override should preserve caller temperature; got: {}",
             body["temperature"]
         );
     }

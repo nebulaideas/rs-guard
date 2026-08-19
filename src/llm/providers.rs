@@ -343,7 +343,11 @@ pub fn provider_variant_names(provider_name: &str) -> Vec<&'static str> {
 ///
 /// Returns the configured temperature when the variant is unknown or the
 /// provider has no variants.
-pub fn effective_temperature(provider_name: &str, variant: Option<&str>, configured: f32) -> f32 {
+pub(crate) fn effective_temperature(
+    provider_name: &str,
+    variant: Option<&str>,
+    configured: f32,
+) -> f32 {
     let Some(vname) = variant else {
         return configured;
     };

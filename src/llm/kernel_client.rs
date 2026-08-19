@@ -143,14 +143,17 @@ impl LlmProvider for KernelBackedClient {
             providers::apply_variant(self.meta.name, &self.model, self.variant.as_deref())?;
 
         // KernelBackedClient must never receive ExtraBody variants — the factory
-        // routes ExtraBody providers to GenericOpenAiCompatibleClient. If this
-        // fires, the factory routing logic has a bug.
-        debug_assert!(
-            extra_body.is_empty(),
-            "KernelBackedClient received non-empty extra_body for provider '{}' — \
-             ExtraBody variants should be routed to GenericOpenAiCompatibleClient",
-            self.meta.name
-        );
+        // routes ExtraBody providers to GenericOpenAiCompatibleClient. Enforce
+        // this in release builds (not just debug) because silently dropping
+        // extra_body fields would send a request missing provider-required
+        // parameters.
+        if !extra_body.is_empty() {
+            return Err(RsGuardError::Config(format!(
+                "KernelBackedClient received non-empty extra_body for provider '{}' — \
+                 ExtraBody variants should be routed to GenericOpenAiCompatibleClient",
+                self.meta.name
+            )));
+        }
 
         // A variant's temperature_override (if set) replaces the caller-supplied
         // temperature. This handles providers that only accept specific
