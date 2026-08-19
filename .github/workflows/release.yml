@@ -23,7 +23,7 @@ jobs:
             os: ubuntu-latest
             strip: aarch64-linux-gnu-strip
             cross: true
-            cross_packages: gcc-aarch64-linux-gnu
+            cross_packages: gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
           - target: x86_64-apple-darwin
             os: macos-13
             strip: strip
@@ -33,8 +33,6 @@ jobs:
             strip: strip
             cross: false
     runs-on: ${{ matrix.os }}
-    permissions:
-      contents: write
     steps:
       # Pinned from actions/checkout@v5 (93cb6efe) to avoid Node.js 20 deprecation.
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
@@ -44,24 +42,20 @@ jobs:
           toolchain: stable
           targets: ${{ matrix.target }}
       # Install cross-compilation C toolchain for aws-lc-rs (Linux aarch64 only).
-      # aws-lc-rs requires a C compiler + cmake for the target arch.
+      # aws-lc-rs requires a C/C++ compiler + cmake for the target arch.
       - name: Install cross-compilation toolchain
         if: matrix.cross
         run: |
           sudo apt-get update
           sudo apt-get install -y ${{ matrix.cross_packages }} cmake
-      - name: Configure aarch64 linker
-        if: matrix.target == 'aarch64-unknown-linux-gnu'
-        run: |
-          mkdir -p ~/.cargo
-          cat >> ~/.cargo/config.toml << 'EOF'
-          [target.aarch64-unknown-linux-gnu]
-          linker = "aarch64-linux-gnu-gcc"
-          EOF
       - name: Build release binary
         run: cargo build --release --target ${{ matrix.target }}
         env:
-          # aws-lc-rs needs to find the cross-compiler
+          # Cross-compilation env vars for aws-lc-rs (aarch64 Linux only).
+          # These tell cmake/cc-rs which compiler to use for the target arch.
+          CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
+          CXX_aarch64_unknown_linux_gnu: aarch64-linux-gnu-g++
+          AR_aarch64_unknown_linux_gnu: aarch64-linux-gnu-ar
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
       - name: Strip binary
         run: ${{ matrix.strip }} target/${{ matrix.target }}/release/rs-guard
@@ -76,12 +70,38 @@ jobs:
           else
             shasum -a 256 "${BINARY}" > "${BINARY}.sha256"
           fi
+      # Upload artifacts for the aggregate release job to collect.
+      # Pinned from actions/upload-artifact@v4 (b4b15b8).
+      - uses: actions/upload-artifact@b4b15b845f87c3b5b69a5b5a4c56108aa41aa166
+        with:
+          name: rs-guard-${{ matrix.target }}
+          path: |
+            rs-guard-${{ matrix.target }}
+            rs-guard-${{ matrix.target }}.sha256
+          if-no-files-found: error
+
+  publish-release:
+    name: Publish GitHub Release
+    runs-on: ubuntu-latest
+    needs: build-release
+    permissions:
+      contents: write
+    steps:
+      # Pinned from actions/checkout@v5 (93cb6efe).
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+      # Download all artifacts from the matrix build jobs.
+      # Pinned from actions/download-artifact@v4 (fa0a91b).
+      - uses: actions/download-artifact@fa0a91b85bf4d1084b1f1197f5e34e6b3a2b8c6f
+        with:
+          path: artifacts
+          merge-multiple: true
+      - name: List artifacts
+        run: ls -lh artifacts/
+      # Single release upload — avoids concurrent release creation races.
       # Pinned from softprops/action-gh-release@v2 (3bb12739).
       - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65
         with:
-          files: |
-            rs-guard-${{ matrix.target }}
-            rs-guard-${{ matrix.target }}.sha256
+          files: artifacts/*
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -89,7 +109,7 @@ jobs:
   publish-crates:
     name: Publish to crates.io
     runs-on: ubuntu-latest
-    needs: build-release
+    needs: publish-release
     steps:
       # Pinned from actions/checkout@v5 (93cb6efe).
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
