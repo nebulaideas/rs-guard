@@ -12,6 +12,9 @@ Complete reference for running rs-guard in all modes.
 - [Structured Findings (v1.7)](#structured-findings-v17)
 - [Inline Comments (v1.7)](#inline-comments-v17)
 - [Check Runs (v1.7)](#check-runs-v17)
+- [Multi-pass Review (v1.8)](#multi-pass-review-v18)
+- [Ignore File (v1.8)](#ignore-file-v18)
+- [Language-aware Prompt Selection (v1.8)](#language-aware-prompt-selection-v18)
 - [Exit Codes](#exit-codes)
 - [Review State Logic](#review-state-logic)
 - [GitHub Actions Integration](#github-actions-integration)
@@ -36,7 +39,7 @@ rs-guard [OPTIONS]
 | `--prompt-file` | `-p`  | `.github/review-prompt.md` | Path to the system prompt markdown file. Uses embedded default if not found.       |
 | `--model`       | `-m`  | _(provider default)_       | LLM model identifier. Overrides TOML and provider defaults.                        |
 | `--temperature` | `-t`  | `0.1`                      | Sampling temperature (0.0 to 2.0). Lower values produce more deterministic output. |
-| `--provider`    |       | `deepseek`                 | LLM provider: `deepseek`, `kimi`, `qwen`, `openrouter`, `openai`, `grok`, `glm`.     |
+| `--provider`    |       | `deepseek`                 | LLM provider: `deepseek`, `kimi`, `qwen`, `openrouter`, `openai`, `grok`, `glm`, `ollama`, `gemini`. |
 | `--variant`     |       | (none)                     | Provider-specific model variant (e.g. `flash`/`pro` for deepseek). See PROVIDERS.md and CONFIGURATION.md. |
 | `--config`      | `-c`  | `.reviewer.toml`           | Path to the configuration TOML file.                                               |
 | `--max-tokens`  |       | `4096`                     | Maximum tokens for LLM completions.                                                |
@@ -254,6 +257,125 @@ When `--check-run` is enabled, rs-guard creates a GitHub Check Run **in addition
 A Check Run creation failure is logged as a warning but does **not** fail the pipeline — the PR review is still submitted normally.
 
 **Permissions:** Check Runs require the `checks: write` permission on the GitHub token. See [docs/GITHUB_BOT_SETUP.md](GITHUB_BOT_SETUP.md) for the full permission matrix.
+
+---
+
+## Multi-pass Review (v1.8)
+
+For large diffs that exceed a single context window, rs-guard can split the
+diff by file sections into chunks, review each chunk independently with
+bounded concurrency, and aggregate the per-chunk verdicts into a single
+GitHub review.
+
+### Enabling multi-pass
+
+```bash
+# CLI
+rs-guard --multi-pass --multi-pass-max-chunks 10 --multi-pass-max-concurrent 3
+
+# Environment variable
+RS_GUARD_MULTI_PASS=1 rs-guard
+
+# TOML
+multi_pass = true
+multi_pass_max_chunks = 10
+multi_pass_max_concurrent = 3
+multi_pass_max_cost_cents = 50.0  # optional cost guard
+```
+
+### Controls
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--multi-pass` | `false` | Enable multi-pass review |
+| `--multi-pass-max-chunks` | `10` | Maximum number of chunks to split the diff into |
+| `--multi-pass-max-concurrent` | `3` | Maximum concurrent LLM calls |
+| `--multi-pass-max-cost-cents` | (disabled) | Abort before LLM calls if estimated total cost exceeds this cap |
+
+### Aggregation
+
+Severity counts are summed across chunks, findings are concatenated, and the
+final verdict is `NEGATIVE` if any chunk is blocking. Partial failures are
+tolerated — successful chunks are reviewed and the failure count is noted in
+the review body.
+
+### Metrics
+
+The `rs-guard-metrics.json` file includes `multi_pass_chunk_count` and
+`multi_pass_failed_chunks` fields when multi-pass is active.
+
+### Cost warning
+
+Multi-pass increases LLM API costs proportionally to the number of chunks.
+Use `--multi-pass-max-cost-cents` to set a hard cap. The cost estimate is
+based on diff size and provider pricing; if pricing is unknown, the guard
+is skipped.
+
+---
+
+## Ignore File (v1.8)
+
+rs-guard supports a `.rs-guardignore` file (gitignore syntax) for excluding
+paths from the review diff before size checks and LLM review.
+
+### Usage
+
+```bash
+# Auto-loaded from repo root in local mode
+echo "Cargo.lock" >> .rs-guardignore
+echo "src/generated/" >> .rs-guardignore
+
+# Explicit path via CLI
+rs-guard --ignore-file .rs-guardignore
+
+# Via environment variable
+RS_GUARD_IGNORE_FILE=.rs-guardignore rs-guard
+
+# Via TOML
+ignore_file = ".rs-guardignore"
+```
+
+### Pattern syntax
+
+Supports gitignore-style patterns: globs (`*`, `**`), directory suffixes
+(`/`), and negation (`!`).
+
+### Security in CI mode
+
+**In CI mode, the repo-root `.rs-guardignore` and TOML-sourced `ignore_file`
+are NOT loaded** — only `--ignore-file` / `RS_GUARD_IGNORE_FILE` from the
+trusted workflow are honored. This prevents PR authors from suppressing
+review of their own changes.
+
+### Scaffolding
+
+`rs-guard init` scaffolds a starter `.rs-guardignore` with common lockfile
+and generated-code patterns.
+
+---
+
+## Language-aware Prompt Selection (v1.8)
+
+When no explicit `--prompt-file` is provided, rs-guard inspects changed file
+extensions and auto-selects a built-in prompt template:
+
+| Detected language | Template |
+|---|---|
+| Frontend (JS/TS/CSS/HTML) | Frontend SPA review prompt |
+| Backend (Python/Ruby/Go/Java) | Backend API review prompt |
+| CLI (Rust/Shell) | CLI tooling review prompt |
+| Mixed / unknown | General review prompt |
+
+### Disabling
+
+```bash
+rs-guard --no-auto-prompt
+RS_GUARD_NO_AUTO_PROMPT=1 rs-guard
+# TOML
+auto_prompt = false
+```
+
+Explicit `--prompt-file` always takes precedence over auto-selection.
 
 ---
 

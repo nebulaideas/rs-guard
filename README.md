@@ -30,7 +30,12 @@ Built by [Ismael Marín](https://ismaelmarin.dev) / [@igmarin](https://github.co
 - 🧩 **Model variants** — `ModelAlias` (e.g. DeepSeek flash/pro) and `ExtraBody` injection (e.g. Kimi thinking mode) via `--variant`, config, or `ProviderConfig`
 - 📝 **Structured findings & inline comments** (v1.7) — `--findings` requests a `[RS_GUARD_VERDICT_FINDINGS]` JSON block; `--inline-comments` maps findings to diff positions and posts them as inline review comments (implies `--findings`)
 - ✅ **GitHub Check Runs** (v1.7) — `--check-run` publishes a Check Run (verdict→conclusion) for branch protection without `APPROVE`/`REQUEST_CHANGES` permissions; resolves the PR head SHA from `GITHUB_EVENT_PATH`; idempotent retries via `external_id`
-- 📦 **Single binary** — No runtime dependencies; ~3s typical execution
+- 🔄 **Multi-pass review** (v1.8) — `--multi-pass` splits large diffs by file sections into chunks, reviews each with bounded concurrency, and aggregates verdicts. Cost-bounded via `--multi-pass-max-cost-cents`
+- 🚫 **Ignore file** (v1.8) — `.rs-guardignore` (gitignore syntax) excludes paths from review. CI-safe: repo-root file is NOT loaded in CI mode to prevent PR-controlled suppression
+- 🌐 **Language-aware prompts** (v1.8) — Auto-selects a frontend/backend/CLI/general prompt template based on changed file extensions. Explicit `--prompt-file` always wins
+- 🧠 **llm-kernel hybrid architecture** (v1.8) — 7 standard providers backed by `llm_kernel::OpenAIClient` (reasoning-content promotion, standardized errors); Qwen and Kimi use the data-driven `GenericOpenAiCompatibleClient` for custom request fields
+- 🌡️ **Per-variant temperature override** (v1.8) — Variants like Kimi k2.5 thinking-on/off automatically set the required temperature; no manual `--temperature` needed
+- 📦 **Single binary** — No runtime dependencies; ~3s typical execution; pre-built for Linux x86_64/ARM64 and macOS Intel/Apple Silicon
 
 ---
 
@@ -309,6 +314,16 @@ cargo doc --no-deps --open
 | [docs/LOCAL_MODE.md](docs/LOCAL_MODE.md)       | Pre-commit hook setup                                                     |
 | [docs/GITHUB_BOT_SETUP.md](docs/GITHUB_BOT_SETUP.md) | Dedicated GitHub bot / machine-user identity for automated reviews  |
 | [docs/PERFORMANCE.md](docs/PERFORMANCE.md)     | Binary-size baselines, runtime benchmarks, CI cold-start tuning          |
+
+---
+
+## Roadmap
+
+| Version | Theme | Doc | Milestone |
+|---------|-------|-----|-----------|
+| v1.6.0 | Review depth | [docs/v1.6.md](docs/v1.6.md) | [milestone/2](https://github.com/nebulaideas/rs-guard/milestone/2) |
+| v1.7.0 | GitHub-native UX | [docs/v1.7.md](docs/v1.7.md) | [milestone/3](https://github.com/nebulaideas/rs-guard/milestone/3) |
+| v1.8.0 | Scale | [docs/v1.8.md](docs/v1.8.md) | [milestone/4](https://github.com/nebulaideas/rs-guard/milestone/4) |
 
 ---
 

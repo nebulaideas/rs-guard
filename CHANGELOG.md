@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Nothing yet.
+
+## [1.8.0] - 2026-08-19
+
+### Added
+
 - **Multi-arch release binaries** (issue #117) —
   Pre-built binaries are now published for 4 targets: Linux x86_64,
   Linux aarch64, macOS Intel (x86_64-apple-darwin), and macOS Apple

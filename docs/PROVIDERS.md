@@ -6,6 +6,7 @@ This document covers how to configure each supported LLM provider for rs-guard.
 
 ## Table of Contents
 
+- [Architecture: Hybrid Client Design](#architecture-hybrid-client-design)
 - [DeepSeek](#deepseek)
 - [Kimi (Moonshot AI)](#kimi-moonshot-ai)
 - [Qwen (Alibaba Cloud)](#qwen-alibaba-cloud)
@@ -13,10 +14,50 @@ This document covers how to configure each supported LLM provider for rs-guard.
 - [OpenAI](#openai)
 - [Grok (xAI)](#grok-xai)
 - [GLM (Zhipu AI)](#glm-zhipu-ai)
+- [Ollama (Local)](#ollama-local)
+- [Gemini (Google)](#gemini-google)
 
 ---
 
 **Model Variants (generic mechanism):** Several providers support provider-specific "variants" (e.g. DeepSeek `flash`/`pro`). Set via `--variant`, `RS_GUARD_VARIANT`, or `variant` in `.reviewer.toml` (top-level or per-provider). See the per-provider sections below and `docs/CONFIGURATION.md`. Unknown variants for a provider that declares them produce a clear error listing the supported ones. Providers without registered variants silently ignore the setting for now.
+
+---
+
+## Architecture: Hybrid Client Design
+
+As of v1.8, rs-guard uses two client implementations for its 9 providers:
+
+| Client | Providers | Backing |
+|--------|-----------|---------|
+| `KernelBackedClient` | deepseek, openai, grok, glm, ollama, gemini, openrouter (7) | `llm_kernel::llm::OpenAIClient` from the [llm-kernel](https://crates.io/crates/llm-kernel) crate |
+| `GenericOpenAiCompatibleClient` | qwen, kimi (2) | rs-guard's own data-driven client parameterized by `ProviderMeta` |
+
+### Why two clients?
+
+`llm_kernel::LLMRequest` has a fixed request body shape that cannot express:
+- Qwen's `result_format` field
+- Kimi's `extra_body` (thinking mode variants)
+
+Providers that need these custom fields use `GenericOpenAiCompatibleClient`.
+All others use `KernelBackedClient`, which provides:
+- **Reasoning-content promotion** (GLM-4.7, DeepSeek-R1)
+- **Standardized error handling** with HTTP status preservation
+- **Future compatibility** with llm-kernel's decorator stack (RetryClient, CacheClient, RouterClient)
+
+### Factory routing
+
+The factory (`create_provider`) routes automatically based on provider metadata
+and config. Providers with `result_format` or `ExtraBody` variants, or with a
+config-level `result_format` override, use `GenericOpenAiCompatibleClient`; all
+others use `KernelBackedClient`. Both implement the `LlmProvider` trait, so the
+pipeline is agnostic to the underlying client.
+
+### Shared TLS stack
+
+rs-guard and llm-kernel share the same reqwest 0.13 stack (no duplicate TLS
+dependencies). The TLS provider is `aws-lc-rs` (via rustls 0.23's default).
+An upstream issue has been filed to evaluate switching to `ring` for simpler
+cross-compilation ([epicsagas/llm-kernel#93](https://github.com/epicsagas/llm-kernel/issues/93)).
 
 ---
 
