@@ -14,7 +14,7 @@
 
 **Scaffolding Commands (v1.4.0):** `rs-guard init`, `rs-guard generate-prompt`, `rs-guard generate-workflow`, and `rs-guard validate-config` make adoption self-service. `init` detects project type and scaffolds workflow, prompt, and config files. `generate-prompt` and `generate-workflow` emit files from built-in templates. `important_issues_threshold` is now configurable via CLI/env/TOML.
 
-**Variant Feature Track (issues #65–#68, PR #70, merged 2026-06-17):** Generic `VariantEffect` (ModelAlias + ExtraBody) support added, with DeepSeek flash/pro and first ExtraBody use for Kimi thinking-on/off. Full CLI/config/env support, integration test coverage, and docs. Released as v1.1.0. See `docs/PROVIDERS.md` and the feature branch history.
+**Variant Feature Track (issues #65–#68, PR #70, merged 2026-06-17):** Generic `VariantEffect` (ModelAlias + ExtraBody) support added, with DeepSeek flash/pro and first ExtraBody use for Kimi thinking-on/off. Full CLI/config/env support, integration test coverage, and docs. Released as v1.1.0. See `docs/PROVIDERS.md` and the feature branch history. Per-variant `temperature_override` added in v1.8 for Kimi k2.5 (thinking-on requires `1.0`, thinking-off requires `0.6`).
 
 **Client Extraction (v1.2, issue #72):** The 5 duplicated per-provider clients (deepseek/kimi/qwen/openrouter/openai) were replaced by a single data-driven `GenericOpenAiCompatibleClient` (pub(crate)) parameterized by `ProviderMeta`. Grok (xAI) and GLM (Zhipu AI) became first-class. Provider-agnostic documentation pass + new bot-setup and performance guides. Released as v1.2.0.
 

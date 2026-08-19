@@ -43,6 +43,14 @@ pub struct ProviderVariant {
     pub description: &'static str,
     /// How this variant changes the outgoing request.
     pub effect: VariantEffect,
+    /// Optional temperature override for this variant.
+    ///
+    /// Some providers restrict which temperature values are valid for specific
+    /// models or modes (e.g. Kimi k2.5 requires `1.0` for thinking-on and
+    /// `0.6` for thinking-off). When `Some`, this value replaces the
+    /// caller-supplied temperature in the outgoing request. When `None`, the
+    /// caller's temperature is used as-is.
+    pub temperature_override: Option<f32>,
 }
 
 /// Metadata for a single LLM provider.
@@ -106,11 +114,13 @@ pub fn all_providers() -> &'static [ProviderMeta] {
                     name: "flash",
                     description: "Fast, cost-effective DeepSeek V4 model",
                     effect: VariantEffect::ModelAlias("deepseek-v4-flash"),
+                    temperature_override: None,
                 },
                 ProviderVariant {
                     name: "pro",
                     description: "Most capable DeepSeek V4 model for complex reasoning",
                     effect: VariantEffect::ModelAlias("deepseek-v4-pro"),
+                    temperature_override: None,
                 },
             ],
             result_format: None,
@@ -135,11 +145,15 @@ pub fn all_providers() -> &'static [ProviderMeta] {
                     // (compile-time validation) but leads to borrow-checker errors when
                     // storing the resulting `&'static Value` in the array.
                     effect: VariantEffect::ExtraBody("thinking", r#"{"type":"enabled"}"#),
+                    // Kimi k2.5 only accepts temperature=1.0 when thinking mode is enabled.
+                    temperature_override: Some(1.0),
                 },
                 ProviderVariant {
                     name: "thinking-off",
                     description: "Disable Kimi thinking mode (default)",
                     effect: VariantEffect::ExtraBody("thinking", r#"{"type":"disabled"}"#),
+                    // Kimi k2.5 only accepts temperature=0.6 when thinking mode is disabled.
+                    temperature_override: Some(0.6),
                 },
             ],
             result_format: None,
@@ -247,11 +261,13 @@ pub fn all_providers() -> &'static [ProviderMeta] {
                     name: "flash",
                     description: "Fast, cost-effective Gemini 2.5 Flash",
                     effect: VariantEffect::ModelAlias("gemini-2.5-flash"),
+                    temperature_override: None,
                 },
                 ProviderVariant {
                     name: "pro",
                     description: "Most capable Gemini 2.5 Pro for complex reasoning",
                     effect: VariantEffect::ModelAlias("gemini-2.5-pro"),
+                    temperature_override: None,
                 },
             ],
             result_format: None,
@@ -271,6 +287,7 @@ pub fn all_providers() -> &'static [ProviderMeta] {
                 name: "bad-variant",
                 description: "Variant with reserved key (for testing collision guard)",
                 effect: VariantEffect::ExtraBody("model", r#""bad-model""#),
+                temperature_override: None,
             }],
             result_format: None,
             default_extra_headers: &[],
@@ -317,31 +334,64 @@ pub fn provider_variant_names(provider_name: &str) -> Vec<&'static str> {
         .unwrap_or_default()
 }
 
-/// Resolves a (possibly variant-adjusted) model identifier together with any
-/// extra top-level body fields contributed by the variant.
+/// Resolves the effective temperature for a provider + variant combination.
+///
+/// When the variant has a `temperature_override`, that value replaces the
+/// configured temperature. Otherwise the configured temperature is returned
+/// as-is. This is used by the cache layer to ensure cache keys reflect the
+/// actual temperature sent to the LLM, not the pre-override configured value.
+///
+/// Returns the configured temperature when the variant is unknown or the
+/// provider has no variants.
+pub(crate) fn effective_temperature(
+    provider_name: &str,
+    variant: Option<&str>,
+    configured: f32,
+) -> f32 {
+    let Some(vname) = variant else {
+        return configured;
+    };
+    find_provider_variant(provider_name, vname)
+        .and_then(|v| v.temperature_override)
+        .unwrap_or(configured)
+}
+
+/// The result of variant resolution: the effective model identifier, any
+/// extra top-level body fields, and an optional temperature override.
+pub(crate) type VariantResolution = (String, HashMap<String, serde_json::Value>, Option<f32>);
+
+/// Resolves a (possibly variant-adjusted) model identifier, extra top-level
+/// body fields, and an optional temperature override contributed by the variant.
 ///
 /// This is the single shared implementation used by all LLM provider clients
-/// so that `ModelAlias` and `ExtraBody` effects work uniformly.
+/// so that `ModelAlias`, `ExtraBody`, and `temperature_override` effects work
+/// uniformly.
+///
+/// Returns a tuple of `(effective_model, extra_body, temperature_override)`.
+/// When `temperature_override` is `Some`, the caller should replace the
+/// configured temperature with this value in the outgoing request.
 ///
 /// See the detailed resolution rules in the implementation below.
 pub(crate) fn apply_variant(
     provider_name: &str,
     configured_model: &str,
     variant: Option<&str>,
-) -> Result<(String, HashMap<String, serde_json::Value>), RsGuardError> {
+) -> Result<VariantResolution, RsGuardError> {
     // Resolution rules (preserve documented "no effect" / silent-ignore behaviour):
-    // * No variant supplied → (configured_model, empty map)
-    // * Variant matches a ModelAlias → (aliased model id, empty map)
-    // * Variant matches an ExtraBody(k, v) → (configured_model, {k: v})
+    // * No variant supplied → (configured_model, empty map, None)
+    // * Variant matches a ModelAlias → (aliased model id, empty map, variant.temperature_override)
+    // * Variant matches an ExtraBody(k, v) → (configured_model, {k: v}, variant.temperature_override)
     // * Variant unknown **and** provider declares ≥1 variants → RsGuardError::Config listing supported names
-    // * Variant unknown **and** provider declares 0 variants → (configured_model, empty map)  // silently ignored
+    // * Variant unknown **and** provider declares 0 variants → (configured_model, empty map, None)  // silently ignored
     let Some(vname) = variant else {
-        return Ok((configured_model.to_string(), HashMap::new()));
+        return Ok((configured_model.to_string(), HashMap::new(), None));
     };
 
     match find_provider_variant(provider_name, vname) {
         Some(v) => match &v.effect {
-            VariantEffect::ModelAlias(alias) => Ok((alias.to_string(), HashMap::new())),
+            VariantEffect::ModelAlias(alias) => {
+                Ok((alias.to_string(), HashMap::new(), v.temperature_override))
+            }
             VariantEffect::ExtraBody(key, json) => {
                 // F7: Reject ExtraBody keys that collide with standard ChatRequest fields.
                 // These would silently overwrite the corresponding field during serialization.
@@ -373,14 +423,14 @@ pub(crate) fn apply_variant(
                 })?;
                 let mut map = HashMap::new();
                 map.insert((*key).to_string(), val);
-                Ok((configured_model.to_string(), map))
+                Ok((configured_model.to_string(), map, v.temperature_override))
             }
         },
         None => {
             let declared = provider_variant_names(provider_name);
             if declared.is_empty() {
                 // No variants registered → "has no effect" per CLI help and PROVIDERS.md
-                Ok((configured_model.to_string(), HashMap::new()))
+                Ok((configured_model.to_string(), HashMap::new(), None))
             } else {
                 Err(RsGuardError::Config(format!(
                     "Unknown variant '{}' for provider '{}'. Supported variants: {}",
@@ -666,28 +716,28 @@ mod tests {
 
     #[test]
     fn test_apply_variant_none_returns_configured() {
-        let (m, extra) = apply_variant("deepseek", "deepseek-v4-flash", None).unwrap();
+        let (m, extra, _) = apply_variant("deepseek", "deepseek-v4-flash", None).unwrap();
         assert_eq!(m, "deepseek-v4-flash");
         assert!(extra.is_empty());
     }
 
     #[test]
     fn test_apply_variant_model_alias_deepseek_flash() {
-        let (m, extra) = apply_variant("deepseek", "ignored-base", Some("flash")).unwrap();
+        let (m, extra, _) = apply_variant("deepseek", "ignored-base", Some("flash")).unwrap();
         assert_eq!(m, "deepseek-v4-flash");
         assert!(extra.is_empty());
     }
 
     #[test]
     fn test_apply_variant_model_alias_deepseek_pro() {
-        let (m, extra) = apply_variant("deepseek", "ignored-base", Some("pro")).unwrap();
+        let (m, extra, _) = apply_variant("deepseek", "ignored-base", Some("pro")).unwrap();
         assert_eq!(m, "deepseek-v4-pro");
         assert!(extra.is_empty());
     }
 
     #[test]
     fn test_apply_variant_case_insensitive() {
-        let (m, _) = apply_variant("deepseek", "base", Some("FLASH")).unwrap();
+        let (m, _, _) = apply_variant("deepseek", "base", Some("FLASH")).unwrap();
         assert_eq!(m, "deepseek-v4-flash");
     }
 
@@ -705,7 +755,8 @@ mod tests {
         // Uses a dedicated dummy provider name that is never expected to declare
         // any variants. This avoids fragility if a real provider (e.g. "openai")
         // later gains variants in all_providers().
-        let (m, extra) = apply_variant("test-no-variants", "some-model", Some("anything")).unwrap();
+        let (m, extra, _) =
+            apply_variant("test-no-variants", "some-model", Some("anything")).unwrap();
         assert_eq!(m, "some-model");
         assert!(extra.is_empty());
     }
@@ -724,14 +775,14 @@ mod tests {
     fn test_apply_variant_extra_body_populates_map() {
         // Now that Kimi registers real ExtraBody variants, exercise the arm
         // directly via apply_variant.
-        let (m, extra) = apply_variant("kimi", "kimi-k2.5", Some("thinking-on")).unwrap();
+        let (m, extra, _) = apply_variant("kimi", "kimi-k2.5", Some("thinking-on")).unwrap();
         assert_eq!(m, "kimi-k2.5");
         assert_eq!(
             extra.get("thinking"),
             Some(&serde_json::json!({"type": "enabled"}))
         );
 
-        let (m2, extra2) = apply_variant("kimi", "kimi-k2.5", Some("thinking-off")).unwrap();
+        let (m2, extra2, _) = apply_variant("kimi", "kimi-k2.5", Some("thinking-off")).unwrap();
         assert_eq!(m2, "kimi-k2.5");
         assert_eq!(
             extra2.get("thinking"),
@@ -757,6 +808,96 @@ mod tests {
         assert!(
             msg.contains("bad-variant"),
             "error should mention the variant name"
+        );
+    }
+
+    // --- temperature_override tests (per-variant temperature constraints) ---
+
+    #[test]
+    fn test_apply_variant_no_variant_returns_none_temperature() {
+        let (_m, _extra, temp_override) =
+            apply_variant("deepseek", "deepseek-v4-flash", None).unwrap();
+        assert_eq!(
+            temp_override, None,
+            "no variant should not override temperature"
+        );
+    }
+
+    #[test]
+    fn test_apply_variant_model_alias_returns_none_temperature() {
+        let (_m, _extra, temp_override) = apply_variant("deepseek", "base", Some("flash")).unwrap();
+        assert_eq!(
+            temp_override, None,
+            "ModelAlias variants without temperature_override should return None"
+        );
+    }
+
+    #[test]
+    fn test_apply_variant_kimi_thinking_on_returns_temperature_override() {
+        let (_m, _extra, temp_override) =
+            apply_variant("kimi", "kimi-k2.5", Some("thinking-on")).unwrap();
+        assert_eq!(
+            temp_override,
+            Some(1.0),
+            "kimi thinking-on should override temperature to 1.0"
+        );
+    }
+
+    #[test]
+    fn test_apply_variant_kimi_thinking_off_returns_temperature_override() {
+        let (_m, _extra, temp_override) =
+            apply_variant("kimi", "kimi-k2.5", Some("thinking-off")).unwrap();
+        assert_eq!(
+            temp_override,
+            Some(0.6),
+            "kimi thinking-off should override temperature to 0.6"
+        );
+    }
+
+    // --- effective_temperature tests (cache key correctness) ---
+
+    #[test]
+    fn test_effective_temperature_no_variant_returns_configured() {
+        assert_eq!(
+            effective_temperature("deepseek", None, 0.1),
+            0.1,
+            "no variant should return configured temperature"
+        );
+    }
+
+    #[test]
+    fn test_effective_temperature_variant_without_override_returns_configured() {
+        assert_eq!(
+            effective_temperature("deepseek", Some("flash"), 0.1),
+            0.1,
+            "variant without temperature_override should return configured temperature"
+        );
+    }
+
+    #[test]
+    fn test_effective_temperature_kimi_thinking_on_returns_override() {
+        assert_eq!(
+            effective_temperature("kimi", Some("thinking-on"), 0.1),
+            1.0,
+            "kimi thinking-on should return 1.0 regardless of configured temperature"
+        );
+    }
+
+    #[test]
+    fn test_effective_temperature_kimi_thinking_off_returns_override() {
+        assert_eq!(
+            effective_temperature("kimi", Some("thinking-off"), 0.1),
+            0.6,
+            "kimi thinking-off should return 0.6 regardless of configured temperature"
+        );
+    }
+
+    #[test]
+    fn test_effective_temperature_unknown_variant_returns_configured() {
+        assert_eq!(
+            effective_temperature("deepseek", Some("nonexistent"), 0.1),
+            0.1,
+            "unknown variant should return configured temperature"
         );
     }
 

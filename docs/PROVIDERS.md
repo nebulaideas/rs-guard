@@ -195,10 +195,16 @@ export KIMI_API_KEY="your-api-key"
 
 Kimi supports a thinking mode toggle via the generic variant mechanism.
 
-| Variant       | Description                                                                 | Injected Request Field          |
-|---------------|-----------------------------------------------------------------------------|---------------------------------|
-| `thinking-on` | Enable Kimi thinking / chain-of-thought mode. The response may contain a `reasoning_content` field (rs-guard parses the final content and discards the reasoning). | `thinking: { "type": "enabled" }` |
-| `thinking-off`| Explicitly disable thinking mode.                                           | `thinking: { "type": "disabled" }` |
+| Variant       | Description                                                                 | Injected Request Field          | Temperature Override |
+|---------------|-----------------------------------------------------------------------------|---------------------------------|----------------------|
+| `thinking-on` | Enable Kimi thinking / chain-of-thought mode. The response may contain a `reasoning_content` field (rs-guard parses the final content and discards the reasoning). | `thinking: { "type": "enabled" }` | `1.0` |
+| `thinking-off`| Explicitly disable thinking mode.                                           | `thinking: { "type": "disabled" }` | `0.6` |
+
+> **Temperature constraints:** Kimi k2.5 only accepts specific temperature values
+> depending on the thinking mode. The variant's `temperature_override` field
+> automatically replaces the configured temperature — you do not need to set
+> `--temperature` manually when using a variant. If you set `--temperature`
+> explicitly, it will be overridden by the variant's required value.
 
 Example:
 ```bash

@@ -16,6 +16,7 @@ use crate::github::{
     format_unmappable_findings, resolve_check_run_sha, review_state_to_conclusion, submit_review,
 };
 use crate::llm::factory::create_provider;
+use crate::llm::providers::effective_temperature;
 use crate::output::{
     print_colored_summary, write_artifact, write_json_result, write_metrics, ReviewConfig,
     ReviewMetrics, ReviewResultJson, ARTIFACT_FILENAME, METRICS_FILENAME,
@@ -288,7 +289,11 @@ async fn obtain_llm_response_with_composed_prompt(
         &config.provider,
         &config.model,
         config.variant.as_deref(),
-        config.temperature,
+        effective_temperature(
+            &config.provider,
+            config.variant.as_deref(),
+            config.temperature,
+        ),
         base_url,
         config.provider_config.max_tokens,
         config.provider_config.result_format.as_deref(),
@@ -426,7 +431,11 @@ fn cache_response(
         &config.provider,
         &config.model,
         config.variant.as_deref(),
-        config.temperature,
+        effective_temperature(
+            &config.provider,
+            config.variant.as_deref(),
+            config.temperature,
+        ),
         effective_base_url(config),
         config.provider_config.max_tokens,
         config.provider_config.result_format.as_deref(),
@@ -969,7 +978,11 @@ async fn run_multi_pass_pipeline(
                 &config_clone.provider,
                 &config_clone.model,
                 config_clone.variant.as_deref(),
-                config_clone.temperature,
+                effective_temperature(
+                    &config_clone.provider,
+                    config_clone.variant.as_deref(),
+                    config_clone.temperature,
+                ),
                 base_url,
                 config_clone.provider_config.max_tokens,
                 config_clone.provider_config.result_format.as_deref(),
@@ -1012,7 +1025,11 @@ async fn run_multi_pass_pipeline(
                     &config_clone.provider,
                     &config_clone.model,
                     config_clone.variant.as_deref(),
-                    config_clone.temperature,
+                    effective_temperature(
+                        &config_clone.provider,
+                        config_clone.variant.as_deref(),
+                        config_clone.temperature,
+                    ),
                     base_url,
                     config_clone.provider_config.max_tokens,
                     config_clone.provider_config.result_format.as_deref(),

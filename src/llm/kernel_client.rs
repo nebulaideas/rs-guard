@@ -139,14 +139,32 @@ impl LlmProvider for KernelBackedClient {
         temperature: f32,
     ) -> Result<ChatCompletionResult, RsGuardError> {
         // Resolve variant (ModelAlias only — ExtraBody providers use GenericClient).
-        let (effective_model, _extra_body) =
+        let (effective_model, extra_body, temp_override) =
             providers::apply_variant(self.meta.name, &self.model, self.variant.as_deref())?;
+
+        // KernelBackedClient must never receive ExtraBody variants — the factory
+        // routes ExtraBody providers to GenericOpenAiCompatibleClient. Enforce
+        // this in release builds (not just debug) because silently dropping
+        // extra_body fields would send a request missing provider-required
+        // parameters.
+        if !extra_body.is_empty() {
+            return Err(RsGuardError::Config(format!(
+                "KernelBackedClient received non-empty extra_body for provider '{}' — \
+                 ExtraBody variants should be routed to GenericOpenAiCompatibleClient",
+                self.meta.name
+            )));
+        }
+
+        // A variant's temperature_override (if set) replaces the caller-supplied
+        // temperature. This handles providers that only accept specific
+        // temperature values per mode.
+        let effective_temperature = temp_override.unwrap_or(temperature);
 
         // Build the LLMRequest using llm-kernel's types.
         let request = LLMRequest {
             system: Some(system_prompt.to_string()),
             messages: vec![llm_kernel::llm::ChatMessage::user(user_message.to_string())],
-            temperature,
+            temperature: effective_temperature,
             max_tokens: self.max_tokens,
             model: Some(effective_model),
             response_format: None,
@@ -311,5 +329,39 @@ mod tests {
         let serde_err = serde_json::from_str::<serde_json::Value>("bad json").unwrap_err();
         let err = map_kernel_error(KernelError::Serialization(serde_err), "deepseek");
         assert!(!err.is_retryable());
+    }
+
+    #[tokio::test]
+    async fn test_kernel_client_rejects_extra_body_variant() {
+        // KernelBackedClient must reject ExtraBody variants — the factory routes
+        // ExtraBody providers to GenericOpenAiCompatibleClient. If a bug in the
+        // factory routing causes KernelBackedClient to receive an ExtraBody
+        // variant, it must return an error rather than silently dropping the
+        // extra body fields.
+        let meta = crate::llm::providers::find_provider("kimi").unwrap();
+        let client = KernelBackedClient::new(
+            meta,
+            "test-key",
+            "http://unused.invalid",
+            "kimi-k2.5",
+            &[],
+            None,
+        )
+        .unwrap()
+        .with_variant(Some("thinking-on".to_string()));
+
+        let result = client.chat_completion("system", "user", 0.1).await;
+        let err = result.expect_err("should reject ExtraBody variant");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("non-empty extra_body"),
+            "error should mention non-empty extra_body; got: {}",
+            msg
+        );
+        assert!(
+            msg.contains("kimi"),
+            "error should mention the provider name; got: {}",
+            msg
+        );
     }
 }
