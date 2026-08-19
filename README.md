@@ -35,23 +35,16 @@ Built by [Ismael Marín](https://ismaelmarin.dev) / [@igmarin](https://github.co
 - 🌐 **Language-aware prompts** (v1.8) — Auto-selects a frontend/backend/CLI/general prompt template based on changed file extensions. Explicit `--prompt-file` always wins
 - 🧠 **llm-kernel hybrid architecture** (v1.8) — 7 standard providers backed by `llm_kernel::OpenAIClient` (reasoning-content promotion, standardized errors); Qwen and Kimi use the data-driven `GenericOpenAiCompatibleClient` for custom request fields
 - 🌡️ **Per-variant temperature override** (v1.8) — Variants like Kimi k2.5 thinking-on/off automatically set the required temperature; no manual `--temperature` needed
-- 📦 **Single binary** — No runtime dependencies; ~3s typical execution; pre-built for Linux x86_64/ARM64 and macOS Intel/Apple Silicon
+- 📦 **Single binary** — No runtime dependencies; ~3s typical execution; install via `cargo install rs-guard --locked`
 
 ---
 
 ## Quick Start
 
-### 1. Download the binary
+### 1. Install rs-guard
 
 ```bash
-# Auto-detect platform (Linux/macOS, x86_64/ARM64)
-ARCH=$(uname -m)
-OS=$(uname -s | tr '[:upper:]' '[:lower:]')
-if [ "$OS" = "darwin" ]; then OS="apple-darwin"; else OS="unknown-linux-gnu"; fi
-if [ "$ARCH" = "arm64" ] || [ "$ARCH" = "aarch64" ]; then ARCH="aarch64"; else ARCH="x86_64"; fi
-curl -L -o rs-guard \
-  "https://github.com/nebulaideas/rs-guard/releases/latest/download/rs-guard-${ARCH}-${OS}"
-chmod +x rs-guard
+cargo install rs-guard --locked
 ```
 
 ### 2. Set your API key
@@ -80,16 +73,19 @@ See [`examples/github-actions-workflow/`](examples/github-actions-workflow/) for
 
 **Quick setup:** run `rs-guard init` to scaffold `.github/workflows/rs-guard-review.yml`, `.github/review-prompt.md`, and `.reviewer.toml` in one step.
 
-**Performance in CI:** The release binary is ~4.6 MB. Pre-built binaries are available for Linux x86_64/ARM64 and macOS Intel/Apple Silicon. See [docs/PERFORMANCE.md](docs/PERFORMANCE.md) for detailed baselines and optimization tips.
+**Performance in CI:** The release binary is ~4.6 MB. Install via `cargo install rs-guard --locked` (2-5 minutes first build, cached after). See [docs/PERFORMANCE.md](docs/PERFORMANCE.md) for detailed baselines and optimization tips.
 
 ---
 
 ## Installation
 
-### Pre-built binary (Recommended)
+### cargo install (Recommended)
 
-Download from [GitHub Releases](https://github.com/nebulaideas/rs-guard/releases).
-See [docs/INSTALLATION.md](docs/INSTALLATION.md) for platform-specific instructions (Linux, macOS, Windows).
+```bash
+cargo install rs-guard --locked
+```
+
+Requires Rust 1.92+, a C/C++ compiler, and cmake (for aws-lc-rs). First build takes 2-5 minutes; subsequent installs are cached.
 
 ### Build from source
 
@@ -100,16 +96,7 @@ cargo build --release
 # Binary at: ./target/release/rs-guard
 ```
 
-Requires Rust 1.92+.
-
-### cargo install
-
-```bash
-cargo install rs-guard
-```
-
-After installation, the `rs-guard` binary will be available in your `~/.cargo/bin` directory.
-**Note:** Requires the crate to be published on crates.io. Before publication, use "Build from source" instead.
+See [docs/INSTALLATION.md](docs/INSTALLATION.md) for detailed instructions.
 
 ---
 

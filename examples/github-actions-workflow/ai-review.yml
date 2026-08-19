@@ -22,25 +22,19 @@ jobs:
       # Pinned from actions/checkout@v5 (93cb6efe) to avoid Node.js 20 deprecation.
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
 
-      # Download rs-guard v1.4.0 and verify its SHA-256.
-      - name: Download rs-guard
-        run: |
-          set -euo pipefail
-          VERSION="v1.4.0"
-          BINARY="rs-guard-x86_64-unknown-linux-gnu"
-          curl -L --fail -o "${BINARY}" \
-            "https://github.com/nebulaideas/rs-guard/releases/download/${VERSION}/${BINARY}"
-          curl -L --fail -o "${BINARY}.sha256" \
-            "https://github.com/nebulaideas/rs-guard/releases/download/${VERSION}/${BINARY}.sha256"
-          sha256sum -c "${BINARY}.sha256"
-          chmod +x "${BINARY}"
-          mv "${BINARY}" rs-guard
+      - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9
+        with:
+          toolchain: stable
+
+      # Install rs-guard from crates.io with a locked Cargo.lock for reproducibility.
+      - name: Install rs-guard
+        run: cargo install rs-guard --locked --version "1.8.0"
 
       # Run the AI code review.
       # The tool reads the diff from the PR, sends it to the configured LLM,
       # parses the structured verdict, and posts the review back to GitHub.
       - name: AI Code Review
-        run: ./rs-guard
+        run: rs-guard
         env:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -49,19 +49,15 @@ jobs:
       # Pinned from actions/checkout@v5 (93cb6efe) to avoid Node.js 20 deprecation.
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
 
-      # Download rs-guard {{VERSION}} and verify its SHA-256.
-      - name: Download rs-guard
-        run: |
-          set -euo pipefail
-          VERSION="{{VERSION}}"
-          BINARY="rs-guard-x86_64-unknown-linux-gnu"
-          curl -L --fail -o "${BINARY}" \
-            "https://github.com/nebulaideas/rs-guard/releases/download/${VERSION}/${BINARY}"
-          curl -L --fail -o "${BINARY}.sha256" \
-            "https://github.com/nebulaideas/rs-guard/releases/download/${VERSION}/${BINARY}.sha256"
-          sha256sum -c "${BINARY}.sha256"
-          chmod +x "${BINARY}"
-          mv "${BINARY}" rs-guard
+      # Install Rust toolchain (MSRV 1.92).
+      - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9
+        with:
+          toolchain: stable
+
+      # Install rs-guard {{VERSION}} from crates.io. --locked ensures
+      # reproducible transitive dependencies; --version pins the crate.
+      - name: Install rs-guard
+        run: cargo install rs-guard --locked --version "{{VERSION_NO_V}}"
 
       # Run the AI code review.
       # The tool reads the diff from the PR, sends it to the configured LLM,
@@ -515,6 +511,7 @@ fn generate_workflow(args: &GenerateWorkflowArgs) -> Result<String, Box<dyn std:
         .unwrap_or_else(|| api_key_env_for(provider));
     let model = args.model.clone();
     let version = format!("v{}", env!("CARGO_PKG_VERSION"));
+    let version_no_v = env!("CARGO_PKG_VERSION").to_string();
 
     let (event, types, fork_guard) = if args.fork_safe {
         (
@@ -538,6 +535,7 @@ fn generate_workflow(args: &GenerateWorkflowArgs) -> Result<String, Box<dyn std:
         .replace("{{TYPES}}", types)
         .replace("{{FORK_GUARD}}", fork_guard)
         .replace("{{VERSION}}", &version)
+        .replace("{{VERSION_NO_V}}", &version_no_v)
         .replace("{{RUN_LINE}}", &run_line)
         .replace("{{SECRET}}", &secret);
 

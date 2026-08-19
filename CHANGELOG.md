@@ -15,14 +15,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Multi-arch release binaries** (issue #117) —
-  Pre-built binaries are now published for 4 targets: Linux x86_64,
-  Linux aarch64, macOS Intel (x86_64-apple-darwin), and macOS Apple
-  Silicon (aarch64-apple-darwin). Each binary includes a SHA256
-  checksum file. The release workflow uses a matrix strategy with
-  appropriate cross-compilation toolchains for aws-lc-rs on Linux
-  aarch64.
-
 - **Binary size budget CI** (issue #117) —
   A new `binary-size` job in CI fails if the release binary exceeds
   12 MB. Current baseline is 4.6 MB (v1.8, with aws-lc-rs from
@@ -114,6 +106,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `TokenUsage` as `llm::KernelTokenUsage`; that type-interop layer was dropped
   before any release, so no public API was removed and no `[Removed]` entry is
   needed.)
+
+### Changed
+
+- **Release pipeline simplified to crates.io only** (issue #117) —
+  Pre-built binary builds were dropped because cross-compiling aws-lc-rs
+  (the TLS library pulled in by llm-kernel) for aarch64 Linux took 50+
+  minutes on GitHub Actions runners. The release workflow now publishes
+  to crates.io only; users install via
+  `cargo install rs-guard --locked --version "1.8.0"`. A `cargo check`
+  verification matrix (4 targets) runs before publish to catch
+  cross-compile regressions. An upstream issue has been filed
+  ([epicsagas/llm-kernel#93](https://github.com/epicsagas/llm-kernel/issues/93))
+  to evaluate switching to `ring`, which would make pre-built binaries
+  viable again.
 
 ## [1.7.0] - 2026-08-15
 

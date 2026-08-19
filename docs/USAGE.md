@@ -467,20 +467,14 @@ jobs:
       # Pinned from actions/checkout@v5 (93cb6efe) to avoid Node.js 20 deprecation.
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
 
-      - name: Download rs-guard
-        run: |
-          set -euo pipefail
-          BINARY="rs-guard-x86_64-unknown-linux-gnu"
-          curl -L --fail -o "${BINARY}" \
-            "https://github.com/nebulaideas/rs-guard/releases/latest/download/${BINARY}"
-          curl -L --fail -o "${BINARY}.sha256" \
-            "https://github.com/nebulaideas/rs-guard/releases/latest/download/${BINARY}.sha256"
-          sha256sum -c "${BINARY}.sha256"
-          chmod +x "${BINARY}"
-          mv "${BINARY}" rs-guard
+      - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9
+        with:
+          toolchain: stable
+      - name: Install rs-guard
+        run: cargo install rs-guard --locked --version "1.8.0"
 
       - name: AI Code Review
-        run: ./rs-guard
+        run: rs-guard
         env:
           # Set the env var for your chosen provider:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
@@ -511,20 +505,14 @@ jobs:
       # Pinned from actions/checkout@v5 (93cb6efe) to avoid Node.js 20 deprecation.
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
 
-      - name: Download rs-guard
-        run: |
-          set -euo pipefail
-          BINARY="rs-guard-x86_64-unknown-linux-gnu"
-          curl -L --fail -o "${BINARY}" \
-            "https://github.com/nebulaideas/rs-guard/releases/latest/download/${BINARY}"
-          curl -L --fail -o "${BINARY}.sha256" \
-            "https://github.com/nebulaideas/rs-guard/releases/latest/download/${BINARY}.sha256"
-          sha256sum -c "${BINARY}.sha256"
-          chmod +x "${BINARY}"
-          mv "${BINARY}" rs-guard
+      - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9
+        with:
+          toolchain: stable
+      - name: Install rs-guard
+        run: cargo install rs-guard --locked --version "1.8.0"
 
       - name: AI Code Review
-        run: ./rs-guard --config .reviewer.toml
+        run: rs-guard --config .reviewer.toml
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -563,10 +551,13 @@ jobs:
     if: ${{ !github.event.pull_request.head.repo.fork }}
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
-      - name: Download rs-guard
-        run: ./scripts/rs-guard-install.sh
+      - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9
+        with:
+          toolchain: stable
+      - name: Install rs-guard
+        run: cargo install rs-guard --locked --version "1.8.0"
       - name: AI Code Review
-        run: ./rs-guard --check-run
+        run: rs-guard --check-run
         env:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -605,7 +596,7 @@ if git diff --cached --quiet; then
   exit 0
 fi
 
-./rs-guard
+rs-guard
 EXIT_CODE=$?
 
 if [ "$EXIT_CODE" -eq 2 ]; then
@@ -861,20 +852,14 @@ jobs:
       # Pinned from actions/checkout@v5 (93cb6efe) to avoid Node.js 20 deprecation.
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
 
-      - name: Download rs-guard
-        run: |
-          set -euo pipefail
-          BINARY="rs-guard-x86_64-unknown-linux-gnu"
-          curl -L --fail -o "${BINARY}" \
-            "https://github.com/nebulaideas/rs-guard/releases/latest/download/${BINARY}"
-          curl -L --fail -o "${BINARY}.sha256" \
-            "https://github.com/nebulaideas/rs-guard/releases/latest/download/${BINARY}.sha256"
-          sha256sum -c "${BINARY}.sha256"
-          chmod +x "${BINARY}"
-          mv "${BINARY}" rs-guard
+      - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9
+        with:
+          toolchain: stable
+      - name: Install rs-guard
+        run: cargo install rs-guard --locked --version "1.8.0"
 
       - name: AI Code Review
-        run: ./rs-guard
+        run: rs-guard
         env:
           # Set the env var for your chosen provider:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
@@ -889,16 +874,10 @@ Then add your API key in **Settings → Secrets and variables → Actions → `D
 
 ### Local Setup (Pre-commit Hook)
 
-Install the binary:
+Install rs-guard:
 
 ```bash
-# Option A: Pre-built binary (Linux x86_64)
-curl -L -o /usr/local/bin/rs-guard \
-  https://github.com/nebulaideas/rs-guard/releases/latest/download/rs-guard-x86_64-unknown-linux-gnu
-chmod +x /usr/local/bin/rs-guard
-
-# Option B: cargo install
-cargo install rs-guard
+cargo install rs-guard --locked --version "1.8.0"
 ```
 
 Create `.git/hooks/pre-commit`:

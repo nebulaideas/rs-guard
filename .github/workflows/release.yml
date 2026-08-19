@@ -9,30 +9,26 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  build-release:
-    name: Build ${{ matrix.target }}
+  # Verify the crate compiles on all supported targets before publishing.
+  # cargo publish only checks the host target, so we add a lightweight
+  # cargo check matrix to catch cross-compile regressions (e.g. aws-lc-rs
+  # on aarch64 Linux). Note: cargo check does not perform final linking,
+  # so it verifies type/cfg correctness but not native link success.
+  verify-targets:
+    name: Check ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
     strategy:
-      fail-fast: false
+      fail-fast: true
       matrix:
         include:
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
-            strip: strip
-            cross: false
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-latest
-            strip: aarch64-linux-gnu-strip
-            cross: true
-            cross_packages: gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
           - target: x86_64-apple-darwin
             os: macos-13
-            strip: strip
-            cross: false
           - target: aarch64-apple-darwin
-            os: macos-14
-            strip: strip
-            cross: false
-    runs-on: ${{ matrix.os }}
+            os: macos-latest
     steps:
       # Pinned from actions/checkout@v5 (93cb6efe) to avoid Node.js 20 deprecation.
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
@@ -41,77 +37,25 @@ jobs:
         with:
           toolchain: stable
           targets: ${{ matrix.target }}
-      # Install cross-compilation C toolchain for aws-lc-rs (Linux aarch64 only).
-      # aws-lc-rs requires a C/C++ compiler + cmake for the target arch.
-      - name: Install cross-compilation toolchain
-        if: matrix.cross
+      - name: Install cross-compilation toolchain (Linux aarch64)
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
         run: |
           sudo apt-get update
-          sudo apt-get install -y ${{ matrix.cross_packages }} cmake
-      - name: Build release binary
-        run: cargo build --release --target ${{ matrix.target }}
+          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu cmake
+      - name: cargo check
+        run: cargo check --release --target ${{ matrix.target }}
         env:
-          # Cross-compilation env vars for aws-lc-rs (aarch64 Linux only).
-          # These tell cmake/cc-rs which compiler to use for the target arch.
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
           CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
           CXX_aarch64_unknown_linux_gnu: aarch64-linux-gnu-g++
           AR_aarch64_unknown_linux_gnu: aarch64-linux-gnu-ar
-          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
-      - name: Strip binary
-        run: ${{ matrix.strip }} target/${{ matrix.target }}/release/rs-guard
-      - name: Prepare release asset and checksum
-        run: |
-          set -euo pipefail
-          BINARY="rs-guard-${{ matrix.target }}"
-          cp "target/${{ matrix.target }}/release/rs-guard" "${BINARY}"
-          # sha256sum is not available on macOS by default; use shasum as fallback.
-          if command -v sha256sum >/dev/null 2>&1; then
-            sha256sum "${BINARY}" > "${BINARY}.sha256"
-          else
-            shasum -a 256 "${BINARY}" > "${BINARY}.sha256"
-          fi
-      # Upload artifacts for the aggregate release job to collect.
-      # Pinned from actions/upload-artifact@v4 (ea165f8).
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: rs-guard-${{ matrix.target }}
-          path: |
-            rs-guard-${{ matrix.target }}
-            rs-guard-${{ matrix.target }}.sha256
-          if-no-files-found: error
-
-  publish-release:
-    name: Publish GitHub Release
-    runs-on: ubuntu-latest
-    needs: build-release
-    permissions:
-      contents: write
-    steps:
-      # Pinned from actions/checkout@v5 (93cb6efe).
-      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
-      # Download all artifacts from the matrix build jobs.
-      # Pinned from actions/download-artifact@v4 (d3f86a1).
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
-        with:
-          path: artifacts
-          merge-multiple: true
-      - name: List artifacts
-        run: ls -lh artifacts/
-      # Single release upload — avoids concurrent release creation races.
-      # Pinned from softprops/action-gh-release@v2 (3bb12739).
-      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65
-        with:
-          files: artifacts/*
-          generate_release_notes: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   publish-crates:
     name: Publish to crates.io
     runs-on: ubuntu-latest
-    needs: build-release
+    needs: verify-targets
     steps:
-      # Pinned from actions/checkout@v5 (93cb6efe).
+      # Pinned from actions/checkout@v5 (93cb6efe) to avoid Node.js 20 deprecation.
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
       # Pinned from dtolnay/rust-toolchain@stable (e97e2d8c).
       - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9

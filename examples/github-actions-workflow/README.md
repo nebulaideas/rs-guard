@@ -18,7 +18,7 @@ All workflows include:
 - **Concurrency groups** — Only one review runs per PR at a time. New pushes cancel in-progress reviews.
 - **Draft PR skipping** — Reviews are skipped while a PR is in draft state.
 - **Minimal permissions** — Uses `contents: read` and `pull-requests: write` only.
-- **SHA-256 integrity check** — The downloaded binary is verified against the release's `*.sha256` file when available; otherwise a warning is emitted.
+- **Reproducible install** — rs-guard is installed from crates.io via `cargo install rs-guard --locked --version "1.8.0"`, which uses the published `Cargo.lock` for a reproducible build.
 
 ## Quick Start
 
@@ -31,7 +31,7 @@ All workflows include:
 The `backend-api.yml` and `frontend-spa.yml` workflows reference a custom prompt file:
 
 ```bash
-./rs-guard --prompt-file .github/review-prompt.md
+rs-guard --prompt-file .github/review-prompt.md
 ```
 
 Create this file in your repository to tailor the review focus to your stack.
@@ -57,12 +57,12 @@ The example workflows use the following security defaults:
 - **Minimal permissions** — `contents: read`, `pull-requests: write`. Never use
   the default `write-all` token scope.
 - **Concurrency groups** — Prevents stale reviews and resource waste.
-- **SHA-256 verification** — The `Download rs-guard` step downloads the
-  release binary (`rs-guard-x86_64-unknown-linux-gnu`) together with its
-  `*.sha256` checksum file, verifies the checksum, and renames the binary to
-  `rs-guard` for subsequent steps.
-- **Pinned release tag** — For production use, replace the `VERSION` variable
-  with a specific tag (e.g., `VERSION="v1.0.2"`) so you have a reproducible build.
+- **Reproducible install** — The `Install rs-guard` step runs
+  `cargo install rs-guard --locked --version "1.8.0"`, which builds the binary from source
+  using the published `Cargo.lock` and places it on `PATH` for subsequent steps.
+- **Locked dependencies** — The `--locked` flag ensures the build uses the
+  exact dependency versions from the published `Cargo.lock`, giving you a
+  reproducible build.
 
 > ⚠️ The `pull_request_target` event in `fork-safe.yml` runs in the **base
 > branch** context and has access to repository secrets. The example workflow

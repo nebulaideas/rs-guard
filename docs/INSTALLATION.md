@@ -8,9 +8,8 @@ Complete guide for installing and running rs-guard locally or in GitHub Actions.
 
 - [Quick Start](#quick-start)
 - [Installation Methods](#installation-methods)
-  - [Option 1: Pre-built Binary (Recommended)](#option-1-pre-built-binary-recommended)
+  - [Option 1: Cargo Install (Recommended)](#option-1-cargo-install-recommended)
   - [Option 2: Build from Source](#option-2-build-from-source)
-  - [Option 3: Cargo Install](#option-3-cargo-install)
 - [Platform-Specific Instructions](#platform-specific-instructions)
   - [Linux](#linux)
   - [macOS](#macos)
@@ -27,111 +26,57 @@ Complete guide for installing and running rs-guard locally or in GitHub Actions.
 **For immediate testing:**
 
 ```bash
-# Download the latest binary (auto-detects platform)
-ARCH=$(uname -m)
-OS=$(uname -s | tr '[:upper:]' '[:lower:]')
-if [ "$OS" = "darwin" ]; then OS="apple-darwin"; else OS="unknown-linux-gnu"; fi
-if [ "$ARCH" = "arm64" ] || [ "$ARCH" = "aarch64" ]; then ARCH="aarch64"; else ARCH="x86_64"; fi
-curl -L -o rs-guard \
-  "https://github.com/nebulaideas/rs-guard/releases/latest/download/rs-guard-${ARCH}-${OS}"
-chmod +x rs-guard
+# Install via cargo (requires Rust toolchain)
+cargo install rs-guard --locked
 
 # Set your API key
 export DEEPSEEK_API_KEY="your-api-key"
 
 # Test locally
-./rs-guard --help
+rs-guard --help
 ```
 
 ---
 
 ## Installation Methods
 
-### Option 1: Pre-built Binary (Recommended)
+### Option 1: Cargo Install (Recommended)
 
-Fastest method — no compilation required. Downloads a ready-to-run binary.
-
-Pre-built binaries are published for the following targets:
-
-| Platform | Target Triple | Download File |
-|---|---|---|
-| Linux x86_64 | `x86_64-unknown-linux-gnu` | `rs-guard-x86_64-unknown-linux-gnu` |
-| Linux ARM64 | `aarch64-unknown-linux-gnu` | `rs-guard-aarch64-unknown-linux-gnu` |
-| macOS Intel | `x86_64-apple-darwin` | `rs-guard-x86_64-apple-darwin` |
-| macOS Apple Silicon | `aarch64-apple-darwin` | `rs-guard-aarch64-apple-darwin` |
-
-Each binary has a corresponding `.sha256` checksum file for verification.
-
-#### Linux (x86_64)
+Simplest method — downloads and builds from crates.io.
 
 ```bash
-curl -L -o rs-guard \
-  https://github.com/nebulaideas/rs-guard/releases/latest/download/rs-guard-x86_64-unknown-linux-gnu
-chmod +x rs-guard
-sudo mv rs-guard /usr/local/bin/
-
-# Verify
-rs-guard --version
+cargo install rs-guard --locked
 ```
 
-#### Linux (ARM64)
+This installs the `rs-guard` binary to `~/.cargo/bin/rs-guard`. Requires Rust
+1.92+ and a C compiler (for aws-lc-rs, the TLS library). First build takes
+2-5 minutes; subsequent installs are cached.
+
+#### Prerequisites
+
+Install Rust (requires version 1.92+):
 
 ```bash
-curl -L -o rs-guard \
-  https://github.com/nebulaideas/rs-guard/releases/latest/download/rs-guard-aarch64-unknown-linux-gnu
-chmod +x rs-guard
-sudo mv rs-guard /usr/local/bin/
-
-# Verify
-rs-guard --version
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
 
-#### macOS (Intel)
+On Linux, you also need a C compiler and cmake (for aws-lc-rs):
 
 ```bash
-curl -L -o rs-guard \
-  https://github.com/nebulaideas/rs-guard/releases/latest/download/rs-guard-x86_64-apple-darwin
-chmod +x rs-guard
-sudo mv rs-guard /usr/local/bin/
-
-# Verify
-rs-guard --version
+sudo apt-get install -y build-essential cmake  # Debian/Ubuntu
+sudo yum install -y gcc cmake                   # RHEL/CentOS
 ```
 
-#### macOS (Apple Silicon)
+On macOS, Xcode Command Line Tools provide everything needed:
 
 ```bash
-curl -L -o rs-guard \
-  https://github.com/nebulaideas/rs-guard/releases/latest/download/rs-guard-aarch64-apple-darwin
-chmod +x rs-guard
-sudo mv rs-guard /usr/local/bin/
-
-# Verify
-rs-guard --version
+xcode-select --install
 ```
 
-#### Verify Checksum (all platforms)
+#### Verify
 
 ```bash
-# Set your target triple (e.g. x86_64-unknown-linux-gnu, aarch64-apple-darwin)
-TARGET="x86_64-unknown-linux-gnu"
-
-# Download the binary and its checksum file
-curl -L -o "rs-guard-${TARGET}" \
-  "https://github.com/nebulaideas/rs-guard/releases/latest/download/rs-guard-${TARGET}"
-curl -L -o "rs-guard-${TARGET}.sha256" \
-  "https://github.com/nebulaideas/rs-guard/releases/latest/download/rs-guard-${TARGET}.sha256"
-
-# Verify (sha256sum on Linux, shasum on macOS)
-if command -v sha256sum >/dev/null 2>&1; then
-  sha256sum -c "rs-guard-${TARGET}.sha256"
-else
-  shasum -a 256 -c "rs-guard-${TARGET}.sha256"
-fi
-
-# Rename to rs-guard
-mv "rs-guard-${TARGET}" rs-guard
-chmod +x rs-guard
+rs-guard --version
 ```
 
 ---
@@ -180,22 +125,6 @@ cargo install --path .
 - **First build:** 2-5 minutes (downloads and compiles all dependencies)
 - **Subsequent builds:** 30-60 seconds (incremental compilation)
 - **Release build:** Additional 1-2 minutes for optimizations
-
----
-
-### Option 3: Cargo Install
-
-Simplest method if you already have Rust installed. Downloads and builds from crates.io.
-
-```bash
-# Install latest published version
-cargo install rs-guard
-
-# Binary will be installed to ~/.cargo/bin/rs-guard
-# Ensure ~/.cargo/bin is in your PATH
-```
-
-**Note:** This requires the crate to be published on crates.io first. Before publication, use "Build from Source" instead.
 
 ---
 
@@ -312,20 +241,15 @@ jobs:
       # Pinned from actions/checkout@v5 (93cb6efe) to avoid Node.js 20 deprecation.
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
 
-      - name: Download rs-guard
-        run: |
-          set -euo pipefail
-          BINARY="rs-guard-x86_64-unknown-linux-gnu"
-          curl -L --fail -o "${BINARY}" \
-            "https://github.com/nebulaideas/rs-guard/releases/latest/download/${BINARY}"
-          curl -L --fail -o "${BINARY}.sha256" \
-            "https://github.com/nebulaideas/rs-guard/releases/latest/download/${BINARY}.sha256"
-          sha256sum -c "${BINARY}.sha256"
-          chmod +x "${BINARY}"
-          mv "${BINARY}" rs-guard
+      - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9
+        with:
+          toolchain: stable
+
+      - name: Install rs-guard
+        run: cargo install rs-guard --locked --version "1.8.0"
 
       - name: AI Code Review
-        run: ./rs-guard
+        run: rs-guard
         env:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -339,7 +263,7 @@ If using `.reviewer.toml`:
 
 ```yaml
 - name: AI Code Review
-  run: ./rs-guard --config .reviewer.toml
+  run: rs-guard --config .reviewer.toml
   env:
     GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -470,28 +394,11 @@ export PATH="$HOME/.cargo/bin:$PATH"
 
 **Cause:** Binary lacks execute permission.
 
-**Solution:**
+**Solution:** Ensure `~/.cargo/bin` is in your PATH:
 
 ```bash
-chmod +x rs-guard
+export PATH="$HOME/.cargo/bin:$PATH"
 ```
-
-### "Binary incompatible" or wrong architecture
-
-**Cause:** Downloaded binary doesn't match your system architecture.
-
-**Solution:** Check your architecture:
-
-```bash
-# Linux/macOS
-uname -m
-
-# Expected outputs:
-# x86_64 = Intel/AMD 64-bit
-# aarch64 = ARM 64-bit (M1/M2/M3/M4/M5, Raspberry Pi, etc.)
-```
-
-Download the matching binary variant.
 
 ### Build fails with "Rust version too old"
 

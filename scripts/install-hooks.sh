@@ -30,7 +30,7 @@ fi
 
 # Check if rs-guard is available
 if ! command -v rs-guard &>/dev/null && [ ! -f ./rs-guard ]; then
-  echo "[rs-guard] rs-guard not found. Skipping review (install with ./scripts/rs-guard-install.sh)"
+  echo "[rs-guard] rs-guard not found. Skipping review (install with: cargo install rs-guard --locked)"
   exit 0
 fi
 
