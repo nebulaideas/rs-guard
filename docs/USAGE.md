@@ -55,6 +55,12 @@ rs-guard [OPTIONS]
 | `--check-run`   | —     | Off                        | Publish a GitHub Check Run in addition to the PR review. See [Check Runs](#check-runs-v17). |
 | `--check-run-name` | —  | `rs-guard`                 | Custom name for the GitHub Check Run.                                               |
 | `--dry-run`     | —     | Off                        | Run the full pipeline without submitting reviews or blocking commits.              |
+| `--multi-pass`  | —     | Off                        | Enable multi-pass review for large diffs. See [Multi-pass Review](#multi-pass-review-v18). |
+| `--multi-pass-max-chunks` | — | `10`                 | Maximum chunks to split the diff into. |
+| `--multi-pass-max-concurrent` | — | `3`              | Maximum concurrent LLM calls during multi-pass. |
+| `--multi-pass-max-cost-cents` | — | (disabled)         | Abort if estimated total cost exceeds this cap (in cents). |
+| `--ignore-file` | —     | `.rs-guardignore`          | Path to a gitignore-style file for excluding paths from review. See [Ignore File](#ignore-file-v18). |
+| `--no-auto-prompt` | —  | Off                        | Disable language-aware prompt auto-selection. See [Language-aware Prompt Selection](#language-aware-prompt-selection-v18). |
 | `--help`        | `-h`  |                            | Display usage information and exit.                                                |
 | `--version`     | `-V`  |                            | Display version and exit.                                                          |
 
