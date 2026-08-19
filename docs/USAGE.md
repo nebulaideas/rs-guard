@@ -470,6 +470,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9
         with:
           toolchain: stable
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c
       - name: Install rs-guard
         run: cargo install rs-guard --locked --version "1.8.0"
 
@@ -508,6 +510,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9
         with:
           toolchain: stable
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c
       - name: Install rs-guard
         run: cargo install rs-guard --locked --version "1.8.0"
 
@@ -554,6 +558,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9
         with:
           toolchain: stable
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c
       - name: Install rs-guard
         run: cargo install rs-guard --locked --version "1.8.0"
       - name: AI Code Review
@@ -855,6 +861,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9
         with:
           toolchain: stable
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c
       - name: Install rs-guard
         run: cargo install rs-guard --locked --version "1.8.0"
 

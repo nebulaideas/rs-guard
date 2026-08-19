@@ -54,6 +54,9 @@ jobs:
         with:
           toolchain: stable
 
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c
+
       # Install rs-guard {{VERSION}} from crates.io. --locked ensures
       # reproducible transitive dependencies; --version pins the crate.
       - name: Install rs-guard
