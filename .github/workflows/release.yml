@@ -71,8 +71,8 @@ jobs:
             shasum -a 256 "${BINARY}" > "${BINARY}.sha256"
           fi
       # Upload artifacts for the aggregate release job to collect.
-      # Pinned from actions/upload-artifact@v4 (b4b15b8).
-      - uses: actions/upload-artifact@b4b15b845f87c3b5b69a5b5a4c56108aa41aa166
+      # Pinned from actions/upload-artifact@v4 (ea165f8).
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: rs-guard-${{ matrix.target }}
           path: |
@@ -90,8 +90,8 @@ jobs:
       # Pinned from actions/checkout@v5 (93cb6efe).
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
       # Download all artifacts from the matrix build jobs.
-      # Pinned from actions/download-artifact@v4 (fa0a91b).
-      - uses: actions/download-artifact@fa0a91b85bf4d1084b1f1197f5e34e6b3a2b8c6f
+      # Pinned from actions/download-artifact@v4 (d3f86a1).
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           path: artifacts
           merge-multiple: true
