@@ -334,6 +334,24 @@ pub fn provider_variant_names(provider_name: &str) -> Vec<&'static str> {
         .unwrap_or_default()
 }
 
+/// Resolves the effective temperature for a provider + variant combination.
+///
+/// When the variant has a `temperature_override`, that value replaces the
+/// configured temperature. Otherwise the configured temperature is returned
+/// as-is. This is used by the cache layer to ensure cache keys reflect the
+/// actual temperature sent to the LLM, not the pre-override configured value.
+///
+/// Returns the configured temperature when the variant is unknown or the
+/// provider has no variants.
+pub fn effective_temperature(provider_name: &str, variant: Option<&str>, configured: f32) -> f32 {
+    let Some(vname) = variant else {
+        return configured;
+    };
+    find_provider_variant(provider_name, vname)
+        .and_then(|v| v.temperature_override)
+        .unwrap_or(configured)
+}
+
 /// The result of variant resolution: the effective model identifier, any
 /// extra top-level body fields, and an optional temperature override.
 pub(crate) type VariantResolution = (String, HashMap<String, serde_json::Value>, Option<f32>);
@@ -829,6 +847,53 @@ mod tests {
             temp_override,
             Some(0.6),
             "kimi thinking-off should override temperature to 0.6"
+        );
+    }
+
+    // --- effective_temperature tests (cache key correctness) ---
+
+    #[test]
+    fn test_effective_temperature_no_variant_returns_configured() {
+        assert_eq!(
+            effective_temperature("deepseek", None, 0.1),
+            0.1,
+            "no variant should return configured temperature"
+        );
+    }
+
+    #[test]
+    fn test_effective_temperature_variant_without_override_returns_configured() {
+        assert_eq!(
+            effective_temperature("deepseek", Some("flash"), 0.1),
+            0.1,
+            "variant without temperature_override should return configured temperature"
+        );
+    }
+
+    #[test]
+    fn test_effective_temperature_kimi_thinking_on_returns_override() {
+        assert_eq!(
+            effective_temperature("kimi", Some("thinking-on"), 0.1),
+            1.0,
+            "kimi thinking-on should return 1.0 regardless of configured temperature"
+        );
+    }
+
+    #[test]
+    fn test_effective_temperature_kimi_thinking_off_returns_override() {
+        assert_eq!(
+            effective_temperature("kimi", Some("thinking-off"), 0.1),
+            0.6,
+            "kimi thinking-off should return 0.6 regardless of configured temperature"
+        );
+    }
+
+    #[test]
+    fn test_effective_temperature_unknown_variant_returns_configured() {
+        assert_eq!(
+            effective_temperature("deepseek", Some("nonexistent"), 0.1),
+            0.1,
+            "unknown variant should return configured temperature"
         );
     }
 

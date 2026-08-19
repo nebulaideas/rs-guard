@@ -139,8 +139,18 @@ impl LlmProvider for KernelBackedClient {
         temperature: f32,
     ) -> Result<ChatCompletionResult, RsGuardError> {
         // Resolve variant (ModelAlias only — ExtraBody providers use GenericClient).
-        let (effective_model, _extra_body, temp_override) =
+        let (effective_model, extra_body, temp_override) =
             providers::apply_variant(self.meta.name, &self.model, self.variant.as_deref())?;
+
+        // KernelBackedClient must never receive ExtraBody variants — the factory
+        // routes ExtraBody providers to GenericOpenAiCompatibleClient. If this
+        // fires, the factory routing logic has a bug.
+        debug_assert!(
+            extra_body.is_empty(),
+            "KernelBackedClient received non-empty extra_body for provider '{}' — \
+             ExtraBody variants should be routed to GenericOpenAiCompatibleClient",
+            self.meta.name
+        );
 
         // A variant's temperature_override (if set) replaces the caller-supplied
         // temperature. This handles providers that only accept specific

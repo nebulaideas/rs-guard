@@ -428,6 +428,33 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_variant_without_temperature_override_preserves_caller_temperature() {
+        // A variant with temperature_override: None (e.g. DeepSeek flash) must
+        // preserve the caller-supplied temperature in the request body.
+        let mock_server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/chat/completions"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "choices": [{ "message": { "content": "ok" } }]
+            })))
+            .mount(&mock_server)
+            .await;
+
+        let client = build("deepseek", &mock_server.uri()).with_variant(Some("flash".to_string()));
+        let _ = client.chat_completion("system", "user", 0.1).await.unwrap();
+
+        let requests = mock_server.received_requests().await.unwrap();
+        assert_eq!(requests.len(), 1);
+        let body: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
+        assert_eq!(
+            body["temperature"].as_f64(),
+            Some(0.1),
+            "variant without temperature_override should preserve caller temperature; got: {}",
+            body["temperature"]
+        );
+    }
+
+    #[tokio::test]
     async fn test_openrouter_default_attribution_headers_sent() {
         let mock_server = MockServer::start().await;
         Mock::given(method("POST"))
