@@ -27,9 +27,13 @@ Complete guide for installing and running rs-guard locally or in GitHub Actions.
 **For immediate testing:**
 
 ```bash
-# Download the latest binary
+# Download the latest binary (auto-detects platform)
+ARCH=$(uname -m)
+OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+if [ "$OS" = "darwin" ]; then OS="apple-darwin"; else OS="unknown-linux-gnu"; fi
+if [ "$ARCH" = "arm64" ] || [ "$ARCH" = "aarch64" ]; then ARCH="aarch64"; else ARCH="x86_64"; fi
 curl -L -o rs-guard \
-  https://github.com/nebulaideas/rs-guard/releases/latest/download/rs-guard
+  "https://github.com/nebulaideas/rs-guard/releases/latest/download/rs-guard-${ARCH}-${OS}"
 chmod +x rs-guard
 
 # Set your API key
@@ -43,13 +47,20 @@ export DEEPSEEK_API_KEY="your-api-key"
 
 ## Installation Methods
 
-### Option 1: Pre-built Binary (Recommended for Linux x86_64)
+### Option 1: Pre-built Binary (Recommended)
 
 Fastest method — no compilation required. Downloads a ready-to-run binary.
 
-The release pipeline currently publishes a pre-built binary for **Linux x86_64** only.
-For other platforms, use [Option 3: Cargo Install](#option-3-cargo-install) or
-[Option 2: Build from Source](#option-2-build-from-source).
+Pre-built binaries are published for the following targets:
+
+| Platform | Target Triple | Download File |
+|---|---|---|
+| Linux x86_64 | `x86_64-unknown-linux-gnu` | `rs-guard-x86_64-unknown-linux-gnu` |
+| Linux ARM64 | `aarch64-unknown-linux-gnu` | `rs-guard-aarch64-unknown-linux-gnu` |
+| macOS Intel | `x86_64-apple-darwin` | `rs-guard-x86_64-apple-darwin` |
+| macOS Apple Silicon | `aarch64-apple-darwin` | `rs-guard-aarch64-apple-darwin` |
+
+Each binary has a corresponding `.sha256` checksum file for verification.
 
 #### Linux (x86_64)
 
@@ -61,6 +72,66 @@ sudo mv rs-guard /usr/local/bin/
 
 # Verify
 rs-guard --version
+```
+
+#### Linux (ARM64)
+
+```bash
+curl -L -o rs-guard \
+  https://github.com/nebulaideas/rs-guard/releases/latest/download/rs-guard-aarch64-unknown-linux-gnu
+chmod +x rs-guard
+sudo mv rs-guard /usr/local/bin/
+
+# Verify
+rs-guard --version
+```
+
+#### macOS (Intel)
+
+```bash
+curl -L -o rs-guard \
+  https://github.com/nebulaideas/rs-guard/releases/latest/download/rs-guard-x86_64-apple-darwin
+chmod +x rs-guard
+sudo mv rs-guard /usr/local/bin/
+
+# Verify
+rs-guard --version
+```
+
+#### macOS (Apple Silicon)
+
+```bash
+curl -L -o rs-guard \
+  https://github.com/nebulaideas/rs-guard/releases/latest/download/rs-guard-aarch64-apple-darwin
+chmod +x rs-guard
+sudo mv rs-guard /usr/local/bin/
+
+# Verify
+rs-guard --version
+```
+
+#### Verify Checksum (all platforms)
+
+```bash
+# Set your target triple (e.g. x86_64-unknown-linux-gnu, aarch64-apple-darwin)
+TARGET="x86_64-unknown-linux-gnu"
+
+# Download the binary and its checksum file
+curl -L -o "rs-guard-${TARGET}" \
+  "https://github.com/nebulaideas/rs-guard/releases/latest/download/rs-guard-${TARGET}"
+curl -L -o "rs-guard-${TARGET}.sha256" \
+  "https://github.com/nebulaideas/rs-guard/releases/latest/download/rs-guard-${TARGET}.sha256"
+
+# Verify (sha256sum on Linux, shasum on macOS)
+if command -v sha256sum >/dev/null 2>&1; then
+  sha256sum -c "rs-guard-${TARGET}.sha256"
+else
+  shasum -a 256 -c "rs-guard-${TARGET}.sha256"
+fi
+
+# Rename to rs-guard
+mv "rs-guard-${TARGET}" rs-guard
+chmod +x rs-guard
 ```
 
 ---

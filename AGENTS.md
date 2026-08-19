@@ -153,6 +153,8 @@ rs-guard/
 | Cache keying             | SHA-256 over (diff \| prompt \| provider \| model \| variant \| temperature \| base_url \| max_tokens \| result_format) — all parameters matter |
 | Cache timestamps         | Stored in file content (line 1), not mtime — reliable across clock changes and file copies |
 | Cache size limit         | 100 MB default with LRU cleanup — prevents unbounded disk usage                            |
+| Binary size budget       | 12 MB CI-enforced budget (current: 4.6 MB); aws-lc-rs from llm-kernel adds ~0.7 MB (upstream issue filed) |
+| Release targets          | 4 targets: Linux x86_64/aarch64, macOS x86_64/aarch64; SHA256 checksums per asset          |
 | Project rules injection  | Auto-detected AI-agent instruction files layered into the review prompt; 32 KB soft cap; explicit `--rules-file` override; interactive picker in local mode |
 | Circuit breaker          | Simple Closed/Open only (no half-open), opt-in, default disabled                           |
 | Cost calculation         | `f64` cents to avoid integer truncation for small diffs; `None` when pricing is unknown |

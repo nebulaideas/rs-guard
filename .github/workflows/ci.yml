@@ -77,6 +77,34 @@ jobs:
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32
       - run: cargo build --release
 
+  binary-size:
+    name: Binary Size Budget
+    runs-on: ubuntu-latest
+    steps:
+      # Pinned from actions/checkout@v5 (93cb6efe) to avoid Node.js 20 deprecation.
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+      # Pinned from dtolnay/rust-toolchain@stable (e97e2d8c).
+      - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32
+      - run: cargo build --release
+      - name: Check binary size against budget
+        run: |
+          set -euo pipefail
+          BINARY="target/release/rs-guard"
+          SIZE_BYTES=$(stat -c %s "$BINARY")
+          SIZE_MB=$(( (SIZE_BYTES + 1048575) / 1048576 ))
+          BUDGET_MB=12
+          BUDGET_BYTES=$((BUDGET_MB * 1048576))
+          echo "Binary size: ${SIZE_MB} MB (${SIZE_BYTES} bytes)"
+          echo "Budget: ${BUDGET_MB} MB (${BUDGET_BYTES} bytes)"
+          if [ "$SIZE_BYTES" -gt "$BUDGET_BYTES" ]; then
+            echo "::error::Binary size ${SIZE_MB} MB exceeds budget of ${BUDGET_MB} MB"
+            exit 1
+          fi
+          echo "✓ Binary size within budget"
+
   deny:
     name: cargo-deny
     runs-on: ubuntu-latest

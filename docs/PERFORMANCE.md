@@ -49,14 +49,23 @@ cargo build --release
 ls -lh target/release/rs-guard
 ```
 
-### Baseline (v1.2, macOS arm64, Rust 1.82 at time of measurement; MSRV now 1.92)
+### Baseline (v1.8, macOS arm64, Rust 1.92)
 
 **Machine:** Apple M1 Max, 32GB RAM, macOS 26.5.1
 
 | Build | Size | Notes |
-| Default `cargo build --release` | **3.9 MB** | profile.release applied (measured 2026-06-18) |
+| Default `cargo build --release` | **4.6 MB** | profile.release applied (measured 2026-08-18) |
 | `strip` (already on via `strip = true`) | included above | symbols removed |
 | + `upx --best` (optional) | ~1.5-2 MB (typical UPX ratio) | runtime self-decompression; see note |
+
+> **v1.8 size increase (3.9 → 4.6 MB):** The llm-kernel adoption (issue #142)
+> pulled in `aws-lc-rs` as the rustls crypto provider (via reqwest 0.13's
+> default `rustls` feature). `aws-lc-rs` is a C/C++ library that adds ~0.7 MB
+> to the binary. An upstream issue has been filed
+> ([epicsagas/llm-kernel#93](https://github.com/epicsagas/llm-kernel/issues/93))
+> to add a `rustls-ring` feature that would eliminate this overhead. Until
+> then, `aws-lc-rs` is accepted as a reasonable tradeoff for the functionality
+> llm-kernel provides.
 
 > **`upx` note:** UPX compresses the binary at rest and decompresses on
 > launch, adding ~50-150ms of startup. It is useful when download bandwidth
@@ -73,9 +82,10 @@ check its impact:
 cargo bloat --release --crates
 ```
 
-A size budget is not enforced in CI today; if size-sensitive, add a
-`cargo bloat` or `ls -lh` step to `.github/workflows/ci.yml` and fail above a
-threshold (e.g. 12 MB).
+A size budget is enforced in CI: the `binary-size` job in
+`.github/workflows/ci.yml` fails if the release binary exceeds **12 MB**.
+The current baseline is 4.6 MB (v1.8, with aws-lc-rs). Adjust the
+`BUDGET_MB` variable in the workflow if the budget needs to change.
 
 ---
 

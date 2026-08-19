@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Multi-arch release binaries** (issue #117) —
+  Pre-built binaries are now published for 4 targets: Linux x86_64,
+  Linux aarch64, macOS Intel (x86_64-apple-darwin), and macOS Apple
+  Silicon (aarch64-apple-darwin). Each binary includes a SHA256
+  checksum file. The release workflow uses a matrix strategy with
+  appropriate cross-compilation toolchains for aws-lc-rs on Linux
+  aarch64.
+
+- **Binary size budget CI** (issue #117) —
+  A new `binary-size` job in CI fails if the release binary exceeds
+  12 MB. Current baseline is 4.6 MB (v1.8, with aws-lc-rs from
+  llm-kernel). Upstream issue filed
+  ([epicsagas/llm-kernel#93](https://github.com/epicsagas/llm-kernel/issues/93))
+  to evaluate switching to `ring` for a smaller binary.
+
 - **Per-variant temperature override** —
   `ProviderVariant` now has a `temperature_override: Option<f32>` field that
   automatically replaces the configured temperature when a variant is active.

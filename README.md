@@ -39,8 +39,13 @@ Built by [Ismael Marín](https://ismaelmarin.dev) / [@igmarin](https://github.co
 ### 1. Download the binary
 
 ```bash
+# Auto-detect platform (Linux/macOS, x86_64/ARM64)
+ARCH=$(uname -m)
+OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+if [ "$OS" = "darwin" ]; then OS="apple-darwin"; else OS="unknown-linux-gnu"; fi
+if [ "$ARCH" = "arm64" ] || [ "$ARCH" = "aarch64" ]; then ARCH="aarch64"; else ARCH="x86_64"; fi
 curl -L -o rs-guard \
-  https://github.com/nebulaideas/rs-guard/releases/latest/download/rs-guard
+  "https://github.com/nebulaideas/rs-guard/releases/latest/download/rs-guard-${ARCH}-${OS}"
 chmod +x rs-guard
 ```
 
@@ -70,7 +75,7 @@ See [`examples/github-actions-workflow/`](examples/github-actions-workflow/) for
 
 **Quick setup:** run `rs-guard init` to scaffold `.github/workflows/rs-guard-review.yml`, `.github/review-prompt.md`, and `.reviewer.toml` in one step.
 
-**Performance in CI:** The release binary is ~3.9 MB (arm64). For faster CI cold starts, consider caching the binary or using the pre-built releases. See [docs/PERFORMANCE.md](docs/PERFORMANCE.md) for detailed baselines and optimization tips.
+**Performance in CI:** The release binary is ~4.6 MB. Pre-built binaries are available for Linux x86_64/ARM64 and macOS Intel/Apple Silicon. See [docs/PERFORMANCE.md](docs/PERFORMANCE.md) for detailed baselines and optimization tips.
 
 ---
 
