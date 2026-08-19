@@ -139,14 +139,19 @@ impl LlmProvider for KernelBackedClient {
         temperature: f32,
     ) -> Result<ChatCompletionResult, RsGuardError> {
         // Resolve variant (ModelAlias only — ExtraBody providers use GenericClient).
-        let (effective_model, _extra_body) =
+        let (effective_model, _extra_body, temp_override) =
             providers::apply_variant(self.meta.name, &self.model, self.variant.as_deref())?;
+
+        // A variant's temperature_override (if set) replaces the caller-supplied
+        // temperature. This handles providers that only accept specific
+        // temperature values per mode.
+        let effective_temperature = temp_override.unwrap_or(temperature);
 
         // Build the LLMRequest using llm-kernel's types.
         let request = LLMRequest {
             system: Some(system_prompt.to_string()),
             messages: vec![llm_kernel::llm::ChatMessage::user(user_message.to_string())],
-            temperature,
+            temperature: effective_temperature,
             max_tokens: self.max_tokens,
             model: Some(effective_model),
             response_format: None,

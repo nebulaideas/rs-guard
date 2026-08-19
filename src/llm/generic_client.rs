@@ -160,7 +160,7 @@ impl LlmProvider for GenericOpenAiCompatibleClient {
         user_message: &str,
         temperature: f32,
     ) -> Result<ChatCompletionResult, RsGuardError> {
-        let (effective_model, extra_body) =
+        let (effective_model, extra_body, temp_override) =
             providers::apply_variant(self.meta.name, &self.model, self.variant.as_deref())?;
 
         let result_format = self
@@ -170,10 +170,15 @@ impl LlmProvider for GenericOpenAiCompatibleClient {
             .map(Cow::Owned)
             .or_else(|| self.meta.result_format.clone());
 
+        // A variant's temperature_override (if set) replaces the caller-supplied
+        // temperature. This handles providers like Kimi k2.5 that only accept
+        // specific temperature values per mode.
+        let effective_temperature = temp_override.unwrap_or(temperature);
+
         let request = ChatRequest {
             model: effective_model,
             messages: chat_messages(system_prompt, user_message),
-            temperature,
+            temperature: effective_temperature,
             result_format,
             max_tokens: self.max_tokens,
             extra_body,
@@ -366,6 +371,60 @@ mod tests {
             build("qwen", &mock_server.uri()).with_result_format(Some("custom_format".to_string()));
         let result = client.chat_completion("system", "user", 0.1).await.unwrap();
         assert_eq!(result.content, "precedence ok");
+    }
+
+    #[tokio::test]
+    async fn test_variant_temperature_override_sent_in_body() {
+        // Kimi thinking-on variant requires temperature=1.0. The variant's
+        // temperature_override must replace the caller-supplied temperature
+        // in the serialized request body.
+        let mock_server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/chat/completions"))
+            .and(body_partial_json(serde_json::json!({
+                "temperature": 1.0
+            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "choices": [{ "message": { "content": "temp override ok" } }]
+            })))
+            .mount(&mock_server)
+            .await;
+
+        let client =
+            build("kimi", &mock_server.uri()).with_variant(Some("thinking-on".to_string()));
+        // Caller passes 0.1, but the variant must override to 1.0.
+        let result = client.chat_completion("system", "user", 0.1).await.unwrap();
+        assert_eq!(result.content, "temp override ok");
+    }
+
+    #[tokio::test]
+    async fn test_variant_temperature_override_inspected_in_body() {
+        // Inspect the actual request body to confirm the override was applied
+        // (not just that the mock matched — this catches silent failures when
+        // the mock is too permissive).
+        let mock_server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/chat/completions"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "choices": [{ "message": { "content": "ok" } }]
+            })))
+            .mount(&mock_server)
+            .await;
+
+        let client =
+            build("kimi", &mock_server.uri()).with_variant(Some("thinking-off".to_string()));
+        // Caller passes 0.1, but thinking-off must override to 0.6.
+        let _ = client.chat_completion("system", "user", 0.1).await.unwrap();
+
+        let requests = mock_server.received_requests().await.unwrap();
+        assert_eq!(requests.len(), 1);
+        let body: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
+        assert_eq!(
+            body["temperature"].as_f64(),
+            Some(0.6),
+            "thinking-off variant should override temperature to 0.6; got: {}",
+            body["temperature"]
+        );
     }
 
     #[tokio::test]

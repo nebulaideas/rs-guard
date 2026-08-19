@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Per-variant temperature override** —
+  `ProviderVariant` now has a `temperature_override: Option<f32>` field that
+  automatically replaces the configured temperature when a variant is active.
+  This handles providers like Kimi k2.5 that only accept specific temperature
+  values per mode (`1.0` for thinking-on, `0.6` for thinking-off). The
+  override is applied in both `GenericOpenAiCompatibleClient` and
+  `KernelBackedClient` via `apply_variant`, which now returns a 3-tuple
+  `(model, extra_body, temperature_override)`. Users no longer need to set
+  `--temperature` manually when using a Kimi variant.
+
 - **llm-kernel adoption for standard providers** (issue #142) —
   7 of 9 LLM providers (deepseek, openai, grok, glm, ollama, gemini, openrouter)
   are now backed by `llm_kernel::llm::OpenAIClient` via a new
