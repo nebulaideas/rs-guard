@@ -330,4 +330,38 @@ mod tests {
         let err = map_kernel_error(KernelError::Serialization(serde_err), "deepseek");
         assert!(!err.is_retryable());
     }
+
+    #[tokio::test]
+    async fn test_kernel_client_rejects_extra_body_variant() {
+        // KernelBackedClient must reject ExtraBody variants — the factory routes
+        // ExtraBody providers to GenericOpenAiCompatibleClient. If a bug in the
+        // factory routing causes KernelBackedClient to receive an ExtraBody
+        // variant, it must return an error rather than silently dropping the
+        // extra body fields.
+        let meta = crate::llm::providers::find_provider("kimi").unwrap();
+        let client = KernelBackedClient::new(
+            meta,
+            "test-key",
+            "http://unused.invalid",
+            "kimi-k2.5",
+            &[],
+            None,
+        )
+        .unwrap()
+        .with_variant(Some("thinking-on".to_string()));
+
+        let result = client.chat_completion("system", "user", 0.1).await;
+        let err = result.expect_err("should reject ExtraBody variant");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("non-empty extra_body"),
+            "error should mention non-empty extra_body; got: {}",
+            msg
+        );
+        assert!(
+            msg.contains("kimi"),
+            "error should mention the provider name; got: {}",
+            msg
+        );
+    }
 }
