@@ -42,7 +42,7 @@ rand = "0.8"
 # LLM client (`client-async` feature) used by `KernelBackedClient` for the 7
 # standard OpenAI-compatible providers. rs-guard and llm-kernel share the same
 # reqwest 0.13 stack, avoiding duplicate TLS dependencies. `rustls-ring`
-# selects the pure-Rust ring TLS provider (no aws-lc-sys / cmake).
+# selects the ring TLS provider (no aws-lc-sys / cmake; a plain C compiler suffices).
 llm-kernel = { version = "0.28", default-features = false, features = ["provider", "client-async", "rustls-ring"] }
 
 [dev-dependencies]
