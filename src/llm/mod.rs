@@ -558,6 +558,9 @@ pub(crate) fn build_llm_client(
         );
     }
 
+    // See `build_github_http_client`: install the ring provider (idempotent)
+    // before building a client with `rustls-no-provider`.
+    let _ = rustls::crypto::ring::default_provider().install_default();
     reqwest::Client::builder()
         .default_headers(headers)
         .timeout(timeout)

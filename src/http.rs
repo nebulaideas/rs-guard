@@ -25,6 +25,10 @@ const USER_AGENT: &str = concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VE
 pub fn build_github_http_client(
     timeout: std::time::Duration,
 ) -> Result<reqwest::Client, RsGuardError> {
+    // reqwest is built with `rustls-no-provider`; install the ring provider as
+    // process default before the first Client build. Idempotent: errors once a
+    // provider is already installed.
+    let _ = rustls::crypto::ring::default_provider().install_default();
     reqwest::Client::builder()
         .timeout(timeout)
         .build()
