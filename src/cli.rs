@@ -755,4 +755,24 @@ mod tests {
             "--check-run-sha should set check_run_sha"
         );
     }
+
+    #[test]
+    fn test_prompt_file_default_value() {
+        let cli = Cli::parse_from(["rs-guard"]);
+        assert_eq!(
+            cli.review.prompt_file,
+            PathBuf::from(".github/review-prompt.md"),
+            "prompt_file should default to .github/review-prompt.md"
+        );
+    }
+
+    #[test]
+    fn test_prompt_file_flag_parsing() {
+        let cli = Cli::parse_from(["rs-guard", "--prompt-file", "custom/prompt.md"]);
+        assert_eq!(
+            cli.review.prompt_file,
+            PathBuf::from("custom/prompt.md"),
+            "--prompt-file should override the default"
+        );
+    }
 }

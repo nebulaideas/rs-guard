@@ -552,22 +552,24 @@ pub fn load_rules_file(path: &Path) -> Result<DetectedRules, RsGuardError> {
 
 /// Selects a rules file from a list of detected files.
 ///
-/// If fewer than two files are detected, or if stdin is not a TTY, the first
-/// file (highest priority) is returned. Otherwise, `select_fn` is invoked with
-/// the display labels and its returned index selects the file. If `select_fn`
-/// errors or returns an invalid index, the first file is used as a safe
-/// fallback.
+/// If fewer than two files are detected, or if `interactive` is `false`, the
+/// first file (highest priority) is returned. Otherwise, `select_fn` is invoked
+/// with the display labels and its returned index selects the file. If
+/// `select_fn` errors or returns an invalid index, the first file is used as a
+/// safe fallback.
 ///
-/// This function is designed to be testable: production code passes a
-/// `dialoguer::Select`-based closure, while tests pass a mock selector.
-pub fn select_rules_file<F>(files: &[PathBuf], is_tty: bool, select_fn: F) -> Option<&Path>
+/// In production, `interactive` is `true` only when stdin is a TTY and the
+/// caller has decided to show the interactive picker. This function is
+/// designed to be testable: production code passes a `dialoguer::Select`-based
+/// closure, while tests pass a mock selector.
+pub fn select_rules_file<F>(files: &[PathBuf], interactive: bool, select_fn: F) -> Option<&Path>
 where
     F: FnOnce(&[String]) -> Result<usize, RsGuardError>,
 {
     if files.is_empty() {
         return None;
     }
-    if files.len() < 2 || !is_tty {
+    if files.len() < 2 || !interactive {
         return files.first().map(PathBuf::as_path);
     }
 
@@ -592,6 +594,26 @@ pub fn should_show_picker(
     is_tty: bool,
 ) -> bool {
     !is_ci && file_count >= 2 && rules_file.is_none() && !no_project_rules && is_tty
+}
+
+/// Decides whether the interactive rules file picker should be shown,
+/// taking a loaded custom prompt file into account.
+///
+/// This is a small wrapper around [`should_show_picker`] that suppresses the
+/// picker when a custom prompt file has been loaded (the user has already
+/// chosen their primary review guidance). In that case the highest-priority
+/// rules file is auto-selected as supplemental context.
+#[must_use]
+pub fn should_show_rules_picker(
+    is_ci: bool,
+    file_count: usize,
+    rules_file: Option<&Path>,
+    no_project_rules: bool,
+    is_tty: bool,
+    prompt_file_loaded: bool,
+) -> bool {
+    should_show_picker(is_ci, file_count, rules_file, no_project_rules, is_tty)
+        && !prompt_file_loaded
 }
 
 // ---------------------------------------------------------------------------
@@ -987,24 +1009,24 @@ mod tests {
     }
 
     #[test]
-    fn test_select_rules_file_non_tty_returns_first() {
+    fn test_select_rules_file_non_interactive_returns_first() {
         let files = vec![PathBuf::from("AGENTS.md"), PathBuf::from("CLAUDE.md")];
         let result = select_rules_file(&files, false, |_| panic!("selector should not be called"));
         assert_eq!(
             result,
             Some(Path::new("AGENTS.md")),
-            "non-TTY should use first match"
+            "non-interactive mode should use first match"
         );
     }
 
     #[test]
-    fn test_select_rules_file_tty_uses_selector() {
+    fn test_select_rules_file_interactive_uses_selector() {
         let files = vec![PathBuf::from("AGENTS.md"), PathBuf::from("CLAUDE.md")];
         let result = select_rules_file(&files, true, |_| Ok(1));
         assert_eq!(
             result,
             Some(Path::new("CLAUDE.md")),
-            "TTY should use selector result"
+            "interactive mode should use selector result"
         );
     }
 
@@ -1074,6 +1096,38 @@ mod tests {
         assert!(
             !should_show_picker(false, 0, None, false, true),
             "no files should skip picker"
+        );
+    }
+
+    #[test]
+    fn test_should_show_rules_picker_suppressed_when_prompt_file_loaded() {
+        // All base conditions for showing the picker are met, but a loaded
+        // custom prompt file should suppress it.
+        assert!(
+            !should_show_rules_picker(false, 2, None, false, true, true),
+            "loaded prompt file should suppress rules picker"
+        );
+    }
+
+    #[test]
+    fn test_should_show_rules_picker_shown_when_no_prompt_file_loaded() {
+        assert!(
+            should_show_rules_picker(false, 2, None, false, true, false),
+            "picker should be shown when no prompt file is loaded and conditions are met"
+        );
+    }
+
+    #[test]
+    fn test_should_show_rules_picker_respects_base_conditions() {
+        // Single file should skip even with prompt_file_loaded=false.
+        assert!(
+            !should_show_rules_picker(false, 1, None, false, true, false),
+            "single file should not show picker"
+        );
+        // CI mode should skip even when prompt_file_loaded=false.
+        assert!(
+            !should_show_rules_picker(true, 2, None, false, true, false),
+            "CI mode should skip picker"
         );
     }
 }

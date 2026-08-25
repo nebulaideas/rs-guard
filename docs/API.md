@@ -285,8 +285,9 @@ Project rules detection and loading. Detects AI-agent instruction files in the r
 | `detect_project_rules(repo_root)` | Detects and loads the highest-priority rules file. Returns `None` if no file is found. |
 | `detect_all_rules_files(repo_root)` | Returns all matching rules file paths in priority order. |
 | `load_rules_file(path)` | Loads a specific rules file with the default soft cap. |
-| `select_rules_file(files, is_tty, select_fn)` | Selects a rules file from a list. Uses `select_fn` in TTY mode, falls back to the first file otherwise. |
+| `select_rules_file(files, interactive, select_fn)` | Selects a rules file from a list. Uses `select_fn` in interactive mode, falls back to the first file otherwise. |
 | `should_show_picker(is_ci, file_count, rules_file, no_project_rules, is_tty)` | Pure predicate for whether to show the interactive picker. |
+| `should_show_rules_picker(is_ci, file_count, rules_file, no_project_rules, is_tty, prompt_file_loaded)` | Pure predicate for whether to show the interactive picker, suppressing it when a custom prompt file was loaded. |
 | `RulesDetector` | Builder-driven detector with configurable repo root and soft cap. |
 | `RulesDetectorBuilder` | Builder for `RulesDetector`. |
 | `DetectedRules` | Loaded rules content plus metadata (path, size, truncation flag). |

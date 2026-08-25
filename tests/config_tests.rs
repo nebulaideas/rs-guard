@@ -1,5 +1,6 @@
 use clap::Parser;
 use rs_guard::config::{load_toml_config, Config, ProviderTomlConfig, TomlConfig, DEFAULT_PROMPT};
+use rs_guard::rules::{detect_all_rules_files, select_rules_file};
 use serial_test::serial;
 use std::collections::HashMap;
 use std::io::Write;
@@ -1566,6 +1567,71 @@ fn test_load_project_rules_does_not_overwrite_existing_when_disabled() {
     assert!(
         config.project_rules.is_none(),
         "disabled should clear project_rules to None even if file exists"
+    );
+}
+
+#[test]
+#[serial]
+fn test_custom_prompt_file_suppresses_picker_but_keeps_rules_loading() {
+    clean_env();
+    let dir = tempfile::TempDir::new().expect("temp dir");
+
+    // Multiple project-rules files exist.
+    std::fs::write(dir.path().join("AGENTS.md"), "# Agents rules\n").expect("write AGENTS.md");
+    std::fs::write(dir.path().join("CLAUDE.md"), "# Claude rules\n").expect("write CLAUDE.md");
+
+    // A custom prompt file is provided.
+    let prompt_path = dir.path().join("prompt.md");
+    std::fs::write(&prompt_path, "# Custom prompt\n").expect("write prompt.md");
+
+    let mut config = Config::empty();
+    config
+        .load_prompt_file(&prompt_path)
+        .expect("load_prompt_file should succeed");
+
+    // A loaded prompt file means the user has already chosen their primary
+    // guidance, so the interactive picker is suppressed and the highest-priority
+    // rules file is auto-selected.
+    let prompt_file_loaded = config.is_prompt_file_loaded();
+    assert!(
+        prompt_file_loaded,
+        "custom prompt file should be reported as loaded"
+    );
+
+    let files = detect_all_rules_files(dir.path()).expect("detect should succeed");
+    assert_eq!(files.len(), 2, "both rules files should be detected");
+
+    // Use is_tty = true so the only reason the picker is suppressed is the
+    // loaded prompt file. A non-TTY runner would already skip the picker.
+    let is_tty = true;
+    let show_picker = rs_guard::rules::should_show_rules_picker(
+        false,
+        files.len(),
+        None,
+        false,
+        is_tty,
+        prompt_file_loaded,
+    );
+    assert!(
+        !show_picker,
+        "picker should be suppressed when prompt file is loaded"
+    );
+
+    let selected = select_rules_file(&files, show_picker, |_| Ok(0));
+    let rules_file = selected.map(|p| p.to_path_buf());
+
+    config
+        .load_project_rules(dir.path(), true, rules_file.as_deref())
+        .expect("load_project_rules should succeed");
+
+    assert_eq!(
+        config.prompt, "# Custom prompt\n",
+        "custom prompt should be preserved"
+    );
+    assert_eq!(
+        config.project_rules.as_deref(),
+        Some("# Agents rules\n"),
+        "highest-priority rules file should still be loaded as supplemental context"
     );
 }
 

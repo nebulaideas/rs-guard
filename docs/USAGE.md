@@ -36,7 +36,7 @@ rs-guard [OPTIONS]
 
 | Flag            | Short | Default                    | Description                                                                        |
 | --------------- | ----- | -------------------------- | ---------------------------------------------------------------------------------- |
-| `--prompt-file` | `-p`  | `.github/review-prompt.md` | Path to the system prompt markdown file. Uses embedded default if not found.       |
+| `--prompt-file` | `-p`  | `.github/review-prompt.md` | Path to the system prompt markdown file. Uses embedded default if not found. A loaded custom prompt file suppresses the interactive project-rules picker. |
 | `--model`       | `-m`  | _(provider default)_       | LLM model identifier. Overrides TOML and provider defaults.                        |
 | `--temperature` | `-t`  | `0.1`                      | Sampling temperature (0.0 to 2.0). Lower values produce more deterministic output. |
 | `--provider`    |       | `deepseek`                 | LLM provider: `deepseek`, `kimi`, `qwen`, `openrouter`, `openai`, `grok`, `glm`, `ollama`, `gemini`. |
@@ -806,7 +806,7 @@ Multiple project rules files detected. Select one:
   CLAUDE.md
 ```
 
-The picker is skipped in CI mode (`is_ci = true`), when `--rules-file` is set, when `--no-project-rules` is set, or when stdin is not a TTY. In those cases, rs-guard falls back to first-match priority silently.
+The picker is skipped in CI mode (`is_ci = true`), when `--rules-file` is set, when `--no-project-rules` is set, when stdin is not a TTY, or when a custom prompt file is loaded (via `--prompt-file` or the default `.github/review-prompt.md`). In those cases, rs-guard falls back to first-match priority silently.
 
 ### Soft Cap and Truncation
 

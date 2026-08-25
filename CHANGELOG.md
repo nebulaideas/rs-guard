@@ -11,6 +11,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Nothing yet.
 
+## [1.8.1] - 2026-08-25
+
+### Changed
+
+- **Switch TLS provider from aws-lc-rs to ring** (contributed by @epicsagas in #148) —
+  Upgraded `llm-kernel` to 0.28 and enabled its `rustls-ring` feature. `reqwest`
+  now uses `rustls-no-provider` with an explicit `rustls` + `ring` dependency,
+  removing `aws-lc-sys`/`cmake` from the dependency tree entirely. This unblocks
+  prebuilt multi-arch release binaries (#117), slashes cross-compilation times
+  from 50+ minutes to ~1.5 minutes per target, and keeps release binaries well
+  within the 12 MB budget.
+
+### Fixed
+
+- **Custom prompt file suppresses the interactive project-rules picker** —
+  When a prompt file is loaded (via `--prompt-file` or the default
+  `.github/review-prompt.md`), it is treated as the primary review guidance and
+  the interactive local-mode picker is suppressed. The highest-priority project
+  rules file (`AGENTS.md`, `.gemini/styleguide.md`, etc.) is still auto-loaded as
+  supplemental context. Previously, local-mode runs with multiple project-rules
+  files would block on an interactive picker even when the user had already
+  chosen a prompt file, which was easy to mistake for the tool ignoring the
+  prompt file. The picker is still shown when no custom prompt file is loaded
+  and multiple rules files are detected.
+
 ## [1.8.0] - 2026-08-19
 
 ### Added

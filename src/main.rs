@@ -11,7 +11,7 @@ use rs_guard::error::RsGuardError;
 use rs_guard::output;
 use rs_guard::pipeline::{run_pipeline, PipelineResult};
 use rs_guard::repo::resolve_repo_root;
-use rs_guard::rules::{detect_all_rules_files, select_rules_file, should_show_picker};
+use rs_guard::rules::{detect_all_rules_files, select_rules_file, should_show_rules_picker};
 use rs_guard::scaffold;
 use std::io::IsTerminal;
 use std::process;
@@ -79,6 +79,13 @@ async fn main() {
         "Failed to load prompt file",
     );
 
+    // A custom prompt file (either via --prompt-file or the default
+    // .github/review-prompt.md when it exists) is treated as the primary review
+    // guidance. In that case the local-mode project-rules picker is suppressed,
+    // while the highest-priority rules file is still auto-loaded as supplemental
+    // context.
+    let prompt_file_loaded = config.is_prompt_file_loaded();
+
     exit_on_error(
         config.load_ignore_file(&repo_root),
         "Failed to load ignore file",
@@ -91,7 +98,9 @@ async fn main() {
     let mut rules_file = config.rules_file.clone();
 
     // In local mode with multiple detected rules files, prompt the user to pick
-    // one. CI mode and explicit overrides skip the picker.
+    // one. CI mode, explicit --rules-file, and a loaded custom prompt file skip
+    // the picker — the user has already chosen their primary guidance source,
+    // so auto-select the highest-priority rules file as supplemental context.
     if rules_file.is_none() && project_rules_enabled && !config.is_ci && !args.no_project_rules {
         let detected_files = detect_all_rules_files(&repo_root);
         if let Err(ref e) = detected_files {
@@ -100,24 +109,29 @@ async fn main() {
         if let Ok(files) = detected_files {
             if files.len() >= 2 {
                 let is_tty = std::io::stdin().is_terminal();
-                if should_show_picker(
+                // A loaded custom prompt file is treated as the primary review
+                // guidance, so suppress the interactive picker and fall back to
+                // the highest-priority rules file.
+                let show_picker = should_show_rules_picker(
                     config.is_ci,
                     files.len(),
                     rules_file.as_deref(),
                     args.no_project_rules,
                     is_tty,
-                ) {
+                    prompt_file_loaded,
+                );
+                if show_picker {
                     eprintln!("{} Multiple project rules files detected:", "info:".cyan());
                     for (i, path) in files.iter().enumerate() {
                         eprintln!("  [{}] {}", i + 1, path.display());
                     }
-                } else if !is_tty {
+                } else if !is_tty && !prompt_file_loaded {
                     eprintln!(
                         "{} Multiple project rules files detected, but stdin is not a TTY. Using first match.",
                         "warning:".yellow()
                     );
                 }
-                let selected = select_rules_file(&files, is_tty, interactive_rules_selector());
+                let selected = select_rules_file(&files, show_picker, interactive_rules_selector());
                 rules_file = selected.map(|p| p.to_path_buf());
             }
         }

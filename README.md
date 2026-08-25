@@ -25,7 +25,7 @@ Built by [Ismael Marín](https://ismaelmarin.dev) / [@igmarin](https://github.co
 - 📊 **Metrics export** — Per-run JSON artifact with token counts, latency, and cost estimate
 - ⚙️ **CI + local mode** — GitHub Actions submits reviews; git pre-commit hook blocks bad commits
 - 📄 **Configurable prompts** — Per-repository `.github/review-prompt.md` or `.reviewer.toml`
-- 📋 **Project rules injection** — Auto-detects `AGENTS.md`, `CLAUDE.md`, and other AI-agent instruction files, layers them into the review prompt. Supports `--rules-file` override, `--no-project-rules` opt-out, and an interactive local picker when multiple files are detected
+- 📋 **Project rules injection** — Auto-detects `AGENTS.md`, `CLAUDE.md`, and other AI-agent instruction files, layers them into the review prompt. Supports `--rules-file` override, `--no-project-rules` opt-out, and an interactive local picker when multiple files are detected (skipped when a custom prompt file is loaded)
 - 🔒 **SSRF protection** — URL allowlist per provider; `Authorization` headers never sent to unknown hosts
 - 🧩 **Model variants** — `ModelAlias` (e.g. DeepSeek flash/pro) and `ExtraBody` injection (e.g. Kimi thinking mode) via `--variant`, config, or `ProviderConfig`
 - 📝 **Structured findings & inline comments** (v1.7) — `--findings` requests a `[RS_GUARD_VERDICT_FINDINGS]` JSON block; `--inline-comments` maps findings to diff positions and posts them as inline review comments (implies `--findings`)
