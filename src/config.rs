@@ -1210,6 +1210,13 @@ pub struct Config {
     pub repo_name: Option<String>,
     /// System prompt text sent to the LLM.
     pub prompt: String,
+    /// Whether a custom prompt file was loaded (via `--prompt-file` or the
+    /// default `.github/review-prompt.md` when it exists).
+    ///
+    /// Used to suppress the interactive project-rules picker in local mode:
+    /// a loaded custom prompt file is treated as the primary review guidance,
+    /// while project rules are still auto-loaded as supplemental context.
+    pub prompt_file_loaded: bool,
     /// Whether the tool is running in CI mode.
     pub is_ci: bool,
     /// GitHub API base URL.
@@ -1371,6 +1378,7 @@ impl Config {
             repo_owner: None,
             repo_name: None,
             prompt: String::new(),
+            prompt_file_loaded: false,
             is_ci: false,
             github_base_url: String::new(),
             provider_config: ProviderConfig::default(),
@@ -1517,6 +1525,7 @@ impl Config {
             repo_owner,
             repo_name,
             prompt: DEFAULT_PROMPT.to_string(),
+            prompt_file_loaded: false,
             is_ci,
             github_base_url,
             provider_config,
@@ -1763,8 +1772,20 @@ impl Config {
             let content = std::fs::read_to_string(path)
                 .map_err(|e| RsGuardError::Config(format!("Failed to read prompt file: {}", e)))?;
             self.prompt = content;
+            self.prompt_file_loaded = true;
         }
         Ok(())
+    }
+
+    /// Returns `true` when a custom prompt file was loaded.
+    ///
+    /// A prompt file is loaded either via `--prompt-file` or because the
+    /// default `.github/review-prompt.md` exists. When `true`, the interactive
+    /// project-rules picker is suppressed in local mode while project rules
+    /// are still auto-loaded as supplemental context.
+    #[must_use]
+    pub fn is_prompt_file_loaded(&self) -> bool {
+        self.prompt_file_loaded
     }
 
     /// Loads `.rs-guardignore` patterns from the configured ignore file path,
@@ -2400,6 +2421,38 @@ mod tests {
         // On Unix, unreadable files should error; on other platforms, may succeed
         #[cfg(unix)]
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_is_prompt_file_loaded_true_after_loading() {
+        let dir = tempfile::tempdir().unwrap();
+        let prompt_path = dir.path().join("prompt.md");
+        std::fs::write(&prompt_path, "Custom review prompt").unwrap();
+
+        let mut config = Config::empty();
+        assert!(
+            !config.is_prompt_file_loaded(),
+            "empty config should not report a loaded prompt file"
+        );
+
+        config.load_prompt_file(&prompt_path).unwrap();
+        assert!(
+            config.is_prompt_file_loaded(),
+            "loading a prompt file should set is_prompt_file_loaded to true"
+        );
+    }
+
+    #[test]
+    fn test_is_prompt_file_loaded_false_when_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        let missing_path = dir.path().join("missing-prompt.md");
+
+        let mut config = Config::empty();
+        config.load_prompt_file(&missing_path).unwrap();
+        assert!(
+            !config.is_prompt_file_loaded(),
+            "missing prompt file should keep is_prompt_file_loaded false"
+        );
     }
 
     #[test]

@@ -318,7 +318,7 @@ These flags are available at the top level for the default review command:
 
 | Flag            | Short | Default                    | Description                          |
 | --------------- | ----- | -------------------------- | ------------------------------------ |
-| `--prompt-file` | `-p`  | `.github/review-prompt.md` | Path to system prompt markdown file. |
+| `--prompt-file` | `-p`  | `.github/review-prompt.md` | Path to system prompt markdown file. A loaded custom prompt file suppresses the interactive project-rules picker. |
 | `--model`       | `-m`  | provider-specific          | LLM model identifier.                |
 | `--temperature` | `-t`  | `0.1`                      | Sampling temperature (0.0 - 2.0).    |
 | `--provider`    |       | `deepseek`                 | LLM provider to use.                 |
