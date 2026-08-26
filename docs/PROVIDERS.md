@@ -46,9 +46,13 @@ null `tool_calls`.
 Providers that need custom request fields (or DeepSeek's loose JSON parsing)
 use `GenericOpenAiCompatibleClient`. All others use `KernelBackedClient`, which
 provides:
-- **Reasoning-content promotion** (GLM-4.7, DeepSeek-R1)
+- **Reasoning-content promotion** (GLM-4.7)
 - **Standardized error handling** with HTTP status preservation
 - **Future compatibility** with llm-kernel's decorator stack (RetryClient, CacheClient, RouterClient)
+
+DeepSeek's generic path does not promote `reasoning_content` into the verdict.
+Empty assistant `content` with `reasoning_content` present is treated as a
+retryable empty-content error (with `max_tokens` escalation), same as before.
 
 ### Factory routing
 
