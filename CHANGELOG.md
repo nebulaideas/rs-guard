@@ -7,9 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
+### Fixed
 
-- Nothing yet.
+- **Route DeepSeek through the generic OpenAI client** (issue #150) —
+  `KernelBackedClient` / llm-kernel 0.28.1 cannot deserialize DeepSeek V4
+  thinking responses that include `"tool_calls": null` or multimodal
+  `content` arrays (`invalid type: null, expected a sequence`). DeepSeek
+  now uses `GenericOpenAiCompatibleClient` (the same loose JSON extraction
+  as Qwen/Kimi). Thinking remains enabled. Restore the kernel path after
+  llm-kernel accepts null `tool_calls`.
 
 ## [1.8.1] - 2026-08-25
 

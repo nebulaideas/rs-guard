@@ -1,10 +1,11 @@
 //! llm-kernel-backed LLM provider client.
 //!
-//! Wraps [`llm_kernel::llm::OpenAIClient`] for the 7 standard OpenAI-compatible
-//! providers that do not need `result_format` (Qwen) or `extra_body` (Kimi
-//! thinking variants). Per-provider differences (base URL, model, attribution
-//! headers, timeout) are expressed through the pre-built [`reqwest::Client`]
-//! passed to the underlying `OpenAIClient`.
+//! Wraps [`llm_kernel::llm::OpenAIClient`] for the 6 standard OpenAI-compatible
+//! providers that do not need `result_format` (Qwen), `extra_body` (Kimi
+//! thinking variants), or DeepSeek's loose V4 JSON parsing. Per-provider
+//! differences (base URL, model, attribution headers, timeout) are expressed
+//! through the pre-built [`reqwest::Client`] passed to the underlying
+//! `OpenAIClient`.
 //!
 //! This type is `pub(crate)` — it is not part of the public API. Provider
 //! instances are constructed exclusively via [`super::factory::create_provider`].
@@ -24,9 +25,9 @@ use super::providers::ProviderMeta;
 /// constructed with a shared `reqwest::Client` that carries provider-specific
 /// headers (e.g. OpenRouter attribution) and timeout settings.
 ///
-/// Providers that require `result_format` (Qwen) or `extra_body` (Kimi thinking
-/// variants) are served by [`super::generic_client::GenericOpenAiCompatibleClient`]
-/// instead, because `LLMRequest` does not expose those fields.
+/// Providers that require `result_format` (Qwen), `extra_body` (Kimi thinking
+/// variants), or DeepSeek's loose V4 JSON parsing are served by
+/// [`super::generic_client::GenericOpenAiCompatibleClient`] instead.
 pub(crate) struct KernelBackedClient {
     /// Static provider metadata (name, defaults, variants).
     meta: &'static ProviderMeta,
