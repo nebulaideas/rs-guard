@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Nothing yet.
+
+## [1.8.2] - 2026-08-26
+
 ### Fixed
 
 - **Route DeepSeek through the generic OpenAI client** (issue #150) —
@@ -16,9 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   sets `ProviderMeta.force_generic_client` so the factory uses
   `GenericOpenAiCompatibleClient` (the same loose JSON extraction as
   Qwen/Kimi). Thinking remains enabled. Restore the kernel path after
-  llm-kernel accepts null `tool_calls`.
-
-### Fixed
+  llm-kernel accepts null `tool_calls` (issue #152).
 
 - **Do not retry LLM response-body decode failures** (issue #151) —
   `KernelError::LlmApi` messages whose reqwest `Display` is
