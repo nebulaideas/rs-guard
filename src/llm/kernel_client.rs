@@ -261,7 +261,16 @@ impl LlmProvider for KernelBackedClient {
 /// - `KernelError::Timeout(_)` → status 0 (retryable as a connection error)
 /// - `KernelError::Config(_)` → status 400 (not retryable — permanent failure)
 /// - `KernelError::Serialization(_)` → status 400 (not retryable — bad response)
-/// - All other variants → status 0 (retryable as a transient error)
+/// - `KernelError::LlmApi(msg)` body-decode failures whose Display is the
+///   reqwest `Kind::Decode` prefix (`error decoding response body`) without a
+///   nested transport cause → status 400 (not retryable).
+///   llm-kernel stringifies via `e.to_string()`, so the serde source chain is
+///   already gone; the original decode substring is preserved. Nested
+///   transport phrases (connection closed / timed out / body read) stay
+///   status 0 so they remain retryable if a future llm-kernel includes them.
+/// - Other `KernelError::LlmApi` messages (send / connect / timeout) and
+///   remaining variants → status 0 (retryable as a transient transport error).
+///   The trailing `_` arm is required: `KernelError` is `#[non_exhaustive]`.
 fn map_kernel_error(e: KernelError, provider_name: &str) -> RsGuardError {
     let (status, message) = match e {
         KernelError::Http { status, message } => (status, message),
@@ -271,6 +280,8 @@ fn map_kernel_error(e: KernelError, provider_name: &str) -> RsGuardError {
         KernelError::Timeout(secs) => (0, format!("Request timed out after {secs}s")),
         KernelError::Config(msg) => (400, format!("Config error: {msg}")),
         KernelError::Serialization(e) => (400, format!("Serialization error: {e}")),
+        KernelError::LlmApi(msg) if is_response_body_decode_failure(&msg) => (400, msg),
+        KernelError::LlmApi(msg) => (0, msg),
         other => (0, other.to_string()),
     };
     RsGuardError::LlmApi {
@@ -278,6 +289,39 @@ fn map_kernel_error(e: KernelError, provider_name: &str) -> RsGuardError {
         status,
         message,
     }
+}
+
+/// Returns `true` when an llm-kernel `LlmApi` message is a permanent body-decode
+/// failure rather than a transient send/connect error.
+///
+/// llm-kernel maps both `reqwest` `.send()` and `.json()` failures to
+/// `KernelError::LlmApi(e.to_string())`. reqwest 0.13 `Display` for
+/// `Kind::Decode` is `error decoding response body for url (...)` and does
+/// not include the serde/hyper source. That prefix is the only decode form
+/// emitted by the pinned llm-kernel + reqwest stack.
+///
+/// If a future kernel version includes the source in Display, nested
+/// transport phrases stay retryable so body-read timeouts are not treated
+/// as permanent serde mismatches.
+fn is_response_body_decode_failure(msg: &str) -> bool {
+    let lower = msg.to_ascii_lowercase();
+    if !lower.contains("error decoding response") {
+        return false;
+    }
+    !has_nested_transport_cause(&lower)
+}
+
+fn has_nested_transport_cause(lower: &str) -> bool {
+    const TRANSPORT: &[&str] = &[
+        "connection closed",
+        "connection reset",
+        "timed out",
+        "timeout",
+        "error reading a body",
+        "broken pipe",
+        "reset by peer",
+    ];
+    TRANSPORT.iter().any(|phrase| lower.contains(phrase))
 }
 
 #[cfg(test)]
@@ -313,6 +357,28 @@ mod tests {
     fn test_map_kernel_error_timeout_is_retryable() {
         let err = map_kernel_error(KernelError::Timeout(60), "deepseek");
         assert!(err.is_retryable());
+        match err {
+            RsGuardError::LlmApi { status, .. } => assert_eq!(status, 0),
+            _ => panic!("expected LlmApi"),
+        }
+    }
+
+    #[test]
+    fn test_map_kernel_error_http_retryable_statuses() {
+        for status in [429u16, 502, 503, 504] {
+            let err = map_kernel_error(
+                KernelError::Http {
+                    status,
+                    message: "transient".to_string(),
+                },
+                "deepseek",
+            );
+            assert!(err.is_retryable(), "HTTP {status} should be retryable");
+            match err {
+                RsGuardError::LlmApi { status: mapped, .. } => assert_eq!(mapped, status),
+                _ => panic!("expected LlmApi"),
+            }
+        }
     }
 
     #[test]
@@ -330,6 +396,146 @@ mod tests {
         let serde_err = serde_json::from_str::<serde_json::Value>("bad json").unwrap_err();
         let err = map_kernel_error(KernelError::Serialization(serde_err), "deepseek");
         assert!(!err.is_retryable());
+        match err {
+            RsGuardError::LlmApi { status, .. } => assert_eq!(status, 400),
+            _ => panic!("expected LlmApi"),
+        }
+    }
+
+    #[test]
+    fn test_map_kernel_error_decode_body_is_not_retryable() {
+        let err = map_kernel_error(
+            KernelError::LlmApi(
+                "error decoding response body for url (https://api.deepseek.com/chat/completions)"
+                    .into(),
+            ),
+            "deepseek",
+        );
+        match &err {
+            RsGuardError::LlmApi {
+                status, message, ..
+            } => {
+                assert_eq!(*status, 400);
+                assert_eq!(
+                    message,
+                    "error decoding response body for url (https://api.deepseek.com/chat/completions)"
+                );
+            }
+            _ => panic!("expected LlmApi"),
+        }
+        assert!(!err.is_retryable());
+    }
+
+    #[test]
+    fn test_map_kernel_error_decode_body_match_is_case_insensitive() {
+        let err = map_kernel_error(
+            KernelError::LlmApi(
+                "Error Decoding Response Body for url (https://example.test)".into(),
+            ),
+            "deepseek",
+        );
+        match &err {
+            RsGuardError::LlmApi {
+                status, message, ..
+            } => {
+                assert_eq!(*status, 400);
+                assert!(
+                    message.contains("Error Decoding Response Body"),
+                    "original casing should be preserved; got: {message}"
+                );
+            }
+            _ => panic!("expected LlmApi"),
+        }
+        assert!(!err.is_retryable());
+    }
+
+    #[test]
+    fn test_map_kernel_error_decode_body_transport_inner_stays_retryable() {
+        let cases = [
+            "error decoding response body: connection closed before message completed",
+            "error decoding response body: operation timed out",
+            "error decoding response body: error reading a body from connection",
+        ];
+        for msg in cases {
+            let err = map_kernel_error(KernelError::LlmApi(msg.into()), "deepseek");
+            match &err {
+                RsGuardError::LlmApi {
+                    status, message, ..
+                } => {
+                    assert_eq!(*status, 0, "expected retryable status 0 for {msg}");
+                    assert_eq!(message, msg);
+                }
+                _ => panic!("expected LlmApi"),
+            }
+            assert!(
+                err.is_retryable(),
+                "body-read transport should retry: {msg}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_is_response_body_decode_failure_table() {
+        let cases = [
+            (
+                "error decoding response body for url (https://api.deepseek.com/chat/completions)",
+                true,
+            ),
+            (
+                "Error Decoding Response Body for url (https://example.test)",
+                true,
+            ),
+            (
+                "error sending request for url (https://api.deepseek.com/chat/completions)",
+                false,
+            ),
+            ("connection reset by peer", false),
+            (
+                "error decoding response body: connection closed before message completed",
+                false,
+            ),
+            ("error decoding response body: operation timed out", false),
+            (
+                "error decoding response body: error reading a body from connection",
+                false,
+            ),
+        ];
+        for (msg, permanent) in cases {
+            assert_eq!(
+                is_response_body_decode_failure(msg),
+                permanent,
+                "classify {msg:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_map_kernel_error_llm_api_connection_reset_is_retryable() {
+        let err = map_kernel_error(
+            KernelError::LlmApi("connection reset by peer".into()),
+            "deepseek",
+        );
+        match &err {
+            RsGuardError::LlmApi { status, .. } => assert_eq!(*status, 0),
+            _ => panic!("expected LlmApi"),
+        }
+        assert!(err.is_retryable());
+    }
+
+    #[test]
+    fn test_map_kernel_error_llm_api_timed_out_is_retryable() {
+        let err = map_kernel_error(
+            KernelError::LlmApi(
+                "error sending request for url (https://api.deepseek.com/chat/completions): operation timed out"
+                    .into(),
+            ),
+            "deepseek",
+        );
+        match &err {
+            RsGuardError::LlmApi { status, .. } => assert_eq!(*status, 0),
+            _ => panic!("expected LlmApi"),
+        }
+        assert!(err.is_retryable());
     }
 
     #[tokio::test]

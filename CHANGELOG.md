@@ -18,6 +18,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Qwen/Kimi). Thinking remains enabled. Restore the kernel path after
   llm-kernel accepts null `tool_calls`.
 
+### Fixed
+
+- **Do not retry LLM response-body decode failures** (issue #151) —
+  `KernelError::LlmApi` messages whose reqwest `Display` is
+  `error decoding response body` (the pinned llm-kernel + reqwest 0.13
+  form) now map to HTTP status 400, so they are not retried as transient
+  status-0 errors. Send / connect / timeout `LlmApi` messages stay status 0.
+  If the stringified message also contains a nested transport cause
+  (connection closed, timed out, body read), it stays retryable.
+
 ## [1.8.1] - 2026-08-25
 
 ### Changed
