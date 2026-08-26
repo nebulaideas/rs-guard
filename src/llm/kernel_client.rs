@@ -275,9 +275,7 @@ fn map_kernel_error(e: KernelError, provider_name: &str) -> RsGuardError {
         KernelError::Timeout(secs) => (0, format!("Request timed out after {secs}s")),
         KernelError::Config(msg) => (400, format!("Config error: {msg}")),
         KernelError::Serialization(e) => (400, format!("Serialization error: {e}")),
-        KernelError::LlmApi(msg) if is_response_body_decode_failure(&msg) => {
-            (400, format!("response body decode failed: {msg}"))
-        }
+        KernelError::LlmApi(msg) if is_response_body_decode_failure(&msg) => (400, msg),
         KernelError::LlmApi(msg) => (0, msg),
         other => (0, other.to_string()),
     };
@@ -390,9 +388,32 @@ mod tests {
                 status, message, ..
             } => {
                 assert_eq!(*status, 400);
+                assert_eq!(
+                    message,
+                    "error decoding response body for url (https://api.deepseek.com/chat/completions)"
+                );
+            }
+            _ => panic!("expected LlmApi"),
+        }
+        assert!(!err.is_retryable());
+    }
+
+    #[test]
+    fn test_map_kernel_error_decode_body_match_is_case_insensitive() {
+        let err = map_kernel_error(
+            KernelError::LlmApi(
+                "Error Decoding Response Body for url (https://example.test)".into(),
+            ),
+            "deepseek",
+        );
+        match &err {
+            RsGuardError::LlmApi {
+                status, message, ..
+            } => {
+                assert_eq!(*status, 400);
                 assert!(
-                    message.contains("error decoding response body"),
-                    "message should retain the decode substring; got: {message}"
+                    message.contains("Error Decoding Response Body"),
+                    "original casing should be preserved; got: {message}"
                 );
             }
             _ => panic!("expected LlmApi"),
