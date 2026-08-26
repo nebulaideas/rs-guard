@@ -461,9 +461,6 @@ mod tests {
         // with a hypothetical no-override variant) must preserve the caller
         // temperature. We use the generic client directly with a ModelAlias
         // variant — DeepSeek flash has temperature_override: None.
-        // Note: DeepSeek is routed through KernelBackedClient in production,
-        // but here we test GenericOpenAiCompatibleClient directly to verify
-        // the no-override code path in the generic client.
         let mock_server = MockServer::start().await;
         Mock::given(method("POST"))
             .and(path("/chat/completions"))

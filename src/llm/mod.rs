@@ -837,6 +837,67 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_send_chat_request_deepseek_v4_tool_calls_null_decodes_without_deserialize_error()
+    {
+        use wiremock::matchers::method;
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mock_server = MockServer::start().await;
+        // DeepSeek V4 thinking payload: content null, reasoning_content present,
+        // tool_calls explicitly null (llm-kernel 0.28.1 fails this shape).
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": "test-id",
+                "object": "chat.completion",
+                "created": 1705651092,
+                "model": "deepseek-v4-pro",
+                "choices": [{
+                    "index": 0,
+                    "finish_reason": "length",
+                    "message": {
+                        "role": "assistant",
+                        "content": null,
+                        "reasoning_content": "long internal reasoning",
+                        "tool_calls": null
+                    }
+                }]
+            })))
+            .mount(&mock_server)
+            .await;
+
+        let client =
+            build_llm_client("deepseek", "key", &[], std::time::Duration::from_secs(60)).unwrap();
+        let request = ChatRequest {
+            model: "deepseek-v4-pro".to_string(),
+            messages: chat_messages("system", "user"),
+            temperature: 0.1,
+            max_tokens: Some(4096),
+            result_format: None,
+            extra_body: HashMap::new(),
+        };
+        let result = send_chat_request(
+            &client,
+            &format!("{}/chat/completions", mock_server.uri()),
+            &request,
+            "deepseek",
+        )
+        .await;
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            !msg.contains("decoding response body"),
+            "generic parser must decode DeepSeek V4 tool_calls:null, got: {msg}"
+        );
+        assert!(matches!(err, RsGuardError::LlmApi { status: 0, .. }));
+        assert!(
+            msg.contains("Empty assistant content"),
+            "expected empty content error, got: {msg}"
+        );
+    }
+
+    #[tokio::test]
     async fn test_send_chat_request_empty_content_with_reasoning_is_retryable() {
         use wiremock::matchers::method;
         use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -959,7 +1020,8 @@ mod tests {
                 "choices": [{
                     "message": {
                         "role": "assistant",
-                        "content": [{"type": "text", "text": "Array content OK"}]
+                        "content": [{"type": "text", "text": "Array content OK"}],
+                        "tool_calls": null
                     }
                 }]
             })))

@@ -29,8 +29,8 @@ As of v1.8, rs-guard uses two client implementations for its 9 providers:
 
 | Client | Providers | Backing |
 |--------|-----------|---------|
-| `KernelBackedClient` | deepseek, openai, grok, glm, ollama, gemini, openrouter (7) | `llm_kernel::llm::OpenAIClient` from the [llm-kernel](https://crates.io/crates/llm-kernel) crate |
-| `GenericOpenAiCompatibleClient` | qwen, kimi (2) | rs-guard's own data-driven client parameterized by `ProviderMeta` |
+| `KernelBackedClient` | openai, grok, glm, ollama, gemini, openrouter (6) | `llm_kernel::llm::OpenAIClient` from the [llm-kernel](https://crates.io/crates/llm-kernel) crate |
+| `GenericOpenAiCompatibleClient` | deepseek, qwen, kimi (3) | rs-guard's own data-driven client parameterized by `ProviderMeta` |
 
 ### Why two clients?
 
@@ -38,19 +38,30 @@ As of v1.8, rs-guard uses two client implementations for its 9 providers:
 - Qwen's `result_format` field
 - Kimi's `extra_body` (thinking mode variants)
 
-Providers that need these custom fields use `GenericOpenAiCompatibleClient`.
-All others use `KernelBackedClient`, which provides:
-- **Reasoning-content promotion** (GLM-4.7, DeepSeek-R1)
+DeepSeek also uses `GenericOpenAiCompatibleClient` because llm-kernel 0.28.1
+cannot deserialize V4 thinking responses with `"tool_calls": null` or
+multimodal `content` arrays. Restore the kernel path after llm-kernel accepts
+null `tool_calls`.
+
+Providers that need custom request fields (or DeepSeek's loose JSON parsing)
+use `GenericOpenAiCompatibleClient`. All others use `KernelBackedClient`, which
+provides:
+- **Reasoning-content promotion** (GLM-4.7)
 - **Standardized error handling** with HTTP status preservation
 - **Future compatibility** with llm-kernel's decorator stack (RetryClient, CacheClient, RouterClient)
+
+DeepSeek's generic path does not promote `reasoning_content` into the verdict.
+Empty assistant `content` with `reasoning_content` present is treated as a
+retryable empty-content error (with `max_tokens` escalation), same as before.
 
 ### Factory routing
 
 The factory (`create_provider`) routes automatically based on provider metadata
-and config. Providers with `result_format` or `ExtraBody` variants, or with a
-config-level `result_format` override, use `GenericOpenAiCompatibleClient`; all
-others use `KernelBackedClient`. Both implement the `LlmProvider` trait, so the
-pipeline is agnostic to the underlying client.
+and config. Providers with `force_generic_client`, `result_format`, or
+`ExtraBody` variants, or a config-level `result_format` override, use
+`GenericOpenAiCompatibleClient`; all others use `KernelBackedClient`. Both
+implement the `LlmProvider` trait, so the pipeline is agnostic to the
+underlying client.
 
 ### Shared TLS stack
 
@@ -79,6 +90,7 @@ export DEEPSEEK_API_KEY="your-api-key"
 | Default Model  | `deepseek-v4-flash`         |
 | Context Window | 64,000 tokens               |
 | Auth Header    | `Bearer {DEEPSEEK_API_KEY}` |
+| Client         | `GenericOpenAiCompatibleClient` (until llm-kernel accepts null `tool_calls`) |
 
 ### Variants
 
