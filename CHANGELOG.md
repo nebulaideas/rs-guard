@@ -11,6 +11,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Nothing yet.
 
+### Fixed
+
+- **Do not retry LLM response-body decode failures** (issue #151) —
+  `KernelError::LlmApi` messages that indicate a body-decode / serde JSON
+  mismatch (`error decoding response body` and similar) now map to HTTP
+  status 400, so they are not retried as transient status-0 errors. Send /
+  connect / timeout `LlmApi` messages stay status 0 and remain retryable.
+
 ## [1.8.1] - 2026-08-25
 
 ### Changed
