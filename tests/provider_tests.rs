@@ -635,6 +635,10 @@ fn test_deepseek_metadata_contract() {
         "DEEPSEEK_API_KEY",
         &[("https", "api.deepseek.com")],
     );
+    assert!(
+        meta.force_generic_client,
+        "DeepSeek must force the generic client until llm-kernel accepts null tool_calls"
+    );
 }
 
 #[test]

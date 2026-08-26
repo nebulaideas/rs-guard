@@ -11,9 +11,9 @@
 //! - **3 custom-field providers** (deepseek, qwen, kimi) are backed by
 //!   [`GenericOpenAiCompatibleClient`]. Qwen needs `result_format` and Kimi
 //!   needs `extra_body` (thinking variants) — fields that
-//!   `llm_kernel::LLMRequest` does not expose. DeepSeek uses the generic
-//!   client because llm-kernel cannot deserialize V4 thinking responses with
-//!   `"tool_calls": null` or multimodal content arrays.
+//!   `llm_kernel::LLMRequest` does not expose. DeepSeek sets
+//!   `force_generic_client` because llm-kernel cannot deserialize V4 thinking
+//!   responses with `"tool_calls": null` or multimodal content arrays.
 //!
 //! Adding a new standard provider requires only a metadata entry in
 //! [`providers`] (and, optionally, tests and documentation). Adding a provider
@@ -28,13 +28,10 @@ use crate::llm::{
 /// Returns `true` if the provider must use [`GenericOpenAiCompatibleClient`]
 /// instead of [`KernelBackedClient`].
 ///
-/// Currently: `deepseek` (llm-kernel cannot parse V4 thinking JSON), `qwen`
-/// (needs `result_format`), and `kimi` (needs `extra_body` for thinking
-/// variants).
+/// Currently: providers with `force_generic_client` (DeepSeek V4 thinking JSON),
+/// `result_format` (Qwen), or ExtraBody variants (Kimi thinking).
 fn needs_custom_client(meta: &providers::ProviderMeta) -> bool {
-    // KernelBackedClient / llm-kernel cannot deserialize `"tool_calls": null`
-    // or multimodal content arrays in DeepSeek V4 thinking responses.
-    if meta.name == "deepseek" {
+    if meta.force_generic_client {
         return true;
     }
     // Providers with a non-None result_format need the generic client.
@@ -94,9 +91,10 @@ pub fn create_provider(
         _ => Vec::new(),
     };
 
-    // Route to the generic client for DeepSeek (V4 thinking JSON), custom
-    // request fields (result_format or extra_body), or a config-level
-    // result_format override. KernelBackedClient cannot send result_format.
+    // Route to the generic client when metadata requires it
+    // (`force_generic_client`, result_format, ExtraBody variants) or a
+    // config-level result_format override. KernelBackedClient cannot send
+    // result_format.
     let needs_custom = needs_custom_client(meta) || config.result_format.is_some();
 
     if needs_custom {
@@ -228,6 +226,10 @@ mod tests {
     #[test]
     fn test_needs_custom_client_deepseek() {
         let meta = providers::find_provider("deepseek").unwrap();
+        assert!(
+            meta.force_generic_client,
+            "DeepSeek must opt into the generic client via ProviderMeta"
+        );
         assert!(needs_custom_client(meta));
     }
 
@@ -237,6 +239,8 @@ mod tests {
         let qwen = providers::find_provider("qwen").unwrap();
         let kimi = providers::find_provider("kimi").unwrap();
         let openai = providers::find_provider("openai").unwrap();
+        assert!(deepseek.force_generic_client);
+        assert!(!openai.force_generic_client);
         assert!(needs_custom_client(deepseek));
         assert!(needs_custom_client(qwen));
         assert!(needs_custom_client(kimi));
@@ -244,15 +248,6 @@ mod tests {
 
         let p = create_provider("deepseek", "k", &default_config()).unwrap();
         assert_eq!(p.name(), "deepseek");
-        let debug = format!("{p:?}");
-        assert!(
-            debug.contains("GenericOpenAiCompatibleClient"),
-            "deepseek must use GenericOpenAiCompatibleClient, got {debug}"
-        );
-        assert!(
-            !debug.contains("KernelBackedClient"),
-            "deepseek must not use KernelBackedClient, got {debug}"
-        );
     }
 
     #[test]

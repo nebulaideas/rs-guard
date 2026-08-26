@@ -91,6 +91,12 @@ pub struct ProviderMeta {
     /// config-supplied overrides (such as a custom OpenRouter referer) on top
     /// of these defaults at client construction time.
     pub default_extra_headers: &'static [(&'static str, &'static str)],
+    /// When `true`, the factory uses the generic OpenAI-compatible client
+    /// even if this provider has no `result_format` or ExtraBody variants.
+    ///
+    /// DeepSeek sets this because llm-kernel cannot deserialize V4 thinking
+    /// JSON with `"tool_calls": null` or multimodal content arrays.
+    pub force_generic_client: bool,
 }
 
 /// Returns the metadata for all known providers, in registration order.
@@ -125,6 +131,8 @@ pub fn all_providers() -> &'static [ProviderMeta] {
             ],
             result_format: None,
             default_extra_headers: &[],
+            // llm-kernel 0.28.1 cannot deserialize V4 thinking `"tool_calls": null`.
+            force_generic_client: true,
         },
         ProviderMeta {
             name: "kimi",
@@ -158,6 +166,7 @@ pub fn all_providers() -> &'static [ProviderMeta] {
             ],
             result_format: None,
             default_extra_headers: &[],
+            force_generic_client: false,
         },
         ProviderMeta {
             name: "qwen",
@@ -174,6 +183,7 @@ pub fn all_providers() -> &'static [ProviderMeta] {
             variants: &[],
             result_format: Some(Cow::Borrowed("message")),
             default_extra_headers: &[],
+            force_generic_client: false,
         },
         ProviderMeta {
             name: "openrouter",
@@ -191,6 +201,7 @@ pub fn all_providers() -> &'static [ProviderMeta] {
                 ("HTTP-Referer", "https://github.com/nebulaideas/rs-guard"),
                 ("X-Title", "rs-guard"),
             ],
+            force_generic_client: false,
         },
         ProviderMeta {
             name: "openai",
@@ -204,6 +215,7 @@ pub fn all_providers() -> &'static [ProviderMeta] {
             variants: &[],
             result_format: None,
             default_extra_headers: &[],
+            force_generic_client: false,
         },
         ProviderMeta {
             name: "grok",
@@ -217,6 +229,7 @@ pub fn all_providers() -> &'static [ProviderMeta] {
             variants: &[],
             result_format: None,
             default_extra_headers: &[],
+            force_generic_client: false,
         },
         ProviderMeta {
             name: "glm",
@@ -230,6 +243,7 @@ pub fn all_providers() -> &'static [ProviderMeta] {
             variants: &[],
             result_format: None,
             default_extra_headers: &[],
+            force_generic_client: false,
         },
         ProviderMeta {
             name: "ollama",
@@ -246,6 +260,7 @@ pub fn all_providers() -> &'static [ProviderMeta] {
             variants: &[],
             result_format: None,
             default_extra_headers: &[],
+            force_generic_client: false,
         },
         ProviderMeta {
             name: "gemini",
@@ -272,6 +287,7 @@ pub fn all_providers() -> &'static [ProviderMeta] {
             ],
             result_format: None,
             default_extra_headers: &[],
+            force_generic_client: false,
         },
         #[cfg(test)]
         ProviderMeta {
@@ -291,6 +307,7 @@ pub fn all_providers() -> &'static [ProviderMeta] {
             }],
             result_format: None,
             default_extra_headers: &[],
+            force_generic_client: false,
         },
     ]
 }

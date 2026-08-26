@@ -64,7 +64,7 @@ All 9 providers are served by two client implementations:
 - **`KernelBackedClient`** (6 providers: openai, grok, glm, ollama, gemini, openrouter) — wraps `llm_kernel::llm::OpenAIClient` from the `llm-kernel` crate (v0.25, `client-async` feature). This gives us reasoning-content promotion, standardized error handling, and future compatibility with llm-kernel's decorator stack (RetryClient, CacheClient, RouterClient).
 - **`GenericOpenAiCompatibleClient`** (3 providers: deepseek, qwen, kimi) — the original data-driven client parameterized by `ProviderMeta`. Used for providers that need custom request fields not exposed by `llm_kernel::LLMRequest` (Qwen's `result_format`, Kimi's `extra_body`) and for DeepSeek, whose V4 thinking JSON (`"tool_calls": null`, array `content`) llm-kernel 0.28.1 cannot deserialize.
 
-The factory (`create_provider`) routes automatically based on provider metadata and config: DeepSeek, providers with `result_format` or `ExtraBody` variants, or a config-level `result_format` override, use `GenericOpenAiCompatibleClient`; all others use `KernelBackedClient`. Both implement the `LlmProvider` trait, so the pipeline is agnostic to the underlying client.
+The factory (`create_provider`) routes automatically based on provider metadata and config: providers with `force_generic_client`, `result_format` or `ExtraBody` variants, or a config-level `result_format` override, use `GenericOpenAiCompatibleClient`; all others use `KernelBackedClient`. Both implement the `LlmProvider` trait, so the pipeline is agnostic to the underlying client.
 
 rs-guard and llm-kernel share the same reqwest 0.13 stack (no duplicate TLS dependencies). Ollama is local-mode only (loopback rejected in CI).
 

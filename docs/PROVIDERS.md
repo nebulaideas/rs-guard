@@ -57,8 +57,8 @@ retryable empty-content error (with `max_tokens` escalation), same as before.
 ### Factory routing
 
 The factory (`create_provider`) routes automatically based on provider metadata
-and config. DeepSeek, providers with `result_format` or `ExtraBody` variants,
-or a config-level `result_format` override, use
+and config. Providers with `force_generic_client`, `result_format`, or
+`ExtraBody` variants, or a config-level `result_format` override, use
 `GenericOpenAiCompatibleClient`; all others use `KernelBackedClient`. Both
 implement the `LlmProvider` trait, so the pipeline is agnostic to the
 underlying client.

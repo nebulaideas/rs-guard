@@ -837,7 +837,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_send_chat_request_deepseek_v4_tool_calls_null_does_not_fail_decode() {
+    async fn test_send_chat_request_deepseek_v4_tool_calls_null_decodes_without_deserialize_error()
+    {
         use wiremock::matchers::method;
         use wiremock::{Mock, MockServer, ResponseTemplate};
 
