@@ -535,6 +535,11 @@ pub fn chunk_diff(content: &str) -> (Cow<'_, str>, bool, usize) {
 
 /// Chunks a large diff with explicit head and tail line counts.
 ///
+/// Returns `Cow<str>` — borrowed (zero-alloc) when no truncation is needed,
+/// owned when the middle section is replaced with a placeholder. See
+/// `docs/implementation-guide.md` §Diff Chunking and
+/// `docs/ARCHITECTURE.md` (`diff.rs` — Diff Fetching + Chunking).
+///
 /// When the diff exceeds `head_lines + tail_lines`, the middle section is
 /// replaced with a placeholder. Returns the original content unchanged (as a
 /// borrowed reference) when no truncation is needed, avoiding allocation.
@@ -752,7 +757,8 @@ pub fn fetch_local_diff(limits: DiffLimits) -> Result<DiffResult, RsGuardError> 
 ///
 /// Three-dot syntax is merge-base aware and closer to GitHub PR diffs than
 /// two-dot `base..HEAD`. Used for local branch reviews when `--base` /
-/// `RS_GUARD_BASE` / `diff_base` is set.
+/// `RS_GUARD_BASE` / `diff_base` is set (`docs/RELEASE_1.6.0.md` `#105`,
+/// `docs/CONFIGURATION.md` §Local branch-range review).
 ///
 /// # Errors
 ///

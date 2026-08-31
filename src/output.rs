@@ -131,6 +131,9 @@ pub struct ReviewConfig {
 
 /// Writes a structured review result file for downstream CI jobs.
 ///
+/// There is no separate `Artifact` struct — this function writes
+/// [`ARTIFACT_FILENAME`] (`review-result.txt`). See `docs/API.md` §output.
+///
 /// The artifact includes provider metadata, the full LLM review text,
 /// and the parsed verdict metadata. The `--- Parsed Metadata ---` section
 /// renders all five verdict fields: `Verdict`, `CriticalIssues`,

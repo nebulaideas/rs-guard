@@ -1,6 +1,7 @@
 # GitHub Bot / Machine User Setup
 
-rs-guard submits reviews to GitHub on your behalf. To do this cleanly and
+rs-guard submits reviews to GitHub on your behalf via `submit_review()` in
+`src/github.rs` (Check Runs via `create_check_run()`). To do this cleanly and
 securely — without tying reviews to a personal account or sharing a personal
 access token (PAT) across your team — set up a **dedicated GitHub identity**.
 This document covers the two recommended approaches.

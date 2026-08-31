@@ -28,6 +28,8 @@ Complete reference for running rs-guard in all modes.
 
 ## CLI Reference
 
+Flags are defined by `Cli` / `ReviewArgs` in `src/cli.rs`.
+
 ```bash
 rs-guard [OPTIONS]
 ```
@@ -181,6 +183,9 @@ rs-guard --dry-run
 ---
 
 ## JSON output (`--format json`)
+
+`OutputFormat::Json` in `src/cli.rs`, rendered by `src/pipeline.rs` when
+`config.output_format` is JSON.
 
 Emit a single JSON object on stdout (progress on stderr):
 

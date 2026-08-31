@@ -4,9 +4,9 @@
 
 ## Highlights
 
-1. **Structured findings** — `--findings` mode asks the LLM for a structured JSON array of findings with file path, line number, and severity. Counts use a max-rule merge so findings can add evidence but never suppress a blocking verdict (#110).
-2. **Inline review comments** — `--inline-comments` posts each finding as an inline comment on the exact diff line. Unmappable findings are appended to the review body (#108).
-3. **GitHub Check Runs** — `--check-run` creates a Check Run in addition to the PR review, enabling branch protection without `APPROVE`/`REQUEST_CHANGES` permissions. Conclusion mapping: `APPROVE`→`success`, `REQUEST_CHANGES`→`failure`, `COMMENT`→`neutral` (#109).
+1. **Structured findings** — `--findings` mode asks the LLM for a structured JSON array of `Finding` values (`src/verdict.rs`) with file path, line number, and severity. Counts use a max-rule merge so findings can add evidence but never suppress a blocking verdict (#110).
+2. **Inline review comments** — `--inline-comments` posts each finding as an inline comment via `format_inline_comment()` / `build_diff_position_map()` in `src/github.rs`. Unmappable findings are appended to the review body (#108).
+3. **GitHub Check Runs** — `--check-run` creates a Check Run via `create_check_run()` in `src/github.rs` in addition to the PR review, enabling branch protection without `APPROVE`/`REQUEST_CHANGES` permissions. Conclusion mapping: `APPROVE`→`success`, `REQUEST_CHANGES`→`failure`, `COMMENT`→`neutral` (#109).
 4. **Review body truncation** — review bodies exceeding GitHub's 65,536 character limit are now truncated with a visible notice instead of failing the review. The findings JSON block is stripped before truncation so only prose is cut (#111).
 5. **API token usage** — when the LLM provider returns `usage` data, rs-guard uses real token counts for metrics and cost estimation instead of character heuristics. A `token_source` field (`"api"`, `"mixed"`, or `"estimate"`) indicates the source (#115).
 6. **Ollama and Gemini providers** — `--provider ollama` for local inference (no API key required, loopback-only) and `--provider gemini` for Google's OpenAI-compatible endpoint with `flash`/`pro` variants (#116).

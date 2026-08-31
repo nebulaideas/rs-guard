@@ -31,8 +31,9 @@ static SECRET_PATTERNS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
 
 /// Redacts sensitive information from the given text.
 ///
-/// Scans for common secret patterns (Bearer tokens, API keys, GitHub PATs,
-/// private keys, passwords) and replaces matches with `[REDACTED]`.
+/// Outbound secret redaction (`docs/RELEASE_1.6.0.md` `#102`): scans for
+/// common secret patterns (Bearer tokens, API keys, GitHub PATs, private
+/// keys, passwords) and replaces matches with `[REDACTED]`.
 ///
 /// This function is safe to call on any text — if no secrets are found,
 /// the original text is returned unchanged (via clone).
