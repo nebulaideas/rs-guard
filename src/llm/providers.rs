@@ -13,6 +13,19 @@ use std::collections::HashMap;
 /// consistency and to avoid repeating the verbose type in multiple places).
 type StaticStr = &'static str;
 
+/// Which HTTP client the factory constructs for a provider.
+///
+/// Computed once at [`ProviderMeta`] definition. The factory matches on this
+/// value, then still honours config-level generic overrides (`result_format`,
+/// ExtraBody variants, [`ProviderMeta::force_generic_client`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClientStrategy {
+    /// Wrap `llm_kernel::llm::OpenAIClient` via the kernel-backed client.
+    Kernel,
+    /// Use the generic OpenAI-compatible client (custom fields / loose JSON).
+    Generic,
+}
+
 /// Effect that a model variant has on an LLM request.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum VariantEffect {
@@ -97,6 +110,11 @@ pub struct ProviderMeta {
     /// DeepSeek sets this because llm-kernel cannot deserialize V4 thinking
     /// JSON with `"tool_calls": null` or multimodal content arrays.
     pub force_generic_client: bool,
+    /// Which client the factory constructs for this provider.
+    ///
+    /// Self-documents the routing decision at the metadata entry. Config-level
+    /// overrides (see [`ClientStrategy`]) still force [`ClientStrategy::Generic`].
+    pub strategy: ClientStrategy,
 }
 
 /// Returns the metadata for all known providers, in registration order.
@@ -133,6 +151,7 @@ pub fn all_providers() -> &'static [ProviderMeta] {
             default_extra_headers: &[],
             // llm-kernel 0.28.1 cannot deserialize V4 thinking `"tool_calls": null`.
             force_generic_client: true,
+            strategy: ClientStrategy::Generic,
         },
         ProviderMeta {
             name: "kimi",
@@ -167,6 +186,7 @@ pub fn all_providers() -> &'static [ProviderMeta] {
             result_format: None,
             default_extra_headers: &[],
             force_generic_client: false,
+            strategy: ClientStrategy::Generic,
         },
         ProviderMeta {
             name: "qwen",
@@ -184,6 +204,7 @@ pub fn all_providers() -> &'static [ProviderMeta] {
             result_format: Some(Cow::Borrowed("message")),
             default_extra_headers: &[],
             force_generic_client: false,
+            strategy: ClientStrategy::Generic,
         },
         ProviderMeta {
             name: "openrouter",
@@ -202,6 +223,7 @@ pub fn all_providers() -> &'static [ProviderMeta] {
                 ("X-Title", "rs-guard"),
             ],
             force_generic_client: false,
+            strategy: ClientStrategy::Kernel,
         },
         ProviderMeta {
             name: "openai",
@@ -216,6 +238,7 @@ pub fn all_providers() -> &'static [ProviderMeta] {
             result_format: None,
             default_extra_headers: &[],
             force_generic_client: false,
+            strategy: ClientStrategy::Kernel,
         },
         ProviderMeta {
             name: "grok",
@@ -230,6 +253,7 @@ pub fn all_providers() -> &'static [ProviderMeta] {
             result_format: None,
             default_extra_headers: &[],
             force_generic_client: false,
+            strategy: ClientStrategy::Kernel,
         },
         ProviderMeta {
             name: "glm",
@@ -244,6 +268,7 @@ pub fn all_providers() -> &'static [ProviderMeta] {
             result_format: None,
             default_extra_headers: &[],
             force_generic_client: false,
+            strategy: ClientStrategy::Kernel,
         },
         ProviderMeta {
             name: "ollama",
@@ -261,6 +286,7 @@ pub fn all_providers() -> &'static [ProviderMeta] {
             result_format: None,
             default_extra_headers: &[],
             force_generic_client: false,
+            strategy: ClientStrategy::Kernel,
         },
         ProviderMeta {
             name: "gemini",
@@ -288,6 +314,7 @@ pub fn all_providers() -> &'static [ProviderMeta] {
             result_format: None,
             default_extra_headers: &[],
             force_generic_client: false,
+            strategy: ClientStrategy::Kernel,
         },
         #[cfg(test)]
         ProviderMeta {
@@ -308,6 +335,7 @@ pub fn all_providers() -> &'static [ProviderMeta] {
             result_format: None,
             default_extra_headers: &[],
             force_generic_client: false,
+            strategy: ClientStrategy::Generic,
         },
     ]
 }

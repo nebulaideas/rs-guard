@@ -1,14 +1,15 @@
 //! Provider factory for creating LLM provider instances by name.
 //!
-//! The factory routes each provider to the appropriate client implementation:
+//! The factory matches on [`providers::ClientStrategy`], then still honours
+//! config-level generic overrides (`force_generic_client`, `result_format`,
+//! ExtraBody variants):
 //!
-//! - **6 standard providers** (openai, grok, glm, ollama, gemini, openrouter)
-//!   are backed by [`KernelBackedClient`], which wraps
-//!   `llm_kernel::llm::OpenAIClient`. These providers need only the standard
-//!   OpenAI chat completions fields (`model`, `messages`, `temperature`,
-//!   `max_tokens`).
+//! - **[`providers::ClientStrategy::Kernel`]** (openai, grok, glm, ollama,
+//!   gemini, openrouter) — [`KernelBackedClient`], wrapping
+//!   `llm_kernel::llm::OpenAIClient`. Standard OpenAI chat completions fields
+//!   only (`model`, `messages`, `temperature`, `max_tokens`).
 //!
-//! - **3 custom-field providers** (deepseek, qwen, kimi) are backed by
+//! - **[`providers::ClientStrategy::Generic`]** (deepseek, qwen, kimi) —
 //!   [`GenericOpenAiCompatibleClient`]. Qwen needs `result_format` and Kimi
 //!   needs `extra_body` (thinking variants) — fields that
 //!   `llm_kernel::LLMRequest` does not expose. DeepSeek sets
@@ -16,8 +17,9 @@
 //!   responses with `"tool_calls": null` or multimodal content arrays.
 //!
 //! Adding a new standard provider requires only a metadata entry in
-//! [`providers`] (and, optionally, tests and documentation). Adding a provider
-//! that needs custom request fields requires using `GenericOpenAiCompatibleClient`.
+//! [`providers`] with `strategy: ClientStrategy::Kernel` (and, optionally,
+//! tests and documentation). Adding a provider that needs custom request
+//! fields requires `strategy: ClientStrategy::Generic`.
 
 use crate::error::RsGuardError;
 use crate::llm::{
@@ -25,28 +27,28 @@ use crate::llm::{
     Provider, ProviderConfig,
 };
 
-/// Returns `true` if the provider must use [`GenericOpenAiCompatibleClient`]
-/// instead of [`KernelBackedClient`].
-///
-/// Currently: providers with `force_generic_client` (DeepSeek V4 thinking JSON),
-/// `result_format` (Qwen), or ExtraBody variants (Kimi thinking).
-fn needs_custom_client(meta: &providers::ProviderMeta) -> bool {
-    if meta.force_generic_client {
-        return true;
+/// Config / metadata overrides that still force the generic client even when
+/// [`providers::ProviderMeta::strategy`] is [`providers::ClientStrategy::Kernel`].
+fn forces_generic_client(meta: &providers::ProviderMeta, config: &ProviderConfig) -> bool {
+    meta.force_generic_client
+        || meta.result_format.is_some()
+        || config.result_format.is_some()
+        || meta
+            .variants
+            .iter()
+            .any(|v| matches!(v.effect, providers::VariantEffect::ExtraBody(..)))
+}
+
+/// Effective client strategy after applying config-level generic overrides.
+fn effective_strategy(
+    meta: &providers::ProviderMeta,
+    config: &ProviderConfig,
+) -> providers::ClientStrategy {
+    if forces_generic_client(meta, config) {
+        providers::ClientStrategy::Generic
+    } else {
+        meta.strategy
     }
-    // Providers with a non-None result_format need the generic client.
-    if meta.result_format.is_some() {
-        return true;
-    }
-    // Providers with ExtraBody variants need the generic client.
-    if meta
-        .variants
-        .iter()
-        .any(|v| matches!(v.effect, providers::VariantEffect::ExtraBody(..)))
-    {
-        return true;
-    }
-    false
 }
 
 /// Creates an LLM provider instance based on the given provider name.
@@ -91,48 +93,45 @@ pub fn create_provider(
         _ => Vec::new(),
     };
 
-    // Route to the generic client when metadata requires it
-    // (`force_generic_client`, result_format, ExtraBody variants) or a
-    // config-level result_format override. KernelBackedClient cannot send
-    // result_format.
-    let needs_custom = needs_custom_client(meta) || config.result_format.is_some();
+    // 2-arm match on the declared strategy; config-level generic overrides
+    // (`force_generic_client`, result_format, ExtraBody) still win because
+    // KernelBackedClient cannot send those fields.
+    match effective_strategy(meta, config) {
+        providers::ClientStrategy::Generic => {
+            let mut client = GenericOpenAiCompatibleClient::new(
+                meta,
+                api_key,
+                &header_overrides,
+                config.timeout_secs,
+            )?;
 
-    if needs_custom {
-        // DeepSeek, Qwen, Kimi — use GenericOpenAiCompatibleClient.
-        let mut client = GenericOpenAiCompatibleClient::new(
-            meta,
-            api_key,
-            &header_overrides,
-            config.timeout_secs,
-        )?;
+            if let Some(ref url) = config.base_url {
+                client = client.with_base_url(url.clone());
+            }
+            client = client
+                .with_model(config.model.clone())
+                .with_variant(config.variant.clone())
+                .with_max_tokens(config.max_tokens)
+                .with_result_format(config.result_format.clone());
 
-        if let Some(ref url) = config.base_url {
-            client = client.with_base_url(url.clone());
+            Ok(Box::new(client))
         }
-        client = client
-            .with_model(config.model.clone())
+        providers::ClientStrategy::Kernel => {
+            let base_url = config.base_url.as_deref().unwrap_or(meta.default_base_url);
+
+            let client = KernelBackedClient::new(
+                meta,
+                api_key,
+                base_url,
+                &config.model,
+                &header_overrides,
+                config.timeout_secs,
+            )?
             .with_variant(config.variant.clone())
-            .with_max_tokens(config.max_tokens)
-            .with_result_format(config.result_format.clone());
+            .with_max_tokens(config.max_tokens);
 
-        Ok(Box::new(client))
-    } else {
-        // openai, grok, glm, ollama, gemini, openrouter — use
-        // KernelBackedClient (wraps llm_kernel::OpenAIClient).
-        let base_url = config.base_url.as_deref().unwrap_or(meta.default_base_url);
-
-        let client = KernelBackedClient::new(
-            meta,
-            api_key,
-            base_url,
-            &config.model,
-            &header_overrides,
-            config.timeout_secs,
-        )?
-        .with_variant(config.variant.clone())
-        .with_max_tokens(config.max_tokens);
-
-        Ok(Box::new(client))
+            Ok(Box::new(client))
+        }
     }
 }
 
@@ -212,25 +211,37 @@ mod tests {
     }
 
     #[test]
-    fn test_needs_custom_client_qwen() {
+    fn test_effective_strategy_qwen_is_generic() {
         let meta = providers::find_provider("qwen").unwrap();
-        assert!(needs_custom_client(meta));
+        assert_eq!(meta.strategy, providers::ClientStrategy::Generic);
+        assert_eq!(
+            effective_strategy(meta, &default_config()),
+            providers::ClientStrategy::Generic
+        );
     }
 
     #[test]
-    fn test_needs_custom_client_kimi() {
+    fn test_effective_strategy_kimi_is_generic() {
         let meta = providers::find_provider("kimi").unwrap();
-        assert!(needs_custom_client(meta));
+        assert_eq!(meta.strategy, providers::ClientStrategy::Generic);
+        assert_eq!(
+            effective_strategy(meta, &default_config()),
+            providers::ClientStrategy::Generic
+        );
     }
 
     #[test]
-    fn test_needs_custom_client_deepseek() {
+    fn test_effective_strategy_deepseek_is_generic() {
         let meta = providers::find_provider("deepseek").unwrap();
         assert!(
             meta.force_generic_client,
             "DeepSeek must opt into the generic client via ProviderMeta"
         );
-        assert!(needs_custom_client(meta));
+        assert_eq!(meta.strategy, providers::ClientStrategy::Generic);
+        assert_eq!(
+            effective_strategy(meta, &default_config()),
+            providers::ClientStrategy::Generic
+        );
     }
 
     #[test]
@@ -241,18 +252,115 @@ mod tests {
         let openai = providers::find_provider("openai").unwrap();
         assert!(deepseek.force_generic_client);
         assert!(!openai.force_generic_client);
-        assert!(needs_custom_client(deepseek));
-        assert!(needs_custom_client(qwen));
-        assert!(needs_custom_client(kimi));
-        assert!(!needs_custom_client(openai));
+        assert_eq!(deepseek.strategy, providers::ClientStrategy::Generic);
+        assert_eq!(qwen.strategy, providers::ClientStrategy::Generic);
+        assert_eq!(kimi.strategy, providers::ClientStrategy::Generic);
+        assert_eq!(openai.strategy, providers::ClientStrategy::Kernel);
 
         let p = create_provider("deepseek", "k", &default_config()).unwrap();
         assert_eq!(p.name(), "deepseek");
     }
 
     #[test]
-    fn test_needs_custom_client_openrouter() {
+    fn test_effective_strategy_openrouter_is_kernel() {
         let meta = providers::find_provider("openrouter").unwrap();
-        assert!(!needs_custom_client(meta));
+        assert_eq!(meta.strategy, providers::ClientStrategy::Kernel);
+        assert_eq!(
+            effective_strategy(meta, &default_config()),
+            providers::ClientStrategy::Kernel
+        );
+    }
+
+    #[test]
+    fn test_config_result_format_forces_generic_even_for_kernel_provider() {
+        let mut config = default_config();
+        config.result_format = Some("message".to_string());
+        let meta = providers::find_provider("openai").unwrap();
+        assert_eq!(meta.strategy, providers::ClientStrategy::Kernel);
+        assert_eq!(
+            effective_strategy(meta, &config),
+            providers::ClientStrategy::Generic
+        );
+    }
+
+    fn kernel_meta_with(
+        force_generic_client: bool,
+        result_format: Option<std::borrow::Cow<'static, str>>,
+        variants: &'static [providers::ProviderVariant],
+    ) -> providers::ProviderMeta {
+        providers::ProviderMeta {
+            name: "override-test",
+            default_base_url: "https://example.com",
+            default_model: "m",
+            api_key_env: "K",
+            api_key_required: true,
+            ci_allowed_hosts: &[],
+            context_window: 1,
+            variants,
+            result_format,
+            default_extra_headers: &[],
+            force_generic_client,
+            strategy: providers::ClientStrategy::Kernel,
+        }
+    }
+
+    #[test]
+    fn test_force_generic_client_override_wins_over_kernel_strategy() {
+        let meta = kernel_meta_with(true, None, &[]);
+        assert_eq!(meta.strategy, providers::ClientStrategy::Kernel);
+        assert_eq!(
+            effective_strategy(&meta, &default_config()),
+            providers::ClientStrategy::Generic
+        );
+    }
+
+    #[test]
+    fn test_metadata_result_format_override_wins_over_kernel_strategy() {
+        let meta = kernel_meta_with(false, Some(std::borrow::Cow::Borrowed("message")), &[]);
+        assert_eq!(meta.strategy, providers::ClientStrategy::Kernel);
+        assert_eq!(
+            effective_strategy(&meta, &default_config()),
+            providers::ClientStrategy::Generic
+        );
+    }
+
+    #[test]
+    fn test_extra_body_override_wins_over_kernel_strategy() {
+        const VARIANTS: &[providers::ProviderVariant] = &[providers::ProviderVariant {
+            name: "thinking-on",
+            description: "test",
+            effect: providers::VariantEffect::ExtraBody("thinking", r#"{"type":"enabled"}"#),
+            temperature_override: None,
+        }];
+        let meta = kernel_meta_with(false, None, VARIANTS);
+        assert_eq!(meta.strategy, providers::ClientStrategy::Kernel);
+        assert_eq!(
+            effective_strategy(&meta, &default_config()),
+            providers::ClientStrategy::Generic
+        );
+    }
+
+    #[test]
+    fn test_provider_meta_self_documents_client_strategy() {
+        use providers::ClientStrategy::{Generic, Kernel};
+        let expected: &[(&str, providers::ClientStrategy)] = &[
+            ("deepseek", Generic),
+            ("kimi", Generic),
+            ("qwen", Generic),
+            ("openrouter", Kernel),
+            ("openai", Kernel),
+            ("grok", Kernel),
+            ("glm", Kernel),
+            ("ollama", Kernel),
+            ("gemini", Kernel),
+            ("test-collision", Generic),
+        ];
+        for (name, strategy) in expected {
+            let meta = providers::find_provider(name).unwrap();
+            assert_eq!(
+                meta.strategy, *strategy,
+                "{name} should declare ClientStrategy::{strategy:?}"
+            );
+        }
     }
 }
