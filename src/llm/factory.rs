@@ -53,15 +53,8 @@ fn effective_strategy(
 
 /// Creates an LLM provider instance based on the given provider name.
 ///
-/// The provider is constructed from its [`providers::ProviderMeta`] defaults,
-/// then the supplied `config` overrides (base URL, model, variant, max tokens,
-/// and — for OpenRouter — a custom HTTP referer) are applied on top.
-///
-/// # Arguments
-///
-/// * `provider_name` — Provider identifier (e.g. `"deepseek"`, `"grok"`).
-/// * `api_key` — API key for authenticating with the provider.
-/// * `config` — Provider configuration overrides from `.reviewer.toml` and CLI.
+/// Delegates to [`create_provider_with_max_tokens`] with `max_tokens_override`
+/// set to `None` (uses `config.max_tokens`).
 ///
 /// # Errors
 ///
@@ -71,6 +64,34 @@ pub fn create_provider(
     provider_name: &str,
     api_key: &str,
     config: &ProviderConfig,
+) -> Result<Provider, RsGuardError> {
+    create_provider_with_max_tokens(provider_name, api_key, config, None)
+}
+
+/// Creates an LLM provider, optionally overriding `config.max_tokens`.
+///
+/// The provider is constructed from its [`providers::ProviderMeta`] defaults,
+/// then the supplied `config` overrides (base URL, model, variant, max tokens,
+/// and — for OpenRouter — a custom HTTP referer) are applied on top.
+///
+/// # Arguments
+///
+/// * `provider_name` — Provider identifier (e.g. `"deepseek"`, `"grok"`).
+/// * `api_key` — API key for authenticating with the provider.
+/// * `config` — Provider configuration overrides from `.reviewer.toml` and CLI.
+/// * `max_tokens_override` — When `Some`, used instead of `config.max_tokens`
+///   so callers can vary the output budget without cloning [`ProviderConfig`].
+///   `None` keeps `config.max_tokens`.
+///
+/// # Errors
+///
+/// Returns [`RsGuardError::Config`] if the provider name is unknown
+/// or if the API key or any header value contains invalid HTTP characters.
+pub fn create_provider_with_max_tokens(
+    provider_name: &str,
+    api_key: &str,
+    config: &ProviderConfig,
+    max_tokens_override: Option<u32>,
 ) -> Result<Provider, RsGuardError> {
     let meta = providers::find_provider(provider_name).ok_or_else(|| {
         let names = providers::known_provider_names().join(", ");
@@ -93,6 +114,8 @@ pub fn create_provider(
         _ => Vec::new(),
     };
 
+    let effective_max_tokens = max_tokens_override.or(config.max_tokens);
+
     // 2-arm match on the declared strategy; config-level generic overrides
     // (`force_generic_client`, result_format, ExtraBody) still win because
     // KernelBackedClient cannot send those fields.
@@ -111,7 +134,7 @@ pub fn create_provider(
             client = client
                 .with_model(config.model.clone())
                 .with_variant(config.variant.clone())
-                .with_max_tokens(config.max_tokens)
+                .with_max_tokens(effective_max_tokens)
                 .with_result_format(config.result_format.clone());
 
             Ok(Box::new(client))
@@ -128,7 +151,7 @@ pub fn create_provider(
                 config.timeout_secs,
             )?
             .with_variant(config.variant.clone())
-            .with_max_tokens(config.max_tokens);
+            .with_max_tokens(effective_max_tokens);
 
             Ok(Box::new(client))
         }
