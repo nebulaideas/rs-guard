@@ -4,11 +4,11 @@
 
 ## Highlights
 
-1. **Safer LLM calls** — secrets in diffs are redacted before they leave the machine (#102 / PR #119).
-2. **Larger, smarter diffs** — higher defaults, path include/exclude, filter-before-size (#103 / PR #124).
-3. **JSON output** — `--format json` for CI and tooling (#104 / PR #123).
-4. **Local branch review** — `--base origin/main` for PR-like local runs (#105 / PR #122).
-5. **Docs + deprecations** — architecture/performance accuracy (#106 / PR #120); `CriticalBugs` warn (#107 / PR #121).
+1. **Safer LLM calls** — `redact_secrets()` in `src/redact.rs` (#102 / PR #119).
+2. **Larger, smarter diffs** — `DiffLimits` / `apply_path_filters()` in `src/diff.rs` (#103 / PR #124).
+3. **JSON output** — `OutputFormat::Json` in `src/cli.rs` (#104 / PR #123).
+4. **Local branch review** — `fetch_range_diff()` in `src/diff.rs` (#105 / PR #122).
+5. **Docs + deprecations** — architecture/performance accuracy (#106 / PR #120); `CriticalBugs:` alias in `parse_metadata_block()` in `src/verdict.rs` (#107 / PR #121).
 
 ## Upgrade notes
 

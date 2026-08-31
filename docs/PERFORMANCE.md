@@ -82,6 +82,10 @@ check its impact:
 cargo bloat --release --crates
 ```
 
+This inspects crate-level size against `[profile.release]` in `Cargo.toml`
+(`opt-level`, `lto`, `strip`, `panic = "abort"`). Binary-size CI lives in
+`.github/workflows/ci.yml` (`binary-size` job).
+
 A size budget is enforced in CI: the `binary-size` job in
 `.github/workflows/ci.yml` fails if the release binary exceeds **12 MB**.
 The current baseline is 4.6 MB (v1.8, with aws-lc-rs). Adjust the
@@ -142,7 +146,9 @@ All parsing operations complete in **under 10 microseconds** even for large diff
 ## GitHub Actions cold-start
 
 In CI the perceived latency is: **install + binary launch + diff fetch + LLM
-call**. The binary itself launches in ~10-30ms; the install step dominates.
+call**. The binary (`src/main.rs`) itself launches in ~10-30ms; the install
+step dominates. After launch, `run_pipeline()` in `src/pipeline.rs` owns
+diff fetch + LLM + review submission.
 
 ### Baseline (GitHub-hosted `ubuntu-latest` runner)
 

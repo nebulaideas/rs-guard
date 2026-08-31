@@ -2,6 +2,8 @@
 //!
 //! Defines the [`run_pipeline`] function that orchestrates the full review
 //! workflow, and [`PipelineResult`] for communicating exit intentions.
+//! Architecture: `docs/ARCHITECTURE.md`. Local vs CI detection:
+//! `docs/LOCAL_MODE.md` (`GITHUB_ACTIONS` absent → local).
 
 use crate::cache::{CacheConfig, DiffCache};
 use crate::cli::OutputFormat;
@@ -1674,7 +1676,9 @@ fn check_token_warning(estimated_tokens: usize, context_window: usize, provider:
 /// Rough cost estimation based on provider pricing.
 ///
 /// Returns estimated cost in **cents** (USD) as `f64` to avoid integer
-/// truncation for small diffs. For display, divide by 100.0.
+/// truncation for small diffs. For display, divide by 100.0. See
+/// `docs/implementation-guide.md` §Integer Cents for Cost Calculation and
+/// `docs/CONFIGURATION.md` §Pricing Section.
 ///
 /// Returns `None` when pricing is unknown for the provider (F9: don't lie).
 /// Pricing can be overridden via `.reviewer.toml` [pricing] sections.

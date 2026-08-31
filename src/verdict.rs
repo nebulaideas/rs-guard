@@ -144,6 +144,8 @@ impl std::fmt::Display for FindingSeverity {
 /// Each finding pinpoints a specific issue in the reviewed code with file path,
 /// line number, severity, and an actionable message. Findings are parsed from
 /// the `[RS_GUARD_VERDICT_FINDINGS]` JSON block at the end of an LLM response.
+/// Schema: `docs/v1.7.md` §Finding Schema (`#110a`). Fixture:
+/// `tests/test_data/verdict_positive.txt`.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct Finding {
     /// File path relative to the repository root (e.g. `"src/main.rs"`).

@@ -154,6 +154,8 @@ cooldown_secs = 60
 #### Pricing Section (`[pricing.<provider>]`)
 
 Optional. Override default cost estimates for providers. Prices are in **cents per million tokens**.
+Consumed by `estimate_cost_cents()` / `default_pricing()` in `src/pipeline.rs`
+(see `docs/implementation-guide.md` §Integer Cents for Cost Calculation).
 
 | Field               | Type    | Default            | Description                              |
 | ------------------- | ------- | ------------------ | ---------------------------------------- |

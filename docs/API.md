@@ -192,8 +192,9 @@ pub struct ProviderConfig {
 | `fetch_pr_diff(base_url, owner, repo, pr, token)` | Fetches PR diff via GitHub API             |
 | `fetch_local_diff()`                              | Runs `git diff --cached`                   |
 | `fetch_file_diff(path)`                           | Reads diff from a file                     |
-| `chunk_diff(content: &str)`                       | Truncates large diffs to 400 head + 400 tail |
-| `DiffResult`                                      | Struct holding diff content and metadata   |
+| `chunk_diff(content: &str)`                       | Truncates large diffs to 400 head + 400 tail (`src/diff.rs`) |
+| `chunk_diff_with_params(content, head, tail)`     | Same as `chunk_diff`, with explicit head/tail; returns `Cow<str>` |
+| `DiffResult`                                      | Struct holding diff content and metadata (`content`, `size_bytes`, `line_count`) |
 
 ### `github`
 
@@ -206,7 +207,7 @@ pub struct ProviderConfig {
 
 | Item                              | Description                                 |
 | --------------------------------- | ------------------------------------------- |
-| `build_github_http_client()`      | Shared `reqwest::Client` builder for GitHub |
+| `build_github_http_client()`      | Shared `reqwest::Client` builder for GitHub (`src/http.rs`) |
 | `github_diff_headers(token)`      | Standard headers for GitHub diff API        |
 | `validate_github_base_url(url)`   | SSRF allowlist check for GitHub URLs        |
 | `validate_provider_base_url(url)` | SSRF allowlist check for provider URLs      |
@@ -238,9 +239,8 @@ pub struct ProviderConfig {
 | ------------------------------------------------------------ | -------------------------------------------------------------------- |
 | `print_colored_report(msg, verdict, state, writer)`          | Print colored review summary                                         |
 | `print_colored_summary(msg, verdict, state, config, writer)` | Full colored summary with metrics                                    |
-| `write_artifact(msg, verdict, state, config, path)`          | Write `review-result.txt`                                            |
+| `write_artifact(msg, verdict, state, config, path)`          | Write `review-result.txt` via `write_artifact()` in `src/output.rs` (no `Artifact` struct; uses `ARTIFACT_FILENAME`) |
 | `write_metrics(metrics, path)`                               | Write `rs-guard-metrics.json`                                        |
-| `Artifact`                                                   | Struct for artifact file contents                                    |
 | `ReviewMetrics`                                              | JSON metrics: provider, model, tokens, latency, cost, verdict, state |
 | `ARTIFACT_FILENAME`                                          | `"review-result.txt"`                                                |
 | `METRICS_FILENAME`                                           | `"rs-guard-metrics.json"`                                            |

@@ -5,6 +5,8 @@
 //! sending them to an LLM for review, parsing structured verdicts,
 //! and submitting review states back to GitHub.
 //!
+//! System design: `docs/ARCHITECTURE.md`. Pipeline entry: [`pipeline::run_pipeline`].
+//!
 //! # Modules
 //!
 //! - [`cache`] — LLM response caching with SHA-256 keyed entries

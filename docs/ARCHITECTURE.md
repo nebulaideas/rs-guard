@@ -6,7 +6,12 @@ This document describes the system design, key decisions, and extension points o
 
 ## Overview
 
-rs-guard is a **single-binary, single-pass review pipeline**. It fetches a diff, calls an LLM once, parses the structured response, and either submits a GitHub review (CI mode) or prints a colored terminal summary (local mode). No intermediate state is persisted, no comments are posted during analysis, and no database or server is required.
+rs-guard is a **single-binary, single-pass review pipeline** orchestrated by
+`run_pipeline()` in `src/pipeline.rs` (see also `src/lib.rs`). It fetches a
+diff, calls an LLM once, parses the structured response, and either submits a
+GitHub review (CI mode) or prints a colored terminal summary (local mode). No
+intermediate state is persisted, no comments are posted during analysis, and no
+database or server is required.
 
 ---
 
@@ -199,7 +204,11 @@ Three diff sources with different behavior:
 | File (`--diff-file`)        | `fetch_file_diff()`  | Prints to stderr, exits 0             |
 | Local (`git diff --cached`) | `fetch_local_diff()` | Prints to stderr, exits 0             |
 
-After fetching, `chunk_diff()` trims large diffs to the first 400 + last 400 lines (configurable via `chunk_head_lines` / `chunk_tail_lines` in `.reviewer.toml`). Returns `Cow<str>` — borrowed when no truncation is needed (zero allocation in the common case).
+After fetching, `chunk_diff_with_params()` in `src/diff.rs` trims large diffs to
+the first 400 + last 400 lines (configurable via `chunk_head_lines` /
+`chunk_tail_lines` in `.reviewer.toml`). Returns `Cow<str>` — borrowed when no
+truncation is needed (zero allocation in the common case). See
+`docs/implementation-guide.md` §Diff Chunking.
 
 ### `verdict.rs` — Verdict Parsing
 
