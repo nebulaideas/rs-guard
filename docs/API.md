@@ -263,7 +263,8 @@ pub struct ProviderConfig {
 | `ChatMessage`                       | Single message with `role` and `content`                           |
 | `ChatRequest`                       | Request body with `model`, `messages`, `temperature`, `max_tokens`, `extra_body` (for VariantEffect) |
 | `ChatResponse` / `ChatChoice` / `ChatMessageResponse` | Document the expected OpenAI-compatible shape. **Runtime parsing uses a loose `serde_json::Value` traversal** (in `parse_completion_response_body`) to tolerate `"content": null`, multimodal arrays, and extra fields from thinking models. |
-| `factory::create_provider()`        | Factory: `provider_name + api_key + config + max_tokens_override -> Provider` |
+| `factory::create_provider()`        | Factory: `provider_name + api_key + config -> Provider` |
+| `factory::create_provider_with_max_tokens()` | Same, with optional `max_tokens` override (budget escalation) |
 | `providers::ClientStrategy`         | `Kernel` or `Generic` — explicit factory routing on `ProviderMeta` |
 | `providers::all_providers()`        | Metadata for all known providers                                   |
 | `providers::find_provider()`               | Lookup provider metadata by name                                   |

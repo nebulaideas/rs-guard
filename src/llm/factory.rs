@@ -53,6 +53,23 @@ fn effective_strategy(
 
 /// Creates an LLM provider instance based on the given provider name.
 ///
+/// Delegates to [`create_provider_with_max_tokens`] with `max_tokens_override`
+/// set to `None` (uses `config.max_tokens`).
+///
+/// # Errors
+///
+/// Returns [`RsGuardError::Config`] if the provider name is unknown
+/// or if the API key or any header value contains invalid HTTP characters.
+pub fn create_provider(
+    provider_name: &str,
+    api_key: &str,
+    config: &ProviderConfig,
+) -> Result<Provider, RsGuardError> {
+    create_provider_with_max_tokens(provider_name, api_key, config, None)
+}
+
+/// Creates an LLM provider, optionally overriding `config.max_tokens`.
+///
 /// The provider is constructed from its [`providers::ProviderMeta`] defaults,
 /// then the supplied `config` overrides (base URL, model, variant, max tokens,
 /// and — for OpenRouter — a custom HTTP referer) are applied on top.
@@ -70,7 +87,7 @@ fn effective_strategy(
 ///
 /// Returns [`RsGuardError::Config`] if the provider name is unknown
 /// or if the API key or any header value contains invalid HTTP characters.
-pub fn create_provider(
+pub fn create_provider_with_max_tokens(
     provider_name: &str,
     api_key: &str,
     config: &ProviderConfig,
@@ -97,7 +114,7 @@ pub fn create_provider(
         _ => Vec::new(),
     };
 
-    let max_tokens = max_tokens_override.or(config.max_tokens);
+    let effective_max_tokens = max_tokens_override.or(config.max_tokens);
 
     // 2-arm match on the declared strategy; config-level generic overrides
     // (`force_generic_client`, result_format, ExtraBody) still win because
@@ -117,7 +134,7 @@ pub fn create_provider(
             client = client
                 .with_model(config.model.clone())
                 .with_variant(config.variant.clone())
-                .with_max_tokens(max_tokens)
+                .with_max_tokens(effective_max_tokens)
                 .with_result_format(config.result_format.clone());
 
             Ok(Box::new(client))
@@ -134,7 +151,7 @@ pub fn create_provider(
                 config.timeout_secs,
             )?
             .with_variant(config.variant.clone())
-            .with_max_tokens(max_tokens);
+            .with_max_tokens(effective_max_tokens);
 
             Ok(Box::new(client))
         }
@@ -159,61 +176,61 @@ mod tests {
 
     #[test]
     fn test_factory_creates_deepseek() {
-        let p = create_provider("deepseek", "k", &default_config(), None).unwrap();
+        let p = create_provider("deepseek", "k", &default_config()).unwrap();
         assert_eq!(p.name(), "deepseek");
     }
 
     #[test]
     fn test_factory_creates_grok() {
-        let p = create_provider("grok", "k", &default_config(), None).unwrap();
+        let p = create_provider("grok", "k", &default_config()).unwrap();
         assert_eq!(p.name(), "grok");
     }
 
     #[test]
     fn test_factory_creates_glm() {
-        let p = create_provider("glm", "k", &default_config(), None).unwrap();
+        let p = create_provider("glm", "k", &default_config()).unwrap();
         assert_eq!(p.name(), "glm");
     }
 
     #[test]
     fn test_factory_creates_qwen() {
-        let p = create_provider("qwen", "k", &default_config(), None).unwrap();
+        let p = create_provider("qwen", "k", &default_config()).unwrap();
         assert_eq!(p.name(), "qwen");
     }
 
     #[test]
     fn test_factory_creates_kimi() {
-        let p = create_provider("kimi", "k", &default_config(), None).unwrap();
+        let p = create_provider("kimi", "k", &default_config()).unwrap();
         assert_eq!(p.name(), "kimi");
     }
 
     #[test]
     fn test_factory_creates_openrouter() {
-        let p = create_provider("openrouter", "k", &default_config(), None).unwrap();
+        let p = create_provider("openrouter", "k", &default_config()).unwrap();
         assert_eq!(p.name(), "openrouter");
     }
 
     #[test]
     fn test_factory_creates_ollama() {
-        let p = create_provider("ollama", "", &default_config(), None).unwrap();
+        let p = create_provider("ollama", "", &default_config()).unwrap();
         assert_eq!(p.name(), "ollama");
     }
 
     #[test]
     fn test_factory_creates_gemini() {
-        let p = create_provider("gemini", "k", &default_config(), None).unwrap();
+        let p = create_provider("gemini", "k", &default_config()).unwrap();
         assert_eq!(p.name(), "gemini");
     }
 
     #[test]
     fn test_factory_creates_openai() {
-        let p = create_provider("openai", "k", &default_config(), None).unwrap();
+        let p = create_provider("openai", "k", &default_config()).unwrap();
         assert_eq!(p.name(), "openai");
     }
 
     #[test]
     fn test_factory_unknown_provider() {
-        assert!(create_provider("nope", "k", &default_config(), None).is_err());
+        assert!(create_provider("nope", "k", &default_config()).is_err());
     }
 
     #[test]
@@ -263,7 +280,7 @@ mod tests {
         assert_eq!(kimi.strategy, providers::ClientStrategy::Generic);
         assert_eq!(openai.strategy, providers::ClientStrategy::Kernel);
 
-        let p = create_provider("deepseek", "k", &default_config(), None).unwrap();
+        let p = create_provider("deepseek", "k", &default_config()).unwrap();
         assert_eq!(p.name(), "deepseek");
     }
 
