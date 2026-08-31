@@ -14,6 +14,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   thinking on large diffs routinely exceeded 180s in CI (issue #163).
 
 ### Fixed
+- **Explicit `ClientStrategy` on `ProviderMeta`** (issue #156) — factory
+  routing is a 2-arm match on `Kernel` vs `Generic`, computed once at
+  metadata definition. Config-level `result_format` and metadata overrides
+  (`force_generic_client`, ExtraBody variants) still force the generic
+  client. DeepSeek stays on `GenericOpenAiCompatibleClient`.
+
+- **`create_provider_with_max_tokens`** (issue #161) — budget escalation
+  no longer clones `ProviderConfig` per attempt. The released 3-argument
+  `create_provider` is preserved and delegates with `None`.
+
+### Added
 
 - **DeepSeek CI timeouts vs payload errors** (issue #163) —
   Generic-client JSON parse and empty-`choices` failures now map to HTTP

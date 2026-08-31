@@ -15,7 +15,7 @@ use crate::github::{
     build_diff_position_map, create_check_run, dismiss_previous_reviews, format_inline_comment,
     format_unmappable_findings, resolve_check_run_sha, review_state_to_conclusion, submit_review,
 };
-use crate::llm::factory::create_provider;
+use crate::llm::factory::create_provider_with_max_tokens;
 use crate::llm::providers::effective_temperature;
 use crate::output::{
     print_colored_summary, write_artifact, write_json_result, write_metrics, ReviewConfig,
@@ -370,10 +370,13 @@ async fn call_llm_with_budget_escalation(
     let mut attempt_max_tokens = config.provider_config.max_tokens;
 
     loop {
-        let mut provider_config = config.provider_config.clone();
-        provider_config.max_tokens = attempt_max_tokens;
-        let provider = create_provider(&config.provider, &config.api_key, &provider_config)
-            .context("Failed to create LLM provider")?;
+        let provider = create_provider_with_max_tokens(
+            &config.provider,
+            &config.api_key,
+            &config.provider_config,
+            attempt_max_tokens,
+        )
+        .context("Failed to create LLM provider")?;
 
         let result = with_retry_predicated(
             || async {
