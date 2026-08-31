@@ -46,6 +46,7 @@ rand = "0.8"
 llm-kernel = { version = "0.28", default-features = false, features = ["provider", "client-async", "rustls-ring"] }
 
 [dev-dependencies]
+proptest = "1.11.0"
 serial_test = "3.5.0"
 tempfile = "3.14"
 wiremock = "0.6"

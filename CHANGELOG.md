@@ -9,7 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Nothing yet.
+- **Property tests for `merge_with_findings` fail-safe invariant** (issue #160) —
+  `proptest` (dev-dependency only) generates 256 cases each for
+  `merge_never_de_escalates` and `malformed_findings_never_silently_approves`.
+  Findings can escalate counts and force `NEGATIVE`, never drop below the
+  preliminary counts or silently approve. The 9 handwritten invariant tests
+  remain as regression examples.
 
 ## [1.8.2] - 2026-08-26
 
