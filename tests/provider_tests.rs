@@ -75,6 +75,7 @@ async fn test_deepseek_provider_success() {
         "deepseek",
         "test-key",
         &config_at("deepseek", &mock_server.uri()),
+        None,
     )
     .unwrap();
     let result = provider
@@ -93,6 +94,7 @@ async fn test_deepseek_trait_dispatch() {
         "deepseek",
         "test-key",
         &config_at("deepseek", &mock_server.uri()),
+        None,
     )
     .unwrap();
     assert_eq!(provider.name(), "deepseek");
@@ -108,8 +110,13 @@ async fn test_kimi_trait_dispatch() {
     let mock_server = MockServer::start().await;
     mount_success(&mock_server, "Kimi trait dispatch works.").await;
 
-    let provider: Box<dyn LlmProvider> =
-        create_provider("kimi", "test-key", &config_at("kimi", &mock_server.uri())).unwrap();
+    let provider: Box<dyn LlmProvider> = create_provider(
+        "kimi",
+        "test-key",
+        &config_at("kimi", &mock_server.uri()),
+        None,
+    )
+    .unwrap();
     assert_eq!(provider.name(), "kimi");
     let result = provider
         .chat_completion("You are a reviewer.", "diff content", 0.1)
@@ -126,8 +133,13 @@ async fn test_qwen_trait_dispatch() {
     let mock_server = MockServer::start().await;
     mount_success(&mock_server, "Qwen trait dispatch works.").await;
 
-    let provider: Box<dyn LlmProvider> =
-        create_provider("qwen", "test-key", &config_at("qwen", &mock_server.uri())).unwrap();
+    let provider: Box<dyn LlmProvider> = create_provider(
+        "qwen",
+        "test-key",
+        &config_at("qwen", &mock_server.uri()),
+        None,
+    )
+    .unwrap();
     assert_eq!(provider.name(), "qwen");
     let result = provider
         .chat_completion("You are a reviewer.", "diff content", 0.1)
@@ -148,6 +160,7 @@ async fn test_openrouter_trait_dispatch() {
         "openrouter",
         "test-key",
         &config_at("openrouter", &mock_server.uri()),
+        None,
     )
     .unwrap();
     assert_eq!(provider.name(), "openrouter");
@@ -170,6 +183,7 @@ async fn test_openai_trait_dispatch() {
         "openai",
         "test-key",
         &config_at("openai", &mock_server.uri()),
+        None,
     )
     .unwrap();
     assert_eq!(provider.name(), "openai");
@@ -188,8 +202,13 @@ async fn test_grok_trait_dispatch() {
     let mock_server = MockServer::start().await;
     mount_success(&mock_server, "Grok trait dispatch works.").await;
 
-    let provider: Box<dyn LlmProvider> =
-        create_provider("grok", "test-key", &config_at("grok", &mock_server.uri())).unwrap();
+    let provider: Box<dyn LlmProvider> = create_provider(
+        "grok",
+        "test-key",
+        &config_at("grok", &mock_server.uri()),
+        None,
+    )
+    .unwrap();
     assert_eq!(provider.name(), "grok");
     let result = provider
         .chat_completion("You are a reviewer.", "diff content", 0.1)
@@ -206,8 +225,13 @@ async fn test_glm_trait_dispatch() {
     let mock_server = MockServer::start().await;
     mount_success(&mock_server, "GLM trait dispatch works.").await;
 
-    let provider: Box<dyn LlmProvider> =
-        create_provider("glm", "test-key", &config_at("glm", &mock_server.uri())).unwrap();
+    let provider: Box<dyn LlmProvider> = create_provider(
+        "glm",
+        "test-key",
+        &config_at("glm", &mock_server.uri()),
+        None,
+    )
+    .unwrap();
     assert_eq!(provider.name(), "glm");
     let result = provider
         .chat_completion("You are a reviewer.", "diff content", 0.1)
@@ -225,6 +249,7 @@ async fn test_gemini_trait_dispatch() {
         "gemini",
         "test-key",
         &config_at("gemini", &mock_server.uri()),
+        None,
     )
     .unwrap();
     assert_eq!(provider.name(), "gemini");
@@ -255,7 +280,8 @@ async fn test_gemini_pro_variant_maps_to_pro_model() {
 
     let mut config = config_at("gemini", &mock_server.uri());
     config.variant = Some("pro".to_string());
-    let provider: Box<dyn LlmProvider> = create_provider("gemini", "test-key", &config).unwrap();
+    let provider: Box<dyn LlmProvider> =
+        create_provider("gemini", "test-key", &config, None).unwrap();
     let result = provider
         .chat_completion("system", "user", 0.1)
         .await
@@ -270,7 +296,7 @@ async fn test_ollama_trait_dispatch_no_key() {
 
     // Ollama does not require an API key — pass empty string.
     let provider: Box<dyn LlmProvider> =
-        create_provider("ollama", "", &config_at("ollama", &mock_server.uri())).unwrap();
+        create_provider("ollama", "", &config_at("ollama", &mock_server.uri()), None).unwrap();
     assert_eq!(provider.name(), "ollama");
     let result = provider
         .chat_completion("You are a reviewer.", "diff content", 0.1)
@@ -284,7 +310,7 @@ async fn test_ollama_trait_dispatch_no_key() {
 
 #[test]
 fn test_unknown_provider_fails() {
-    let result = create_provider("unknown", "test-key", &default_config());
+    let result = create_provider("unknown", "test-key", &default_config(), None);
     assert!(result.is_err());
     let err = result.unwrap_err().to_string();
     assert!(err.contains("Unknown provider"));
@@ -299,6 +325,7 @@ async fn test_factory_applies_base_url_override() {
         "openai",
         "test-key",
         &config_at("openai", &mock_server.uri()),
+        None,
     )
     .unwrap();
     let result = provider
@@ -316,12 +343,46 @@ async fn test_factory_applies_max_tokens() {
     let mut config = config_at("deepseek", &mock_server.uri());
     config.max_tokens = Some(4096);
 
-    let provider = create_provider("deepseek", "test-key", &config).unwrap();
+    let provider = create_provider("deepseek", "test-key", &config, None).unwrap();
     let result = provider
         .chat_completion("You are a reviewer.", "diff content", 0.1)
         .await;
     assert!(result.is_ok());
     assert!(result.unwrap().content.contains("max_tokens applied"));
+}
+
+#[tokio::test]
+async fn test_factory_max_tokens_override_wins_without_cloning_config() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/chat/completions"))
+        .and(body_partial_json(serde_json::json!({
+            "max_tokens": 8192
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "choices": [{ "message": { "content": "override max_tokens applied" } }],
+            "model": "test-model"
+        })))
+        .mount(&mock_server)
+        .await;
+
+    let mut config = config_at("deepseek", &mock_server.uri());
+    config.max_tokens = Some(4096);
+
+    let provider = create_provider("deepseek", "test-key", &config, Some(8192)).unwrap();
+    assert_eq!(
+        config.max_tokens,
+        Some(4096),
+        "override must not mutate the caller's ProviderConfig"
+    );
+    let result = provider
+        .chat_completion("You are a reviewer.", "diff content", 0.1)
+        .await;
+    assert!(result.is_ok());
+    assert!(result
+        .unwrap()
+        .content
+        .contains("override max_tokens applied"));
 }
 
 #[tokio::test]
@@ -342,7 +403,7 @@ async fn test_factory_applies_result_format_override() {
     let mut config = config_at("openai", &mock_server.uri());
     config.result_format = Some("json_object".to_string());
 
-    let provider = create_provider("openai", "test-key", &config).unwrap();
+    let provider = create_provider("openai", "test-key", &config, None).unwrap();
     let result = provider
         .chat_completion("You are a reviewer.", "diff content", 0.1)
         .await;
@@ -372,7 +433,7 @@ async fn test_deepseek_variant_flash_maps_to_model_id() {
     config.model = "ignored".to_string();
     config.variant = Some("flash".to_string());
 
-    let provider = create_provider("deepseek", "test-key", &config).unwrap();
+    let provider = create_provider("deepseek", "test-key", &config, None).unwrap();
     let result = provider
         .chat_completion("You are a reviewer.", "diff content", 0.1)
         .await;
@@ -399,7 +460,7 @@ async fn test_deepseek_variant_pro_maps_to_model_id() {
     config.model = "ignored".to_string();
     config.variant = Some("pro".to_string());
 
-    let provider = create_provider("deepseek", "test-key", &config).unwrap();
+    let provider = create_provider("deepseek", "test-key", &config, None).unwrap();
     let result = provider
         .chat_completion("You are a reviewer.", "diff content", 0.1)
         .await;
@@ -415,7 +476,7 @@ async fn test_deepseek_unknown_variant_returns_error() {
     let mut config = config_at("deepseek", &mock_server.uri());
     config.variant = Some("unknown".to_string());
 
-    let provider = create_provider("deepseek", "test-key", &config).unwrap();
+    let provider = create_provider("deepseek", "test-key", &config, None).unwrap();
     let result = provider
         .chat_completion("You are a reviewer.", "diff content", 0.1)
         .await;
@@ -443,7 +504,7 @@ async fn test_openai_variant_ignored_sends_configured_model() {
     let mut config = config_at("openai", &mock_server.uri());
     config.variant = Some("some-future-variant".to_string());
 
-    let provider = create_provider("openai", "test-key", &config).unwrap();
+    let provider = create_provider("openai", "test-key", &config, None).unwrap();
     let result = provider
         .chat_completion("You are a reviewer.", "diff content", 0.1)
         .await;
@@ -459,7 +520,7 @@ async fn test_kimi_unknown_variant_returns_error() {
     let mut config = config_at("kimi", &mock_server.uri());
     config.variant = Some("nonexistent".to_string());
 
-    let provider = create_provider("kimi", "test-key", &config).unwrap();
+    let provider = create_provider("kimi", "test-key", &config, None).unwrap();
     let result = provider
         .chat_completion("You are a reviewer.", "diff content", 0.1)
         .await;
@@ -488,7 +549,7 @@ async fn test_kimi_variant_thinking_on_sends_thinking_enabled() {
     let mut config = config_at("kimi", &mock_server.uri());
     config.variant = Some("thinking-on".to_string());
 
-    let provider = create_provider("kimi", "test-key", &config).unwrap();
+    let provider = create_provider("kimi", "test-key", &config, None).unwrap();
     let result = provider
         .chat_completion("You are a reviewer.", "diff content", 0.1)
         .await;
@@ -514,7 +575,7 @@ async fn test_kimi_variant_thinking_off_sends_thinking_disabled() {
     let mut config = config_at("kimi", &mock_server.uri());
     config.variant = Some("thinking-off".to_string());
 
-    let provider = create_provider("kimi", "test-key", &config).unwrap();
+    let provider = create_provider("kimi", "test-key", &config, None).unwrap();
     let result = provider
         .chat_completion("You are a reviewer.", "diff content", 0.1)
         .await;
@@ -543,6 +604,7 @@ async fn test_openrouter_default_referer_header_sent() {
         "openrouter",
         "test-key",
         &config_at("openrouter", &mock_server.uri()),
+        None,
     )
     .unwrap();
     let result = provider
@@ -569,7 +631,7 @@ async fn test_openrouter_custom_referer_override() {
     let mut config = config_at("openrouter", &mock_server.uri());
     config.http_referer = Some("https://my-bot.example.com".to_string());
 
-    let provider = create_provider("openrouter", "test-key", &config).unwrap();
+    let provider = create_provider("openrouter", "test-key", &config, None).unwrap();
     let result = provider
         .chat_completion("You are a reviewer.", "diff content", 0.1)
         .await;
@@ -592,8 +654,13 @@ async fn test_qwen_result_format_sent() {
         .mount(&mock_server)
         .await;
 
-    let provider =
-        create_provider("qwen", "test-key", &config_at("qwen", &mock_server.uri())).unwrap();
+    let provider = create_provider(
+        "qwen",
+        "test-key",
+        &config_at("qwen", &mock_server.uri()),
+        None,
+    )
+    .unwrap();
     let result = provider
         .chat_completion("You are a reviewer.", "diff content", 0.1)
         .await;

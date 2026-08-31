@@ -62,6 +62,9 @@ fn effective_strategy(
 /// * `provider_name` — Provider identifier (e.g. `"deepseek"`, `"grok"`).
 /// * `api_key` — API key for authenticating with the provider.
 /// * `config` — Provider configuration overrides from `.reviewer.toml` and CLI.
+/// * `max_tokens_override` — When `Some`, used instead of `config.max_tokens`
+///   so callers can vary the output budget without cloning [`ProviderConfig`].
+///   `None` keeps `config.max_tokens`.
 ///
 /// # Errors
 ///
@@ -71,6 +74,7 @@ pub fn create_provider(
     provider_name: &str,
     api_key: &str,
     config: &ProviderConfig,
+    max_tokens_override: Option<u32>,
 ) -> Result<Provider, RsGuardError> {
     let meta = providers::find_provider(provider_name).ok_or_else(|| {
         let names = providers::known_provider_names().join(", ");
@@ -93,6 +97,8 @@ pub fn create_provider(
         _ => Vec::new(),
     };
 
+    let max_tokens = max_tokens_override.or(config.max_tokens);
+
     // 2-arm match on the declared strategy; config-level generic overrides
     // (`force_generic_client`, result_format, ExtraBody) still win because
     // KernelBackedClient cannot send those fields.
@@ -111,7 +117,7 @@ pub fn create_provider(
             client = client
                 .with_model(config.model.clone())
                 .with_variant(config.variant.clone())
-                .with_max_tokens(config.max_tokens)
+                .with_max_tokens(max_tokens)
                 .with_result_format(config.result_format.clone());
 
             Ok(Box::new(client))
@@ -128,7 +134,7 @@ pub fn create_provider(
                 config.timeout_secs,
             )?
             .with_variant(config.variant.clone())
-            .with_max_tokens(config.max_tokens);
+            .with_max_tokens(max_tokens);
 
             Ok(Box::new(client))
         }
@@ -153,61 +159,61 @@ mod tests {
 
     #[test]
     fn test_factory_creates_deepseek() {
-        let p = create_provider("deepseek", "k", &default_config()).unwrap();
+        let p = create_provider("deepseek", "k", &default_config(), None).unwrap();
         assert_eq!(p.name(), "deepseek");
     }
 
     #[test]
     fn test_factory_creates_grok() {
-        let p = create_provider("grok", "k", &default_config()).unwrap();
+        let p = create_provider("grok", "k", &default_config(), None).unwrap();
         assert_eq!(p.name(), "grok");
     }
 
     #[test]
     fn test_factory_creates_glm() {
-        let p = create_provider("glm", "k", &default_config()).unwrap();
+        let p = create_provider("glm", "k", &default_config(), None).unwrap();
         assert_eq!(p.name(), "glm");
     }
 
     #[test]
     fn test_factory_creates_qwen() {
-        let p = create_provider("qwen", "k", &default_config()).unwrap();
+        let p = create_provider("qwen", "k", &default_config(), None).unwrap();
         assert_eq!(p.name(), "qwen");
     }
 
     #[test]
     fn test_factory_creates_kimi() {
-        let p = create_provider("kimi", "k", &default_config()).unwrap();
+        let p = create_provider("kimi", "k", &default_config(), None).unwrap();
         assert_eq!(p.name(), "kimi");
     }
 
     #[test]
     fn test_factory_creates_openrouter() {
-        let p = create_provider("openrouter", "k", &default_config()).unwrap();
+        let p = create_provider("openrouter", "k", &default_config(), None).unwrap();
         assert_eq!(p.name(), "openrouter");
     }
 
     #[test]
     fn test_factory_creates_ollama() {
-        let p = create_provider("ollama", "", &default_config()).unwrap();
+        let p = create_provider("ollama", "", &default_config(), None).unwrap();
         assert_eq!(p.name(), "ollama");
     }
 
     #[test]
     fn test_factory_creates_gemini() {
-        let p = create_provider("gemini", "k", &default_config()).unwrap();
+        let p = create_provider("gemini", "k", &default_config(), None).unwrap();
         assert_eq!(p.name(), "gemini");
     }
 
     #[test]
     fn test_factory_creates_openai() {
-        let p = create_provider("openai", "k", &default_config()).unwrap();
+        let p = create_provider("openai", "k", &default_config(), None).unwrap();
         assert_eq!(p.name(), "openai");
     }
 
     #[test]
     fn test_factory_unknown_provider() {
-        assert!(create_provider("nope", "k", &default_config()).is_err());
+        assert!(create_provider("nope", "k", &default_config(), None).is_err());
     }
 
     #[test]
@@ -257,7 +263,7 @@ mod tests {
         assert_eq!(kimi.strategy, providers::ClientStrategy::Generic);
         assert_eq!(openai.strategy, providers::ClientStrategy::Kernel);
 
-        let p = create_provider("deepseek", "k", &default_config()).unwrap();
+        let p = create_provider("deepseek", "k", &default_config(), None).unwrap();
         assert_eq!(p.name(), "deepseek");
     }
 

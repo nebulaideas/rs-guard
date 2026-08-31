@@ -15,6 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`force_generic_client`, ExtraBody variants) still force the generic
   client. DeepSeek stays on `GenericOpenAiCompatibleClient`.
 
+- **`create_provider` takes a `max_tokens` override** (issue #161) — budget
+  escalation no longer clones `ProviderConfig` per attempt. Pass `None` to
+  keep `config.max_tokens`.
+
 ### Added
 
 - Nothing yet.

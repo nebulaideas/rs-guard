@@ -369,10 +369,13 @@ async fn call_llm_with_budget_escalation(
     let mut attempt_max_tokens = config.provider_config.max_tokens;
 
     loop {
-        let mut provider_config = config.provider_config.clone();
-        provider_config.max_tokens = attempt_max_tokens;
-        let provider = create_provider(&config.provider, &config.api_key, &provider_config)
-            .context("Failed to create LLM provider")?;
+        let provider = create_provider(
+            &config.provider,
+            &config.api_key,
+            &config.provider_config,
+            attempt_max_tokens,
+        )
+        .context("Failed to create LLM provider")?;
 
         let result = with_retry_predicated(
             || async {
