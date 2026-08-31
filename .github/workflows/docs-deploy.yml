@@ -1,4 +1,6 @@
 name: Deploy Documentation
+# Builds rustdoc from src/lib.rs (cargo doc --no-deps) and publishes GitHub Pages.
+# See docs/ARCHITECTURE.md and the crate docs for rs_guard.
 
 on:
   push:

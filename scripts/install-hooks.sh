@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Install git pre-commit hook for rs-guard code review.
 # Usage: ./scripts/install-hooks.sh
+# The installed hook runs `rs-guard` (src/main.rs → run_pipeline in src/pipeline.rs)
+# on staged changes. See docs/LOCAL_MODE.md §Pre-Commit Hook Setup.
 
 set -euo pipefail
 

@@ -92,6 +92,10 @@ pub const DEFAULT_CHUNK_TAIL_LINES: usize = 400;
 const CHUNK_PLACEHOLDER: &str = "\n# ... [diff truncated: {removed} lines omitted] ...\n";
 
 /// Result of a successful diff fetch operation.
+///
+/// Returned by [`fetch_pr_diff`], [`fetch_local_diff`], [`fetch_file_diff`],
+/// and [`fetch_range_diff`]. See `docs/API.md` §diff and
+/// `docs/LOCAL_MODE.md` §Branch-range review.
 #[derive(Debug, Clone)]
 #[must_use = "DiffResult should be used for review processing"]
 pub struct DiffResult {
@@ -248,6 +252,8 @@ pub fn path_allowed(path: &str, include: &[String], exclude: &[String]) -> bool 
 /// Lines starting with `#` are comments and ignored. Blank lines are ignored.
 /// Patterns follow gitignore syntax: directory patterns ending with `/`,
 /// glob patterns (`*`, `**`), and negation patterns starting with `!`.
+/// Config: `ignore_file` in `docs/CONFIGURATION.md`; usage:
+/// `docs/USAGE.md` §Ignore File. Applied by [`apply_path_filters_with_ignore`].
 pub fn parse_rs_guard_ignore(content: &str) -> Vec<String> {
     content
         .lines()
@@ -535,10 +541,11 @@ pub fn chunk_diff(content: &str) -> (Cow<'_, str>, bool, usize) {
 
 /// Chunks a large diff with explicit head and tail line counts.
 ///
-/// Returns `Cow<str>` — borrowed (zero-alloc) when no truncation is needed,
-/// owned when the middle section is replaced with a placeholder. See
-/// `docs/implementation-guide.md` §Diff Chunking and
-/// `docs/ARCHITECTURE.md` (`diff.rs` — Diff Fetching + Chunking).
+/// Returns `(Cow<str>, was_truncated, removed_lines)` — `Cow` is borrowed
+/// (zero-alloc) when no truncation is needed, owned when the middle section
+/// is replaced with a placeholder. See `docs/implementation-guide.md`
+/// §Diff Chunking and `docs/ARCHITECTURE.md` (`diff.rs` — Diff Fetching +
+/// Chunking).
 ///
 /// When the diff exceeds `head_lines + tail_lines`, the middle section is
 /// replaced with a placeholder. Returns the original content unchanged (as a
@@ -863,6 +870,9 @@ pub fn apply_path_filters(
 
 /// Applies path filters and `.rs-guardignore` patterns then re-validates size
 /// limits.
+///
+/// Ignore patterns come from `parse_rs_guard_ignore()` (`docs/USAGE.md`
+/// §Ignore File; `ignore_file` in `docs/CONFIGURATION.md`).
 ///
 /// Returns [`RsGuardError::EmptyDiff`] when every file section is filtered out.
 pub fn apply_path_filters_with_ignore(

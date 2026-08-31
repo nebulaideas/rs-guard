@@ -6,12 +6,15 @@ This document describes the system design, key decisions, and extension points o
 
 ## Overview
 
-rs-guard is a **single-binary, single-pass review pipeline** orchestrated by
-`run_pipeline()` in `src/pipeline.rs` (see also `src/lib.rs`). It fetches a
-diff, calls an LLM once, parses the structured response, and either submits a
-GitHub review (CI mode) or prints a colored terminal summary (local mode). No
-intermediate state is persisted, no comments are posted during analysis, and no
-database or server is required.
+rs-guard is a **single-binary review pipeline** (optional multi-pass for large
+diffs) orchestrated by `run_pipeline()` in `src/pipeline.rs` (crate root:
+`src/lib.rs`). It fetches a `DiffResult` (`src/diff.rs`), calls an LLM, parses
+the structured response (`parse_verdict()` in `src/verdict.rs`), and either
+submits a GitHub review (CI mode, `submit_review()` in `src/github.rs`) or
+prints a colored terminal summary (local mode). No database or server is
+required; optional on-disk LLM response caching lives in `.rs-guard/cache/`.
+Rustdoc is built and published by `.github/workflows/docs-deploy.yml`
+(`cargo doc --no-deps`).
 
 ---
 

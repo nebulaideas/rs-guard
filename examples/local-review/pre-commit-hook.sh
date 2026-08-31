@@ -5,8 +5,10 @@
 #   cp examples/local-review/pre-commit-hook.sh .git/hooks/pre-commit
 #   chmod +x .git/hooks/pre-commit
 #
-# This hook analyzes staged changes with rs-guard and aborts the commit
-# if the review returns REQUEST_CHANGES.
+# This hook analyzes staged changes with rs-guard (src/main.rs →
+# run_pipeline() in src/pipeline.rs; fetch_local_diff() in src/diff.rs)
+# and aborts the commit if the review returns REQUEST_CHANGES.
+# See docs/LOCAL_MODE.md; alternative installer: scripts/install-hooks.sh.
 #
 # Tips:
 #   - Test the hook without blocking: ./rs-guard --dry-run
