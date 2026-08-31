@@ -6,7 +6,7 @@
 //! not part of the public surface.
 
 use rs_guard::llm::factory::create_provider;
-use rs_guard::llm::providers::{find_provider, ProviderMeta};
+use rs_guard::llm::providers::{find_provider, ClientStrategy, ProviderMeta};
 use rs_guard::llm::{LlmProvider, ProviderConfig};
 use wiremock::matchers::{body_partial_json, header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -638,6 +638,11 @@ fn test_deepseek_metadata_contract() {
     assert!(
         meta.force_generic_client,
         "DeepSeek must force the generic client until llm-kernel accepts null tool_calls"
+    );
+    assert_eq!(
+        meta.strategy,
+        ClientStrategy::Generic,
+        "DeepSeek must declare ClientStrategy::Generic until llm-kernel accepts null tool_calls"
     );
 }
 

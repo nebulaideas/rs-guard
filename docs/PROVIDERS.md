@@ -56,12 +56,11 @@ retryable empty-content error (with `max_tokens` escalation), same as before.
 
 ### Factory routing
 
-The factory (`create_provider`) routes automatically based on provider metadata
-and config. Providers with `force_generic_client`, `result_format`, or
-`ExtraBody` variants, or a config-level `result_format` override, use
-`GenericOpenAiCompatibleClient`; all others use `KernelBackedClient`. Both
-implement the `LlmProvider` trait, so the pipeline is agnostic to the
-underlying client.
+The factory (`create_provider`) matches on `ProviderMeta.strategy`
+(`ClientStrategy::Kernel` or `ClientStrategy::Generic`). Config-level
+`result_format` and metadata overrides (`force_generic_client`, ExtraBody
+variants) still force `GenericOpenAiCompatibleClient`. Both clients implement
+the `LlmProvider` trait, so the pipeline is agnostic to the underlying client.
 
 ### Shared TLS stack
 

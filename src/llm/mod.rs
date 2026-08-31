@@ -19,7 +19,7 @@ mod generic_client;
 mod kernel_client;
 pub mod providers;
 
-pub use providers::VariantEffect;
+pub use providers::{ClientStrategy, VariantEffect};
 
 /// A single message in a chat conversation.
 #[derive(Debug, Clone, Serialize)]

@@ -264,6 +264,7 @@ pub struct ProviderConfig {
 | `ChatRequest`                       | Request body with `model`, `messages`, `temperature`, `max_tokens`, `extra_body` (for VariantEffect) |
 | `ChatResponse` / `ChatChoice` / `ChatMessageResponse` | Document the expected OpenAI-compatible shape. **Runtime parsing uses a loose `serde_json::Value` traversal** (in `parse_completion_response_body`) to tolerate `"content": null`, multimodal arrays, and extra fields from thinking models. |
 | `factory::create_provider()`        | Factory: `provider_name + api_key -> Provider`                     |
+| `providers::ClientStrategy`         | `Kernel` or `Generic` — explicit factory routing on `ProviderMeta` |
 | `providers::all_providers()`        | Metadata for all known providers                                   |
 | `providers::find_provider()`               | Lookup provider metadata by name                                   |
 | `providers::get_provider_context_window()` | Returns context window size for a provider                         |
@@ -396,6 +397,7 @@ ProviderMeta {
     result_format: None,  // Or Some(Cow::Borrowed("message")) for Qwen/DashScope
     default_extra_headers: &[],  // Add default headers if needed (e.g. OpenRouter attribution)
     force_generic_client: false,  // true if llm-kernel cannot deserialize this provider's responses
+    strategy: ClientStrategy::Kernel,  // or ClientStrategy::Generic for custom fields / loose JSON
 }
 ```
 
@@ -407,6 +409,7 @@ The `factory.rs` module resolves the provider name to a `ProviderMeta` and const
 - `result_format`: Uses `Option<Cow<'static, str>>` so known providers keep a zero-cost borrowed value. Set to `Some(Cow::Borrowed("message"))` when the provider requires it (Qwen/DashScope); otherwise `None`. Per-provider TOML overrides (`[providers.<name>].result_format`) take precedence over this static default at runtime.
 - `default_extra_headers`: Default HTTP headers sent with every request. Use for provider-specific attribution (e.g. OpenRouter's `HTTP-Referer` and `X-Title`). Most providers don't need this.
 - `force_generic_client`: When `true`, the factory uses `GenericOpenAiCompatibleClient` even without `result_format` or ExtraBody variants. Set for providers whose response JSON llm-kernel cannot deserialize (currently DeepSeek V4 thinking).
+- `strategy`: Explicit `ClientStrategy::Kernel` or `ClientStrategy::Generic`. The factory matches on this field; `force_generic_client`, metadata `result_format`, ExtraBody variants, and a config-level `result_format` override still force Generic.
 - `ci_allowed_hosts`: Hosts allowed in CI mode (scheme, host) tuples. Use an empty slice `&[]` for local-only providers (loopback is rejected in CI by default).
 
 ### 2. Update `.reviewer.toml` Schema

@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Explicit `ClientStrategy` on `ProviderMeta`** (issue #156) — factory
+  routing is a 2-arm match on `Kernel` vs `Generic`, computed once at
+  metadata definition. Config-level `result_format` and metadata overrides
+  (`force_generic_client`, ExtraBody variants) still force the generic
+  client. DeepSeek stays on `GenericOpenAiCompatibleClient`.
+
 ### Added
 
 - Nothing yet.
