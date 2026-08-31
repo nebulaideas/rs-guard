@@ -50,6 +50,19 @@ impl Default for DiffLimits {
 impl DiffLimits {
     /// Limits used only for raw network/file fetch before path filtering.
     ///
+    /// **Why two tiers:** A large lockfile such as `package-lock.json` would
+    /// trigger user-facing limits ([`DEFAULT_MAX_DIFF_BYTES`], 500 KB) and
+    /// produce a truncation warning — even though the file will be dropped by
+    /// `.rs-guardignore` in the next step. The raw fetch tier
+    /// ([`RAW_FETCH_MAX_DIFF_BYTES`], 10 MiB) reads the full unfiltered diff,
+    /// then [`apply_path_filters`] / [`apply_path_filters_with_ignore`] drop
+    /// ignored files, then user-facing limits apply to what remains.
+    ///
+    /// **Example:** Diff with a 10 MB lockfile + 50 KB of source changes:
+    /// 1. Raw fetch: reads all 10.05 MB (within the 10 MiB raw ceiling)
+    /// 2. Path filter: drops the lockfile → 50 KB remains
+    /// 3. User limits: 50 KB < 500 KB → no truncation warning
+    ///
     /// User-facing limits are applied in [`apply_path_filters`] after
     /// include/exclude so large lockfiles can be dropped first.
     #[must_use]
