@@ -48,7 +48,7 @@ jobs:
 
       # Install rs-guard from crates.io with a locked Cargo.lock for reproducibility.
       - name: Install rs-guard
-        run: cargo install rs-guard --locked --version "1.8.0"
+        run: cargo install rs-guard --locked --version "1.8.2"
 
       - name: AI Code Review
         run: rs-guard

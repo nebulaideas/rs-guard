@@ -1231,7 +1231,7 @@ fn test_default_llm_timeout_secs_raised_for_deepseek() {
         assert_eq!(
             config.llm_timeout_secs,
             rs_guard::config::THINKING_MIN_LLM_TIMEOUT_SECS,
-            "deepseek should get auto-raised timeout (180s) when not explicit"
+            "deepseek should get auto-raised timeout (240s) when not explicit"
         );
     });
 }
