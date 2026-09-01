@@ -41,8 +41,9 @@ jobs:
     # Skip draft PRs to avoid wasting tokens on work-in-progress.
     if: github.event.pull_request.draft == false{{FORK_GUARD}}
     runs-on: ubuntu-latest
-    # DeepSeek/Kimi thinking can take up to 240s (v1.8.3 floor). Timeouts are
-    # not retried; 15m leaves headroom for budget escalation.
+    # DeepSeek/Kimi thinking can take up to 240s when --llm-timeout is unset
+    # (auto-raised). Timeouts are not retried; 15m leaves headroom for budget
+    # escalation.
     timeout-minutes: 15
     permissions:
       contents: read

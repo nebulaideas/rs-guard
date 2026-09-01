@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.8.3] - 2026-09-01
+
 ### Changed
 
 - **`auto_gitignore` now defaults to `false`** — local runs no longer append
@@ -14,14 +16,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `.rs-guard/` and `rs-guard-metrics.json` in a global gitignore
   (`core.excludesFile`) instead — see the new "Global gitignore" section in
   docs/USAGE.md. Opt back in per-repo with `auto_gitignore = true`.
-
-### Added
-
-- Nothing yet.
-
-## [1.8.3] - 2026-09-01
-
-### Changed
 
 - **`Config` split into focused sub-structs** (issue #158) — `Config` is now a
   composition of `DiffConfig`, `LlmConfig`, `GithubConfig`, `CacheConfig`,

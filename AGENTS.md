@@ -317,7 +317,7 @@ cargo audit
 - **Decision Log** in Appendix F of the plan tracks all architectural decisions.
 - **Cache directory** (`.rs-guard/cache/`) — `auto_gitignore` now defaults to `false`; rs-guard no longer rewrites the repo `.gitignore` on local runs. Recommend a global gitignore (see docs/USAGE.md §Global gitignore); opt in per-repo with `auto_gitignore = true`.
 - **`--no-cache` flag** bypasses the LLM response cache for a fresh API call.
-- **v1.2 client extraction** — the 5 per-provider clients were removed; all providers now use `GenericOpenAiCompatibleClient`. Adding a provider = a `ProviderMeta` entry in `llm/providers.rs` + docs + tests.
+- **v1.2 client extraction** — the 5 duplicated per-provider clients were replaced by `GenericOpenAiCompatibleClient`; since v1.8 the factory routes between it and `KernelBackedClient` via `ClientStrategy` on `ProviderMeta`. Adding a provider = a `ProviderMeta` entry in `llm/providers.rs` + docs + tests.
 
 ---
 

@@ -608,8 +608,8 @@ review:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
   script:
     - cargo install rs-guard --locked --version "1.8.2"
-    - git diff "$CI_MERGE_REQUEST_DIFF_BASE_SHA"..."$CI_MERGE_REQUEST_SOURCE_BRANCH_SHA" > /tmp/mr.diff
-    - rs-guard --diff-file /tmp/mr.diff --llm-timeout 240
+    - git diff "$CI_MERGE_REQUEST_DIFF_BASE_SHA...$CI_MERGE_REQUEST_SOURCE_BRANCH_SHA" > /tmp/mr.diff
+    - rs-guard --provider deepseek --diff-file /tmp/mr.diff --llm-timeout 240
   artifacts:
     when: always
     paths:
@@ -677,15 +677,16 @@ repository's `.gitignore`. Instead, add one global entry to your
 project is covered at once:
 
 ```bash
-# Set a global excludes file only if none is configured at any scope
-# (system, global, or local) — never clobber an existing setting.
-if ! git config --get core.excludesFile >/dev/null 2>&1; then
+# Configure a global excludes file only if none is set at the global scope
+# — never clobber an existing setting. (We do not write to the system
+# config, and a repo-local excludes file is intentionally left alone.)
+if ! git config --global --get core.excludesFile >/dev/null 2>&1; then
   git config --global core.excludesFile '~/.gitignore_global'
 fi
 
-# Append to whatever file is actually in effect (existing or just-set).
-# `--path` expands `~` and `~user` the same way git itself does.
-GLOBAL_IGNORE="$(git config --path --get core.excludesFile)"
+# Append to the global excludes file. `--path` expands `~` and `~user` the
+# same way git itself does.
+GLOBAL_IGNORE="$(git config --global --path --get core.excludesFile)"
 cat >> "$GLOBAL_IGNORE" <<'EOF'
 # rs-guard local review artifacts
 .rs-guard/
