@@ -1167,83 +1167,9 @@ fn resolve_circuit_breaker(toml: Option<&TomlConfig>) -> Option<crate::retry::Ci
         })
 }
 
-/// Validated CI configuration with all required fields present.
-///
-/// Created by [`Config::validate_for_ci()`] when running in CI mode.
-/// This struct guarantees that all CI-required fields are present,
-/// eliminating the need for `.expect()` calls in the pipeline.
+/// Diff size limits, path filters, chunking, and ignore-file settings.
 #[derive(Debug, Clone)]
-pub struct CiConfig {
-    /// GitHub authentication token.
-    pub github_token: String,
-    /// Pull request number.
-    pub pr_number: u64,
-    /// Repository owner (e.g., "nebulaideas").
-    pub repo_owner: String,
-    /// Repository name (e.g., "rs-guard").
-    pub repo_name: String,
-    /// GitHub API base URL.
-    pub github_base_url: String,
-}
-
-/// Resolved application configuration.
-#[derive(Debug, Clone)]
-pub struct Config {
-    /// LLM provider name (e.g. `"deepseek"`).
-    pub provider: String,
-    /// Model identifier for the LLM provider.
-    pub model: String,
-    /// Provider-specific model variant (e.g. "flash", "thinking-on").
-    pub variant: Option<String>,
-    /// Top-level variant from TOML, retained for provider-switch re-resolution.
-    top_level_variant: Option<String>,
-    /// Sampling temperature for LLM completions.
-    pub temperature: f32,
-    /// API key for the selected LLM provider.
-    pub api_key: String,
-    /// GitHub authentication token (required in CI mode).
-    pub github_token: Option<String>,
-    /// Pull request number (required in CI mode).
-    pub pr_number: Option<u64>,
-    /// Repository owner (required in CI mode).
-    pub repo_owner: Option<String>,
-    /// Repository name (required in CI mode).
-    pub repo_name: Option<String>,
-    /// System prompt text sent to the LLM.
-    pub prompt: String,
-    /// Whether a custom prompt file was loaded (via `--prompt-file` or the
-    /// default `.github/review-prompt.md` when it exists).
-    ///
-    /// Used to suppress the interactive project-rules picker in local mode:
-    /// a loaded custom prompt file is treated as the primary review guidance,
-    /// while project rules are still auto-loaded as supplemental context.
-    pub prompt_file_loaded: bool,
-    /// Whether the tool is running in CI mode.
-    pub is_ci: bool,
-    /// GitHub API base URL.
-    pub github_base_url: String,
-    /// Provider-specific configuration overrides from TOML.
-    pub provider_config: ProviderConfig,
-    /// TOML per-provider sections (retained for `apply_args` provider switching).
-    toml_providers: HashMap<String, ProviderTomlConfig>,
-    /// Whether the model was explicitly set via CLI `--model` flag.
-    /// When `false` and the provider changes, the model resets to the new provider's default.
-    /// Env/TOML model values are NOT carried across provider changes.
-    model_set_via_cli: bool,
-    /// Bypass the response cache, forcing an LLM API call.
-    pub no_cache: bool,
-    /// Dry-run mode: run pipeline without submitting or blocking.
-    pub dry_run: bool,
-    /// Output format for the pipeline result (`text` or `json`).
-    pub output_format: crate::cli::OutputFormat,
-    /// Custom cache directory path.
-    pub cache_dir: Option<String>,
-    /// Optional circuit breaker configuration.
-    pub circuit_breaker: Option<crate::retry::CircuitBreaker>,
-    /// Optional per-provider pricing overrides.
-    pub pricing: Option<HashMap<String, PricingTomlConfig>>,
-    /// Whether to automatically add the cache directory to `.gitignore`.
-    pub auto_gitignore: bool,
+pub struct DiffConfig {
     /// Lines to preserve from the start of the diff when chunking.
     pub chunk_head_lines: usize,
     /// Lines to preserve from the end of the diff when chunking.
@@ -1256,61 +1182,11 @@ pub struct Config {
     pub include_paths: Vec<String>,
     /// Path exclude globs.
     pub exclude_paths: Vec<String>,
-    /// Resolved LLM request timeout in seconds.
-    pub llm_timeout_secs: u64,
-    /// Number of "Important" issues required to trigger REQUEST_CHANGES.
-    pub important_threshold: u32,
-    /// Project-specific coding conventions loaded from AI-agent instruction
-    /// files (`AGENTS.md`, `CLAUDE.md`, etc.).
-    ///
-    /// `None` when no rules file was found, auto-detection is disabled
-    /// (`--no-project-rules`), or the file could not be read. The pipeline
-    /// layers this content on top of the review prompt as a
-    /// "Project Conventions" section.
-    pub project_rules: Option<String>,
-    /// Name of the project rules file that was loaded (e.g., `"AGENTS.md"`).
-    ///
-    /// The path to the loaded project rules file, as given or as detected.
-    /// For auto-detected files this is the repo-relative path; for explicit
-    /// files it is the path provided by the user. Used for display in the
-    /// terminal notice. `None` when no rules file was found or auto-detection
-    /// is disabled.
-    pub project_rules_file: Option<String>,
-    /// Path to an explicit project rules file requested by the user.
-    ///
-    /// Set from `--rules-file`, `RS_GUARD_RULES_FILE`, or `rules_file` in
-    /// `.reviewer.toml`. When set, auto-detection is skipped and this file is
-    /// loaded directly. `None` when no explicit file is requested.
-    pub rules_file: Option<PathBuf>,
     /// Optional git base ref for local mode range diffs (`git diff base...HEAD`).
     ///
     /// When set (and not CI / not `--diff-file`), local mode uses
     /// [`crate::diff::fetch_range_diff`] instead of staged changes.
     pub diff_base: Option<String>,
-    /// Request structured findings from the LLM.
-    ///
-    /// When `true`, the review prompt asks the LLM to include a
-    /// `[RS_GUARD_VERDICT_FINDINGS]` JSON block. Findings override metadata
-    /// counts when present.
-    pub findings: bool,
-    /// Submit inline review comments on the GitHub PR diff.
-    ///
-    /// When `true`, findings are mapped to diff positions and submitted as
-    /// inline comments. Implies `findings`.
-    pub inline_comments: bool,
-    /// Whether to create a GitHub Check Run in addition to the PR review.
-    ///
-    /// When `true`, rs-guard creates a Check Run via the GitHub Checks API
-    /// after submitting the review. Check Run failure does NOT fail the
-    /// pipeline — it is logged as a warning.
-    pub check_run: bool,
-    /// Name for the GitHub Check Run (default: `rs-guard`).
-    pub check_run_name: String,
-    /// Explicit commit SHA for the GitHub Check Run.
-    ///
-    /// When `None`, the SHA is resolved from `GITHUB_EVENT_PATH`
-    /// (`pull_request.head.sha`) for PR events, falling back to `GITHUB_SHA`.
-    pub check_run_sha: Option<String>,
     /// Parsed `.rs-guardignore` patterns applied to the diff after
     /// include/exclude filtering.
     ///
@@ -1322,6 +1198,45 @@ pub struct Config {
     /// When `None`, rs-guard looks for `.rs-guardignore` in the repo root
     /// or current directory. When set, only the specified file is loaded.
     pub ignore_file: Option<PathBuf>,
+}
+
+impl Default for DiffConfig {
+    fn default() -> Self {
+        Self {
+            chunk_head_lines: crate::diff::DEFAULT_CHUNK_HEAD_LINES,
+            chunk_tail_lines: crate::diff::DEFAULT_CHUNK_TAIL_LINES,
+            max_diff_bytes: crate::diff::DEFAULT_MAX_DIFF_BYTES,
+            max_diff_lines: crate::diff::DEFAULT_MAX_DIFF_LINES,
+            include_paths: Vec::new(),
+            exclude_paths: Vec::new(),
+            diff_base: None,
+            ignore_patterns: Vec::new(),
+            ignore_file: None,
+        }
+    }
+}
+
+/// LLM provider, model, prompt, pricing, and multi-pass review settings.
+#[derive(Debug, Clone)]
+pub struct LlmConfig {
+    /// LLM provider name (e.g. `"deepseek"`).
+    pub provider: String,
+    /// Model identifier for the LLM provider.
+    pub model: String,
+    /// Provider-specific model variant (e.g. "flash", "thinking-on").
+    pub variant: Option<String>,
+    /// Sampling temperature for LLM completions.
+    pub temperature: f32,
+    /// API key for the selected LLM provider.
+    pub api_key: String,
+    /// System prompt text sent to the LLM.
+    pub prompt: String,
+    /// Provider-specific configuration overrides from TOML.
+    pub provider_config: ProviderConfig,
+    /// Optional per-provider pricing overrides.
+    pub pricing: Option<HashMap<String, PricingTomlConfig>>,
+    /// Resolved LLM request timeout in seconds.
+    pub llm_timeout_secs: u64,
     /// Whether language-aware prompt auto-selection is enabled.
     ///
     /// When `true` and no explicit `--prompt-file` is given, the pipeline
@@ -1354,6 +1269,224 @@ pub struct Config {
     pub multi_pass_max_cost_cents: Option<f64>,
 }
 
+impl Default for LlmConfig {
+    fn default() -> Self {
+        Self {
+            provider: String::new(),
+            model: String::new(),
+            variant: None,
+            temperature: 0.1,
+            api_key: String::new(),
+            prompt: String::new(),
+            provider_config: ProviderConfig::default(),
+            pricing: None,
+            llm_timeout_secs: DEFAULT_LLM_TIMEOUT_SECS,
+            auto_prompt: true,
+            multi_pass: false,
+            multi_pass_max_chunks: 10,
+            multi_pass_max_concurrent: 3,
+            multi_pass_max_cost_cents: None,
+        }
+    }
+}
+
+/// GitHub authentication, PR identity, and review-submission settings.
+#[derive(Debug, Clone)]
+pub struct GithubConfig {
+    /// GitHub authentication token (required in CI mode).
+    pub github_token: Option<String>,
+    /// Pull request number (required in CI mode).
+    pub pr_number: Option<u64>,
+    /// Repository owner (required in CI mode).
+    pub repo_owner: Option<String>,
+    /// Repository name (required in CI mode).
+    pub repo_name: Option<String>,
+    /// GitHub API base URL.
+    pub github_base_url: String,
+    /// Submit inline review comments on the GitHub PR diff.
+    ///
+    /// When `true`, findings are mapped to diff positions and submitted as
+    /// inline comments. Implies `findings`.
+    pub inline_comments: bool,
+    /// Whether to create a GitHub Check Run in addition to the PR review.
+    ///
+    /// When `true`, rs-guard creates a Check Run via the GitHub Checks API
+    /// after submitting the review. Check Run failure does NOT fail the
+    /// pipeline — it is logged as a warning.
+    pub check_run: bool,
+    /// Name for the GitHub Check Run (default: `rs-guard`).
+    pub check_run_name: String,
+    /// Explicit commit SHA for the GitHub Check Run.
+    ///
+    /// When `None`, the SHA is resolved from `GITHUB_EVENT_PATH`
+    /// (`pull_request.head.sha`) for PR events, falling back to `GITHUB_SHA`.
+    pub check_run_sha: Option<String>,
+}
+
+impl Default for GithubConfig {
+    fn default() -> Self {
+        Self {
+            github_token: None,
+            pr_number: None,
+            repo_owner: None,
+            repo_name: None,
+            github_base_url: String::new(),
+            inline_comments: false,
+            check_run: false,
+            check_run_name: "rs-guard".to_string(),
+            check_run_sha: None,
+        }
+    }
+}
+
+/// Resolved cache settings from CLI/env/TOML.
+///
+/// Distinct from [`crate::cache::CacheConfig`], which is the runtime cache
+/// engine (TTL, size limit, resolved directory). The pipeline converts this
+/// into the engine config when building [`crate::cache::DiffCache`].
+#[derive(Debug, Clone)]
+pub struct CacheConfig {
+    /// Bypass the response cache, forcing an LLM API call.
+    pub no_cache: bool,
+    /// Custom cache directory path.
+    pub cache_dir: Option<String>,
+    /// Whether to automatically add the cache directory to `.gitignore`.
+    pub auto_gitignore: bool,
+}
+
+impl Default for CacheConfig {
+    fn default() -> Self {
+        Self {
+            no_cache: false,
+            cache_dir: None,
+            auto_gitignore: true,
+        }
+    }
+}
+
+/// Terminal output format, verdict threshold, findings, and dry-run.
+#[derive(Debug, Clone)]
+pub struct OutputConfig {
+    /// Output format for the pipeline result (`text` or `json`).
+    pub output_format: crate::cli::OutputFormat,
+    /// Number of "Important" issues required to trigger REQUEST_CHANGES.
+    pub important_threshold: u32,
+    /// Request structured findings from the LLM.
+    ///
+    /// When `true`, the review prompt asks the LLM to include a
+    /// `[RS_GUARD_VERDICT_FINDINGS]` JSON block. Findings override metadata
+    /// counts when present.
+    pub findings: bool,
+    /// Dry-run mode: run pipeline without submitting or blocking.
+    pub dry_run: bool,
+}
+
+impl Default for OutputConfig {
+    fn default() -> Self {
+        Self {
+            output_format: crate::cli::OutputFormat::Text,
+            important_threshold: 3,
+            findings: false,
+            dry_run: false,
+        }
+    }
+}
+
+/// Circuit-breaker settings for LLM retries.
+#[derive(Debug, Clone, Default)]
+pub struct RetryConfig {
+    /// Optional circuit breaker configuration.
+    pub circuit_breaker: Option<crate::retry::CircuitBreaker>,
+}
+
+/// Project-rules file detection and loaded content.
+#[derive(Debug, Clone, Default)]
+pub struct RulesConfig {
+    /// Project-specific coding conventions loaded from AI-agent instruction
+    /// files (`AGENTS.md`, `CLAUDE.md`, etc.).
+    ///
+    /// `None` when no rules file was found, auto-detection is disabled
+    /// (`--no-project-rules`), or the file could not be read. The pipeline
+    /// layers this content on top of the review prompt as a
+    /// "Project Conventions" section.
+    pub project_rules: Option<String>,
+    /// Name of the project rules file that was loaded (e.g., `"AGENTS.md"`).
+    ///
+    /// The path to the loaded project rules file, as given or as detected.
+    /// For auto-detected files this is the repo-relative path; for explicit
+    /// files it is the path provided by the user. Used for display in the
+    /// terminal notice. `None` when no rules file was found or auto-detection
+    /// is disabled.
+    pub project_rules_file: Option<String>,
+    /// Path to an explicit project rules file requested by the user.
+    ///
+    /// Set from `--rules-file`, `RS_GUARD_RULES_FILE`, or `rules_file` in
+    /// `.reviewer.toml`. When set, auto-detection is skipped and this file is
+    /// loaded directly. `None` when no explicit file is requested.
+    pub rules_file: Option<PathBuf>,
+}
+
+/// Validated CI configuration with all required fields present.
+///
+/// Created by [`Config::validate_for_ci()`] when running in CI mode.
+/// This struct guarantees that all CI-required fields are present,
+/// eliminating the need for `.expect()` calls in the pipeline.
+#[derive(Debug, Clone)]
+pub struct CiConfig {
+    /// GitHub authentication token.
+    pub github_token: String,
+    /// Pull request number.
+    pub pr_number: u64,
+    /// Repository owner (e.g., "nebulaideas").
+    pub repo_owner: String,
+    /// Repository name (e.g., "rs-guard").
+    pub repo_name: String,
+    /// GitHub API base URL.
+    pub github_base_url: String,
+}
+
+/// Resolved application configuration.
+///
+/// `Config` is a composition of focused sub-structs ([`DiffConfig`],
+/// [`LlmConfig`], [`GithubConfig`], [`CacheConfig`], [`OutputConfig`],
+/// [`RetryConfig`], [`RulesConfig`]) plus CI mode and construction-time
+/// bookkeeping. Pipeline helpers that only need one concern take that
+/// sub-struct rather than the whole blob.
+#[derive(Debug, Clone)]
+pub struct Config {
+    /// Diff fetching, size limits, path filters, and ignore patterns.
+    pub diff: DiffConfig,
+    /// LLM provider, model, prompt, pricing, and multi-pass settings.
+    pub llm: LlmConfig,
+    /// GitHub authentication, PR identity, and review submission.
+    pub github: GithubConfig,
+    /// Cache bypass, directory, and auto-gitignore settings.
+    pub cache: CacheConfig,
+    /// Output format, important-issue threshold, findings, and dry-run.
+    pub output: OutputConfig,
+    /// Circuit-breaker settings.
+    pub retry: RetryConfig,
+    /// Project-rules file detection and loaded content.
+    pub rules: RulesConfig,
+    /// Whether the tool is running in CI mode.
+    pub is_ci: bool,
+    /// Top-level variant from TOML, retained for provider-switch re-resolution.
+    top_level_variant: Option<String>,
+    /// Whether a custom prompt file was loaded (via `--prompt-file` or the
+    /// default `.github/review-prompt.md` when it exists).
+    ///
+    /// Used to suppress the interactive project-rules picker in local mode:
+    /// a loaded custom prompt file is treated as the primary review guidance,
+    /// while project rules are still auto-loaded as supplemental context.
+    pub prompt_file_loaded: bool,
+    /// TOML per-provider sections (retained for `apply_args` provider switching).
+    toml_providers: HashMap<String, ProviderTomlConfig>,
+    /// Whether the model was explicitly set via CLI `--model` flag.
+    /// When `false` and the provider changes, the model resets to the new provider's default.
+    /// Env/TOML model values are NOT carried across provider changes.
+    model_set_via_cli: bool,
+}
+
 impl Config {
     /// Creates a minimal config for integration tests.
     ///
@@ -1368,54 +1501,18 @@ impl Config {
     #[doc(hidden)]
     pub fn empty() -> Self {
         Self {
-            provider: String::new(),
-            model: String::new(),
-            variant: None,
-            top_level_variant: None,
-            temperature: 0.1,
-            api_key: String::new(),
-            github_token: None,
-            pr_number: None,
-            repo_owner: None,
-            repo_name: None,
-            prompt: String::new(),
-            prompt_file_loaded: false,
+            diff: DiffConfig::default(),
+            llm: LlmConfig::default(),
+            github: GithubConfig::default(),
+            cache: CacheConfig::default(),
+            output: OutputConfig::default(),
+            retry: RetryConfig::default(),
+            rules: RulesConfig::default(),
             is_ci: false,
-            github_base_url: String::new(),
-            provider_config: ProviderConfig::default(),
+            top_level_variant: None,
+            prompt_file_loaded: false,
             toml_providers: HashMap::new(),
             model_set_via_cli: false,
-            no_cache: false,
-            dry_run: false,
-            output_format: crate::cli::OutputFormat::Text,
-            cache_dir: None,
-            circuit_breaker: None,
-            pricing: None,
-            auto_gitignore: true,
-            chunk_head_lines: crate::diff::DEFAULT_CHUNK_HEAD_LINES,
-            chunk_tail_lines: crate::diff::DEFAULT_CHUNK_TAIL_LINES,
-            max_diff_bytes: crate::diff::DEFAULT_MAX_DIFF_BYTES,
-            max_diff_lines: crate::diff::DEFAULT_MAX_DIFF_LINES,
-            include_paths: Vec::new(),
-            exclude_paths: Vec::new(),
-            llm_timeout_secs: DEFAULT_LLM_TIMEOUT_SECS,
-            important_threshold: 3,
-            project_rules: None,
-            project_rules_file: None,
-            rules_file: None,
-            diff_base: None,
-            findings: false,
-            inline_comments: false,
-            check_run: false,
-            check_run_name: "rs-guard".to_string(),
-            check_run_sha: None,
-            ignore_patterns: Vec::new(),
-            ignore_file: None,
-            auto_prompt: true,
-            multi_pass: false,
-            multi_pass_max_chunks: 10,
-            multi_pass_max_concurrent: 3,
-            multi_pass_max_cost_cents: None,
         }
     }
 
@@ -1515,54 +1612,66 @@ impl Config {
         let multi_pass_max_cost_cents = resolve_multi_pass_max_cost_cents(toml.as_ref());
 
         Ok(Config {
-            provider,
-            model,
-            variant,
-            top_level_variant,
-            temperature,
-            api_key,
-            github_token,
-            pr_number,
-            repo_owner,
-            repo_name,
-            prompt: DEFAULT_PROMPT.to_string(),
-            prompt_file_loaded: false,
+            diff: DiffConfig {
+                chunk_head_lines,
+                chunk_tail_lines,
+                max_diff_bytes,
+                max_diff_lines,
+                include_paths,
+                exclude_paths,
+                diff_base,
+                ignore_patterns: Vec::new(),
+                ignore_file,
+            },
+            llm: LlmConfig {
+                provider,
+                model,
+                variant,
+                temperature,
+                api_key,
+                prompt: DEFAULT_PROMPT.to_string(),
+                provider_config,
+                pricing,
+                llm_timeout_secs,
+                auto_prompt,
+                multi_pass,
+                multi_pass_max_chunks,
+                multi_pass_max_concurrent,
+                multi_pass_max_cost_cents,
+            },
+            github: GithubConfig {
+                github_token,
+                pr_number,
+                repo_owner,
+                repo_name,
+                github_base_url,
+                inline_comments: false,
+                check_run,
+                check_run_name,
+                check_run_sha: None,
+            },
+            cache: CacheConfig {
+                no_cache: false,
+                cache_dir,
+                auto_gitignore,
+            },
+            output: OutputConfig {
+                output_format,
+                important_threshold,
+                findings: false,
+                dry_run: false,
+            },
+            retry: RetryConfig { circuit_breaker },
+            rules: RulesConfig {
+                project_rules: None,
+                project_rules_file: None,
+                rules_file,
+            },
             is_ci,
-            github_base_url,
-            provider_config,
+            top_level_variant,
+            prompt_file_loaded: false,
             toml_providers,
             model_set_via_cli: false,
-            no_cache: false,
-            dry_run: false,
-            output_format,
-            cache_dir,
-            circuit_breaker,
-            pricing,
-            auto_gitignore,
-            chunk_head_lines,
-            chunk_tail_lines,
-            max_diff_bytes,
-            max_diff_lines,
-            include_paths,
-            exclude_paths,
-            llm_timeout_secs,
-            important_threshold,
-            project_rules: None,
-            project_rules_file: None,
-            rules_file,
-            diff_base,
-            findings: false,
-            inline_comments: false,
-            check_run,
-            check_run_name,
-            check_run_sha: None,
-            ignore_patterns: Vec::new(),
-            ignore_file,
-            auto_prompt,
-            multi_pass,
-            multi_pass_max_chunks,
-            multi_pass_max_concurrent,
-            multi_pass_max_cost_cents,
         })
     }
 
@@ -1581,7 +1690,7 @@ impl Config {
     /// new provider's API key environment variable is not set.
     pub fn apply_args(&mut self, args: &crate::cli::ReviewArgs) -> Result<(), RsGuardError> {
         if let Some(ref provider) = args.provider {
-            if *provider != self.provider {
+            if *provider != self.llm.provider {
                 let new_env = resolve_api_key_env_var(provider, Some(&self.toml_providers))?;
                 let new_key = std::env::var(&new_env).map_err(|_| {
                     RsGuardError::Config(format!(
@@ -1589,9 +1698,9 @@ impl Config {
                         new_env, provider
                     ))
                 })?;
-                let old_provider = self.provider.clone();
-                self.api_key = new_key;
-                self.provider = provider.clone();
+                let old_provider = self.llm.provider.clone();
+                self.llm.api_key = new_key;
+                self.llm.provider = provider.clone();
 
                 // Update provider_config from TOML for the new provider
                 let toml_provider = self.toml_providers.get(provider);
@@ -1610,23 +1719,23 @@ impl Config {
                     new_base_url,
                     toml_provider.and_then(|p| p.http_referer.as_deref())
                 );
-                self.provider_config.base_url = new_base_url;
-                self.provider_config.http_referer =
+                self.llm.provider_config.base_url = new_base_url;
+                self.llm.provider_config.http_referer =
                     toml_provider.and_then(|p| p.http_referer.clone());
-                self.provider_config.result_format =
+                self.llm.provider_config.result_format =
                     toml_provider.and_then(|p| normalize_result_format(p.result_format.clone()));
 
                 // Reset model to new provider's default unless CLI --model was used
                 if !self.model_set_via_cli && args.model.is_none() {
-                    self.model = default_model(provider)
+                    self.llm.model = default_model(provider)
                         .expect("provider already validated above")
                         .to_string();
                 }
 
-                // Always sync provider_config.model with self.model after provider change.
+                // Always sync provider_config.model with self.llm.model after provider change.
                 // This prevents provider_config.model from becoming stale when
                 // model_set_via_cli is true and no --model flag is passed.
-                self.provider_config.model = self.model.clone();
+                self.llm.provider_config.model = self.llm.model.clone();
 
                 // Re-resolve variant for the new provider unless CLI --variant was used.
                 if args.variant.is_none() {
@@ -1635,68 +1744,68 @@ impl Config {
                         .toml_providers
                         .get(provider)
                         .and_then(|p| p.variant.clone());
-                    self.variant = env_variant
+                    self.llm.variant = env_variant
                         .or(provider_variant)
                         .or(self.top_level_variant.clone());
-                    self.provider_config.variant = self.variant.clone();
+                    self.llm.provider_config.variant = self.llm.variant.clone();
                 }
             }
         }
 
         if let Some(ref model) = args.model {
-            self.model = model.clone();
-            self.provider_config.model = model.clone();
+            self.llm.model = model.clone();
+            self.llm.provider_config.model = model.clone();
             self.model_set_via_cli = true;
         }
         if let Some(ref variant) = args.variant {
-            self.variant = Some(variant.clone());
-            self.provider_config.variant = Some(variant.clone());
+            self.llm.variant = Some(variant.clone());
+            self.llm.provider_config.variant = Some(variant.clone());
         }
         if let Some(temp) = args.temperature {
-            self.temperature = temp;
+            self.llm.temperature = temp;
         }
         if let Some(max_tokens) = args.max_tokens {
-            self.provider_config.max_tokens = Some(max_tokens);
+            self.llm.provider_config.max_tokens = Some(max_tokens);
         }
         if let Some(t) = args.llm_timeout {
-            self.llm_timeout_secs = t;
-            self.provider_config.timeout_secs = Some(t);
+            self.llm.llm_timeout_secs = t;
+            self.llm.provider_config.timeout_secs = Some(t);
         }
         if args.no_cache {
-            self.no_cache = true;
+            self.cache.no_cache = true;
         }
         if args.dry_run {
-            self.dry_run = true;
+            self.output.dry_run = true;
         }
         if let Some(v) = args.max_diff_bytes {
-            self.max_diff_bytes = v;
+            self.diff.max_diff_bytes = v;
         }
         if let Some(v) = args.max_diff_lines {
-            self.max_diff_lines = v;
+            self.diff.max_diff_lines = v;
         }
         if let Some(ref raw) = args.include_paths {
-            self.include_paths = split_csv_paths(raw);
+            self.diff.include_paths = split_csv_paths(raw);
         }
         if let Some(ref raw) = args.exclude_paths {
-            self.exclude_paths = split_csv_paths(raw);
+            self.diff.exclude_paths = split_csv_paths(raw);
         }
         // clap resolves --format / RS_GUARD_FORMAT when present.
         if let Some(fmt) = args.format {
-            self.output_format = fmt;
+            self.output.output_format = fmt;
         }
         if let Some(threshold) = args.important_threshold {
-            self.important_threshold = threshold;
+            self.output.important_threshold = threshold;
         }
         if let Some(ref rules_file) = args.rules_file {
-            self.rules_file = Some(rules_file.clone());
+            self.rules.rules_file = Some(rules_file.clone());
         }
         if let Some(ref base) = args.base {
             // Clap may set this from `--base` or `RS_GUARD_BASE`. Empty/whitespace
             // means unset → fall back to staged (overrides TOML `diff_base`).
-            self.diff_base = normalize_diff_base(base);
+            self.diff.diff_base = normalize_diff_base(base);
         }
 
-        if args.no_project_rules && self.rules_file.is_some() {
+        if args.no_project_rules && self.rules.rules_file.is_some() {
             return Err(RsGuardError::Config(
                 "--rules-file and --no-project-rules are mutually exclusive".to_string(),
             ));
@@ -1704,10 +1813,10 @@ impl Config {
 
         // --inline-comments implies --findings
         if args.inline_comments {
-            self.inline_comments = true;
-            self.findings = true;
+            self.github.inline_comments = true;
+            self.output.findings = true;
         } else if args.findings {
-            self.findings = true;
+            self.output.findings = true;
         }
 
         // --check-run / RS_GUARD_CHECK_RUN: tri-state to respect
@@ -1715,26 +1824,26 @@ impl Config {
         // TOML `true`, so we check env presence explicitly rather than only
         // acting on a truthy `args.check_run`.
         if let Some(sha) = args.check_run_sha.clone() {
-            self.check_run_sha = Some(sha);
+            self.github.check_run_sha = Some(sha);
         }
         if let Ok(val) = std::env::var("RS_GUARD_CHECK_RUN") {
-            self.check_run = parse_bool_env("RS_GUARD_CHECK_RUN", &val)?;
+            self.github.check_run = parse_bool_env("RS_GUARD_CHECK_RUN", &val)?;
         } else if args.check_run {
-            self.check_run = true;
+            self.github.check_run = true;
         }
         if let Some(ref name) = args.check_run_name {
             validate_check_run_name(name)?;
-            self.check_run_name = name.clone();
+            self.github.check_run_name = name.clone();
         }
 
         // --ignore-file overrides env/TOML ignore_file path.
         if let Some(ref ignore_path) = args.ignore_file {
-            self.ignore_file = Some(ignore_path.clone());
+            self.diff.ignore_file = Some(ignore_path.clone());
         }
 
         // --no-auto-prompt disables language-aware prompt auto-selection.
         if args.no_auto_prompt {
-            self.auto_prompt = false;
+            self.llm.auto_prompt = false;
         }
 
         // Multi-pass CLI overrides.
@@ -1742,20 +1851,20 @@ impl Config {
         // overrides_with). The last one wins. When neither is set, the
         // TOML/env value is preserved.
         if args.no_multi_pass {
-            self.multi_pass = false;
+            self.llm.multi_pass = false;
         } else if args.multi_pass {
-            self.multi_pass = true;
+            self.llm.multi_pass = true;
         }
         // clap value_parser constraints ensure these are > 0 (or >= 0 for cost),
         // so we can apply them directly. Clamp to safety limits.
         if let Some(max_chunks) = args.multi_pass_max_chunks {
-            self.multi_pass_max_chunks = clamp_max_chunks(max_chunks);
+            self.llm.multi_pass_max_chunks = clamp_max_chunks(max_chunks);
         }
         if let Some(max_concurrent) = args.multi_pass_max_concurrent {
-            self.multi_pass_max_concurrent = clamp_max_concurrent(max_concurrent);
+            self.llm.multi_pass_max_concurrent = clamp_max_concurrent(max_concurrent);
         }
         if let Some(max_cost) = args.multi_pass_max_cost_cents {
-            self.multi_pass_max_cost_cents = Some(max_cost);
+            self.llm.multi_pass_max_cost_cents = Some(max_cost);
         }
 
         Ok(())
@@ -1772,7 +1881,7 @@ impl Config {
         if path.exists() {
             let content = std::fs::read_to_string(path)
                 .map_err(|e| RsGuardError::Config(format!("Failed to read prompt file: {}", e)))?;
-            self.prompt = content;
+            self.llm.prompt = content;
             self.prompt_file_loaded = true;
         }
         Ok(())
@@ -1811,7 +1920,7 @@ impl Config {
         // suppress review of their own changes. Only honor an explicit
         // --ignore-file / RS_GUARD_IGNORE_FILE path, which is expected to
         // point to a trusted location outside the PR diff.
-        let path = match &self.ignore_file {
+        let path = match &self.diff.ignore_file {
             Some(p) => p.clone(),
             None if !self.is_ci => repo_root.join(".rs-guardignore"),
             None => return Ok(()),
@@ -1824,10 +1933,10 @@ impl Config {
                     e
                 ))
             })?;
-            self.ignore_patterns = crate::diff::parse_rs_guard_ignore(&content);
+            self.diff.ignore_patterns = crate::diff::parse_rs_guard_ignore(&content);
             log::info!(
                 "Loaded {} ignore pattern(s) from {}",
-                self.ignore_patterns.len(),
+                self.diff.ignore_patterns.len(),
                 path.display()
             );
         }
@@ -1854,8 +1963,8 @@ impl Config {
                 ""
             }
         );
-        self.project_rules = Some(detected.content().to_string());
-        self.project_rules_file = Some(detected.path().to_string_lossy().into_owned());
+        self.rules.project_rules = Some(detected.content().to_string());
+        self.rules.project_rules_file = Some(detected.path().to_string_lossy().into_owned());
         Ok(())
     }
 
@@ -1901,8 +2010,8 @@ impl Config {
         }
 
         if !enabled {
-            self.project_rules = None;
-            self.project_rules_file = None;
+            self.rules.project_rules = None;
+            self.rules.project_rules_file = None;
             return Ok(());
         }
 
@@ -1918,12 +2027,13 @@ impl Config {
                         ""
                     }
                 );
-                self.project_rules = Some(detected.content().to_string());
-                self.project_rules_file = Some(detected.path().to_string_lossy().into_owned());
+                self.rules.project_rules = Some(detected.content().to_string());
+                self.rules.project_rules_file =
+                    Some(detected.path().to_string_lossy().into_owned());
             }
             None => {
-                self.project_rules = None;
-                self.project_rules_file = None;
+                self.rules.project_rules = None;
+                self.rules.project_rules_file = None;
             }
         }
 
@@ -1979,7 +2089,7 @@ impl Config {
     ///
     /// Returns [`RsGuardError::Config`] if validation fails.
     pub fn validate_for_ci(&self) -> Result<CiConfig, RsGuardError> {
-        validate_github_base_url(&self.github_base_url)?;
+        validate_github_base_url(&self.github.github_base_url)?;
 
         if !self.is_ci {
             return Err(RsGuardError::Config(
@@ -1987,21 +2097,22 @@ impl Config {
             ));
         }
 
-        let github_token = self.github_token.clone().ok_or_else(|| {
+        let github_token = self.github.github_token.clone().ok_or_else(|| {
             RsGuardError::Config("GITHUB_TOKEN is required in CI mode".to_string())
         })?;
 
         let pr_number = self
+            .github
             .pr_number
             .ok_or_else(|| RsGuardError::Config("PR_NUMBER is required in CI mode".to_string()))?;
 
-        let repo_owner = self.repo_owner.clone().ok_or_else(|| {
+        let repo_owner = self.github.repo_owner.clone().ok_or_else(|| {
             RsGuardError::Config(
                 "REPO_FULL_NAME is required in CI mode (format: owner/repo)".to_string(),
             )
         })?;
 
-        let repo_name = self.repo_name.clone().ok_or_else(|| {
+        let repo_name = self.github.repo_name.clone().ok_or_else(|| {
             RsGuardError::Config(
                 "REPO_FULL_NAME is required in CI mode (format: owner/repo)".to_string(),
             )
@@ -2012,7 +2123,7 @@ impl Config {
             pr_number,
             repo_owner,
             repo_name,
-            github_base_url: self.github_base_url.clone(),
+            github_base_url: self.github.github_base_url.clone(),
         })
     }
 }
@@ -2184,7 +2295,7 @@ mod tests {
         let config = Config::from_env(Some(toml)).unwrap();
         std::env::remove_var("DASHSCOPE_API_KEY");
 
-        assert_eq!(config.provider_config.result_format, None);
+        assert_eq!(config.llm.provider_config.result_format, None);
     }
 
     #[test]
@@ -2215,7 +2326,7 @@ mod tests {
         std::env::remove_var("DASHSCOPE_API_KEY");
 
         assert_eq!(
-            config.provider_config.result_format,
+            config.llm.provider_config.result_format,
             Some("json_object".to_string())
         );
     }
@@ -2260,7 +2371,7 @@ mod tests {
     fn test_validate_for_ci_local_mode_valid() {
         let mut config = Config::empty();
         config.is_ci = false;
-        config.github_base_url = "https://api.github.com".to_string();
+        config.github.github_base_url = "https://api.github.com".to_string();
         // In local mode, validate_for_ci() should return an error
         // because CI-specific fields are not available
         assert!(config.validate_for_ci().is_err());
@@ -2270,11 +2381,11 @@ mod tests {
     fn test_validate_for_ci_missing_github_token() {
         let mut config = Config::empty();
         config.is_ci = true;
-        config.github_base_url = "https://api.github.com".to_string();
-        config.github_token = None;
-        config.pr_number = Some(1);
-        config.repo_owner = Some("owner".to_string());
-        config.repo_name = Some("repo".to_string());
+        config.github.github_base_url = "https://api.github.com".to_string();
+        config.github.github_token = None;
+        config.github.pr_number = Some(1);
+        config.github.repo_owner = Some("owner".to_string());
+        config.github.repo_name = Some("repo".to_string());
         let result = config.validate_for_ci();
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("GITHUB_TOKEN"));
@@ -2284,11 +2395,11 @@ mod tests {
     fn test_validate_for_ci_missing_pr_number() {
         let mut config = Config::empty();
         config.is_ci = true;
-        config.github_base_url = "https://api.github.com".to_string();
-        config.github_token = Some("token".to_string());
-        config.pr_number = None;
-        config.repo_owner = Some("owner".to_string());
-        config.repo_name = Some("repo".to_string());
+        config.github.github_base_url = "https://api.github.com".to_string();
+        config.github.github_token = Some("token".to_string());
+        config.github.pr_number = None;
+        config.github.repo_owner = Some("owner".to_string());
+        config.github.repo_name = Some("repo".to_string());
         let result = config.validate_for_ci();
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("PR_NUMBER"));
@@ -2298,11 +2409,11 @@ mod tests {
     fn test_validate_for_ci_missing_repo_owner() {
         let mut config = Config::empty();
         config.is_ci = true;
-        config.github_base_url = "https://api.github.com".to_string();
-        config.github_token = Some("token".to_string());
-        config.pr_number = Some(1);
-        config.repo_owner = None;
-        config.repo_name = Some("repo".to_string());
+        config.github.github_base_url = "https://api.github.com".to_string();
+        config.github.github_token = Some("token".to_string());
+        config.github.pr_number = Some(1);
+        config.github.repo_owner = None;
+        config.github.repo_name = Some("repo".to_string());
         let result = config.validate_for_ci();
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("REPO_FULL_NAME"));
@@ -2312,11 +2423,11 @@ mod tests {
     fn test_validate_for_ci_missing_repo_name() {
         let mut config = Config::empty();
         config.is_ci = true;
-        config.github_base_url = "https://api.github.com".to_string();
-        config.github_token = Some("token".to_string());
-        config.pr_number = Some(1);
-        config.repo_owner = Some("owner".to_string());
-        config.repo_name = None;
+        config.github.github_base_url = "https://api.github.com".to_string();
+        config.github.github_token = Some("token".to_string());
+        config.github.pr_number = Some(1);
+        config.github.repo_owner = Some("owner".to_string());
+        config.github.repo_name = None;
         let result = config.validate_for_ci();
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("REPO_FULL_NAME"));
@@ -2326,11 +2437,11 @@ mod tests {
     fn test_validate_for_ci_all_fields_present() {
         let mut config = Config::empty();
         config.is_ci = true;
-        config.github_base_url = "https://api.github.com".to_string();
-        config.github_token = Some("token".to_string());
-        config.pr_number = Some(42);
-        config.repo_owner = Some("owner".to_string());
-        config.repo_name = Some("repo".to_string());
+        config.github.github_base_url = "https://api.github.com".to_string();
+        config.github.github_token = Some("token".to_string());
+        config.github.pr_number = Some(42);
+        config.github.repo_owner = Some("owner".to_string());
+        config.github.repo_name = Some("repo".to_string());
         assert!(config.validate_for_ci().is_ok());
     }
 
@@ -2338,11 +2449,11 @@ mod tests {
     fn test_validate_for_ci_invalid_base_url() {
         let mut config = Config::empty();
         config.is_ci = true;
-        config.github_base_url = "http://evil.com".to_string();
-        config.github_token = Some("token".to_string());
-        config.pr_number = Some(1);
-        config.repo_owner = Some("owner".to_string());
-        config.repo_name = Some("repo".to_string());
+        config.github.github_base_url = "http://evil.com".to_string();
+        config.github.github_token = Some("token".to_string());
+        config.github.pr_number = Some(1);
+        config.github.repo_owner = Some("owner".to_string());
+        config.github.repo_name = Some("repo".to_string());
         let result = config.validate_for_ci();
         assert!(result.is_err());
     }
@@ -2351,11 +2462,11 @@ mod tests {
     fn test_validate_for_ci_returns_ci_config() {
         let mut config = Config::empty();
         config.is_ci = true;
-        config.github_token = Some("test-token".to_string());
-        config.pr_number = Some(42);
-        config.repo_owner = Some("owner".to_string());
-        config.repo_name = Some("repo".to_string());
-        config.github_base_url = "https://api.github.com".to_string();
+        config.github.github_token = Some("test-token".to_string());
+        config.github.pr_number = Some(42);
+        config.github.repo_owner = Some("owner".to_string());
+        config.github.repo_name = Some("repo".to_string());
+        config.github.github_base_url = "https://api.github.com".to_string();
 
         let ci_config = config.validate_for_ci().expect("should validate");
         assert_eq!(ci_config.github_token, "test-token");
@@ -2369,7 +2480,7 @@ mod tests {
     fn test_validate_for_ci_not_in_ci_mode_returns_error() {
         let mut config = Config::empty();
         config.is_ci = false;
-        config.github_base_url = "https://api.github.com".to_string();
+        config.github.github_base_url = "https://api.github.com".to_string();
 
         let result = config.validate_for_ci();
         assert!(result.is_err());
@@ -2384,16 +2495,16 @@ mod tests {
 
         let mut config = Config::empty();
         config.load_prompt_file(&prompt_path).unwrap();
-        assert_eq!(config.prompt, "Custom review prompt");
+        assert_eq!(config.llm.prompt, "Custom review prompt");
     }
 
     #[test]
     fn test_load_prompt_file_missing_file_keeps_default() {
         let mut config = Config::empty();
-        config.prompt = "default prompt".to_string();
+        config.llm.prompt = "default prompt".to_string();
         let result = config.load_prompt_file(std::path::Path::new("/nonexistent/prompt.md"));
         assert!(result.is_ok());
-        assert_eq!(config.prompt, "default prompt");
+        assert_eq!(config.llm.prompt, "default prompt");
     }
 
     #[test]
@@ -2457,22 +2568,60 @@ mod tests {
     }
 
     #[test]
+    fn test_config_empty_composes_focused_sub_structs() {
+        let config = Config::empty();
+        assert_eq!(config.llm.provider, "");
+        assert!((config.llm.temperature - 0.1).abs() < f32::EPSILON);
+        assert!(config.github.github_token.is_none());
+        assert!(!config.cache.no_cache);
+        assert!(!config.output.dry_run);
+        assert!(config.retry.circuit_breaker.is_none());
+        assert!(config.rules.project_rules.is_none());
+        assert_eq!(
+            config.diff.max_diff_bytes,
+            crate::diff::DEFAULT_MAX_DIFF_BYTES
+        );
+        assert!(!config.is_ci);
+        assert!(!config.prompt_file_loaded);
+
+        let mut config = Config::empty();
+        config.llm.provider = "kimi".into();
+        config.diff.max_diff_lines = 42;
+        let cloned = config.clone();
+        assert_eq!(cloned.llm.provider, "kimi");
+        assert_eq!(cloned.diff.max_diff_lines, 42);
+    }
+
+    #[test]
+    fn test_config_from_env_fills_sub_structs() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        std::env::set_var("DEEPSEEK_API_KEY", "test-key");
+        let config = Config::from_env(None).unwrap();
+        assert_eq!(config.llm.provider, "deepseek");
+        assert_eq!(config.llm.api_key, "test-key");
+        assert!(config.cache.auto_gitignore);
+        assert_eq!(config.output.important_threshold, 3);
+        assert!(config.diff.include_paths.is_empty());
+        std::env::remove_var("DEEPSEEK_API_KEY");
+    }
+
+    #[test]
     fn test_config_empty_has_dry_run_false() {
         let config = Config::empty();
-        assert!(!config.dry_run);
+        assert!(!config.output.dry_run);
     }
 
     #[test]
     fn test_config_empty_has_ignore_patterns_empty() {
         let config = Config::empty();
-        assert!(config.ignore_patterns.is_empty());
-        assert!(config.ignore_file.is_none());
+        assert!(config.diff.ignore_patterns.is_empty());
+        assert!(config.diff.ignore_file.is_none());
     }
 
     #[test]
     fn test_config_empty_has_auto_prompt_true() {
         let config = Config::empty();
-        assert!(config.auto_prompt);
+        assert!(config.llm.auto_prompt);
     }
 
     #[test]
@@ -2482,22 +2631,26 @@ mod tests {
         std::fs::write(&ignore_path, "# comment\n*.lock\nnode_modules/\n!keep.me\n").unwrap();
 
         let mut config = Config::empty();
-        config.ignore_file = Some(ignore_path);
+        config.diff.ignore_file = Some(ignore_path);
         config.load_ignore_file(Path::new(".")).unwrap();
-        assert_eq!(config.ignore_patterns.len(), 3);
-        assert!(config.ignore_patterns.contains(&"*.lock".to_string()));
+        assert_eq!(config.diff.ignore_patterns.len(), 3);
+        assert!(config.diff.ignore_patterns.contains(&"*.lock".to_string()));
         assert!(config
+            .diff
             .ignore_patterns
             .contains(&"node_modules/".to_string()));
-        assert!(config.ignore_patterns.contains(&"!keep.me".to_string()));
+        assert!(config
+            .diff
+            .ignore_patterns
+            .contains(&"!keep.me".to_string()));
     }
 
     #[test]
     fn test_load_ignore_file_missing_is_noop() {
         let mut config = Config::empty();
-        config.ignore_file = Some(std::path::PathBuf::from("/nonexistent/.rs-guardignore"));
+        config.diff.ignore_file = Some(std::path::PathBuf::from("/nonexistent/.rs-guardignore"));
         config.load_ignore_file(Path::new(".")).unwrap();
-        assert!(config.ignore_patterns.is_empty());
+        assert!(config.diff.ignore_patterns.is_empty());
     }
 
     #[test]
@@ -2512,9 +2665,9 @@ mod tests {
         config.is_ci = false;
         // With ignore_file=None and is_ci=false, load_ignore_file falls back
         // to repo_root.join(".rs-guardignore").
-        config.ignore_file = None;
+        config.diff.ignore_file = None;
         config.load_ignore_file(dir.path()).unwrap();
-        assert_eq!(config.ignore_patterns, vec!["target/".to_string()]);
+        assert_eq!(config.diff.ignore_patterns, vec!["target/".to_string()]);
     }
 
     #[test]
@@ -2529,10 +2682,10 @@ mod tests {
         // should be a no-op regardless of what files exist in repo_root.
         let mut config = Config::empty();
         config.is_ci = true;
-        config.ignore_file = None;
+        config.diff.ignore_file = None;
         config.load_ignore_file(dir.path()).unwrap();
         assert!(
-            config.ignore_patterns.is_empty(),
+            config.diff.ignore_patterns.is_empty(),
             "CI mode must not auto-load .rs-guardignore from the working tree"
         );
     }
@@ -2546,26 +2699,26 @@ mod tests {
 
         let mut config = Config::empty();
         config.is_ci = true;
-        config.ignore_file = Some(ignore_path);
+        config.diff.ignore_file = Some(ignore_path);
         config.load_ignore_file(Path::new(".")).unwrap();
-        assert_eq!(config.ignore_patterns, vec!["*.lock".to_string()]);
+        assert_eq!(config.diff.ignore_patterns, vec!["*.lock".to_string()]);
     }
 
     #[test]
     fn test_config_empty_has_cache_dir_none() {
         let config = Config::empty();
-        assert!(config.cache_dir.is_none());
+        assert!(config.cache.cache_dir.is_none());
     }
 
     #[test]
     fn test_apply_args_sets_dry_run() {
         use clap::Parser;
         let mut config = Config::empty();
-        assert!(!config.dry_run);
+        assert!(!config.output.dry_run);
 
         let cli = crate::cli::Cli::parse_from(["rs-guard", "--dry-run"]);
         config.apply_args(&cli.review).unwrap();
-        assert!(config.dry_run);
+        assert!(config.output.dry_run);
     }
 
     #[test]
@@ -2673,8 +2826,8 @@ mod tests {
         std::env::remove_var("REPO_FULL_NAME");
         assert!(result.is_ok());
         let config = result.unwrap();
-        assert_eq!(config.repo_owner, Some("owner".to_string()));
-        assert_eq!(config.repo_name, Some("repo".to_string()));
+        assert_eq!(config.github.repo_owner, Some("owner".to_string()));
+        assert_eq!(config.github.repo_name, Some("repo".to_string()));
     }
 
     #[test]
@@ -2715,7 +2868,7 @@ mod tests {
         let result = Config::from_env(None).unwrap();
         std::env::remove_var("DEEPSEEK_API_KEY");
         assert_eq!(
-            result.provider_config.max_tokens,
+            result.llm.provider_config.max_tokens,
             Some(THINKING_MIN_MAX_TOKENS)
         );
     }
@@ -2728,7 +2881,7 @@ mod tests {
         let result = Config::from_env(None).unwrap();
         std::env::remove_var("DEEPSEEK_API_KEY");
         std::env::remove_var("RS_GUARD_MAX_TOKENS");
-        assert_eq!(result.provider_config.max_tokens, Some(1024));
+        assert_eq!(result.llm.provider_config.max_tokens, Some(1024));
     }
 
     #[test]
@@ -2803,20 +2956,20 @@ mod tests {
         };
 
         let mut config = Config::from_env(Some(toml)).unwrap();
-        assert_eq!(config.provider, "deepseek");
-        assert!(config.variant.is_none());
+        assert_eq!(config.llm.provider, "deepseek");
+        assert!(config.llm.variant.is_none());
         assert_eq!(
-            config.provider_config.result_format,
+            config.llm.provider_config.result_format,
             Some("json_object".to_string())
         );
 
         let cli = crate::cli::Cli::parse_from(["rs-guard", "--provider", "kimi"]);
         config.apply_args(&cli.review).unwrap();
 
-        assert_eq!(config.provider, "kimi");
-        assert_eq!(config.api_key, "kimi-key");
-        assert_eq!(config.variant, Some("thinking-on".to_string()));
-        assert_eq!(config.provider_config.result_format, None);
+        assert_eq!(config.llm.provider, "kimi");
+        assert_eq!(config.llm.api_key, "kimi-key");
+        assert_eq!(config.llm.variant, Some("thinking-on".to_string()));
+        assert_eq!(config.llm.provider_config.result_format, None);
 
         std::env::remove_var("DEEPSEEK_API_KEY");
         std::env::remove_var("KIMI_API_KEY");
@@ -2845,8 +2998,8 @@ mod tests {
 
         let config = Config::from_env(Some(toml)).unwrap();
         std::env::remove_var("DEEPSEEK_API_KEY");
-        assert!(config.pricing.is_some());
-        let pricing = config.pricing.as_ref().unwrap();
+        assert!(config.llm.pricing.is_some());
+        let pricing = config.llm.pricing.as_ref().unwrap();
         assert_eq!(pricing.get("deepseek").unwrap().input_per_million, 10);
     }
 
@@ -2899,11 +3052,11 @@ mod tests {
             ..Default::default()
         };
         let mut config = Config::from_env(Some(toml)).unwrap();
-        assert_eq!(config.output_format, OutputFormat::Text);
+        assert_eq!(config.output.output_format, OutputFormat::Text);
         use clap::Parser;
         let cli = crate::cli::Cli::parse_from(["rs-guard", "--format", "json"]);
         config.apply_args(&cli.review).unwrap();
-        assert_eq!(config.output_format, OutputFormat::Json);
+        assert_eq!(config.output.output_format, OutputFormat::Json);
         std::env::remove_var("DEEPSEEK_API_KEY");
     }
 
@@ -2924,11 +3077,11 @@ mod tests {
         let _guard = ENV_MUTEX.lock().unwrap();
         std::env::set_var("DEEPSEEK_API_KEY", "test-key");
         let mut config = Config::from_env(None).unwrap();
-        config.diff_base = Some("main".into());
+        config.diff.diff_base = Some("main".into());
         use clap::Parser;
         let cli = crate::cli::Cli::parse_from(["rs-guard", "--base", ""]);
         config.apply_args(&cli.review).unwrap();
-        assert_eq!(config.diff_base, None);
+        assert_eq!(config.diff.diff_base, None);
         std::env::remove_var("DEEPSEEK_API_KEY");
     }
 
@@ -2937,12 +3090,18 @@ mod tests {
     #[test]
     fn test_config_empty_check_run_defaults() {
         let config = Config::empty();
-        assert!(!config.check_run, "check_run should default to false");
+        assert!(
+            !config.github.check_run,
+            "check_run should default to false"
+        );
         assert_eq!(
-            config.check_run_name, "rs-guard",
+            config.github.check_run_name, "rs-guard",
             "check_run_name should default to 'rs-guard'"
         );
-        assert!(config.check_run_sha.is_none(), "check_run_sha default None");
+        assert!(
+            config.github.check_run_sha.is_none(),
+            "check_run_sha default None"
+        );
     }
 
     #[test]
@@ -2953,8 +3112,8 @@ mod tests {
         std::env::remove_var("RS_GUARD_CHECK_RUN_NAME");
         std::env::remove_var("RS_GUARD_CHECK_RUN_SHA");
         let config = Config::from_env(None).unwrap();
-        assert!(!config.check_run);
-        assert_eq!(config.check_run_name, "rs-guard");
+        assert!(!config.github.check_run);
+        assert_eq!(config.github.check_run_name, "rs-guard");
         std::env::remove_var("DEEPSEEK_API_KEY");
     }
 
@@ -2970,8 +3129,11 @@ mod tests {
             ..Default::default()
         };
         let config = Config::from_env(Some(toml)).unwrap();
-        assert!(config.check_run, "TOML check_run=true should be respected");
-        assert_eq!(config.check_run_name, "my-bot");
+        assert!(
+            config.github.check_run,
+            "TOML check_run=true should be respected"
+        );
+        assert_eq!(config.github.check_run_name, "my-bot");
         std::env::remove_var("DEEPSEEK_API_KEY");
     }
 
@@ -2981,11 +3143,14 @@ mod tests {
         std::env::set_var("DEEPSEEK_API_KEY", "test-key");
         std::env::remove_var("RS_GUARD_CHECK_RUN");
         let mut config = Config::from_env(None).unwrap();
-        assert!(!config.check_run);
+        assert!(!config.github.check_run);
         use clap::Parser;
         let cli = crate::cli::Cli::parse_from(["rs-guard", "--check-run"]);
         config.apply_args(&cli.review).unwrap();
-        assert!(config.check_run, "--check-run should enable check_run");
+        assert!(
+            config.github.check_run,
+            "--check-run should enable check_run"
+        );
         std::env::remove_var("DEEPSEEK_API_KEY");
     }
 
@@ -2994,11 +3159,11 @@ mod tests {
         let _guard = ENV_MUTEX.lock().unwrap();
         std::env::set_var("DEEPSEEK_API_KEY", "test-key");
         let mut config = Config::from_env(None).unwrap();
-        assert_eq!(config.check_run_name, "rs-guard");
+        assert_eq!(config.github.check_run_name, "rs-guard");
         use clap::Parser;
         let cli = crate::cli::Cli::parse_from(["rs-guard", "--check-run-name", "custom-name"]);
         config.apply_args(&cli.review).unwrap();
-        assert_eq!(config.check_run_name, "custom-name");
+        assert_eq!(config.github.check_run_name, "custom-name");
         std::env::remove_var("DEEPSEEK_API_KEY");
     }
 
@@ -3012,12 +3177,12 @@ mod tests {
             ..Default::default()
         };
         let mut config = Config::from_env(Some(toml)).unwrap();
-        assert_eq!(config.check_run_name, "toml-name");
+        assert_eq!(config.github.check_run_name, "toml-name");
         use clap::Parser;
         let cli = crate::cli::Cli::parse_from(["rs-guard"]);
         config.apply_args(&cli.review).unwrap();
         assert_eq!(
-            config.check_run_name, "toml-name",
+            config.github.check_run_name, "toml-name",
             "TOML name should be preserved when CLI flag is not set"
         );
         std::env::remove_var("DEEPSEEK_API_KEY");
@@ -3029,11 +3194,11 @@ mod tests {
         std::env::set_var("DEEPSEEK_API_KEY", "test-key");
         std::env::remove_var("RS_GUARD_CHECK_RUN_SHA");
         let mut config = Config::from_env(None).unwrap();
-        assert!(config.check_run_sha.is_none());
+        assert!(config.github.check_run_sha.is_none());
         use clap::Parser;
         let cli = crate::cli::Cli::parse_from(["rs-guard", "--check-run-sha", "deadbeef"]);
         config.apply_args(&cli.review).unwrap();
-        assert_eq!(config.check_run_sha.as_deref(), Some("deadbeef"));
+        assert_eq!(config.github.check_run_sha.as_deref(), Some("deadbeef"));
         std::env::remove_var("DEEPSEEK_API_KEY");
     }
 
@@ -3048,14 +3213,14 @@ mod tests {
         };
         let mut config = Config::from_env(Some(toml)).unwrap();
         assert!(
-            config.check_run,
+            config.github.check_run,
             "TOML true should hold before apply_args (env handled in apply_args)"
         );
         use clap::Parser;
         let cli = crate::cli::Cli::parse_from(["rs-guard"]);
         config.apply_args(&cli.review).unwrap();
         assert!(
-            !config.check_run,
+            !config.github.check_run,
             "RS_GUARD_CHECK_RUN=false must override TOML check_run=true"
         );
         std::env::remove_var("RS_GUARD_CHECK_RUN");
@@ -3068,11 +3233,14 @@ mod tests {
         std::env::set_var("DEEPSEEK_API_KEY", "test-key");
         std::env::set_var("RS_GUARD_CHECK_RUN", "true");
         let mut config = Config::from_env(None).unwrap();
-        assert!(!config.check_run);
+        assert!(!config.github.check_run);
         use clap::Parser;
         let cli = crate::cli::Cli::parse_from(["rs-guard"]);
         config.apply_args(&cli.review).unwrap();
-        assert!(config.check_run, "RS_GUARD_CHECK_RUN=true should enable");
+        assert!(
+            config.github.check_run,
+            "RS_GUARD_CHECK_RUN=true should enable"
+        );
         std::env::remove_var("RS_GUARD_CHECK_RUN");
         std::env::remove_var("DEEPSEEK_API_KEY");
     }

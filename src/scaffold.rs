@@ -246,23 +246,26 @@ pub fn run_validate_config(args: &ValidateConfigArgs) -> Result<(), Box<dyn std:
     );
 
     println!("✅ Configuration is valid.");
-    println!("  Provider: {}", config.provider);
-    println!("  Model:    {}", config.model);
-    if let Some(variant) = &config.variant {
+    println!("  Provider: {}", config.llm.provider);
+    println!("  Model:    {}", config.llm.model);
+    if let Some(variant) = &config.llm.variant {
         println!("  Variant:  {}", variant);
     }
-    println!("  API key env: {}", api_key_env_for(&config.provider));
+    println!("  API key env: {}", api_key_env_for(&config.llm.provider));
     println!(
         "  API key set: {}",
-        if std::env::var(api_key_env_for(&config.provider)).is_ok() {
+        if std::env::var(api_key_env_for(&config.llm.provider)).is_ok() {
             "yes"
         } else {
             "no"
         }
     );
-    println!("  Important threshold: {}", config.important_threshold);
+    println!(
+        "  Important threshold: {}",
+        config.output.important_threshold
+    );
 
-    let detected_rules = if let Some(path) = &config.rules_file {
+    let detected_rules = if let Some(path) = &config.rules.rules_file {
         match load_rules_file(path) {
             Ok(rules) => Some(rules),
             Err(e) => {
@@ -284,7 +287,7 @@ pub fn run_validate_config(args: &ValidateConfigArgs) -> Result<(), Box<dyn std:
 
     for line in format_project_rules_validate_lines(
         rules_enabled,
-        config.rules_file.as_deref(),
+        config.rules.rules_file.as_deref(),
         detected_rules.as_ref(),
     ) {
         println!("{line}");

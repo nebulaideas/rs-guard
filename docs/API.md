@@ -62,30 +62,23 @@ pub struct DiffResult {
 
 Resolved application configuration. Available via `config::Config::empty()` in tests only.
 
+`Config` is a composition of focused sub-structs plus CI mode and construction-time bookkeeping (`prompt_file_loaded`, `toml_providers`, `model_set_via_cli`, `top_level_variant`). Pipeline helpers that only need one concern take that sub-struct (`&DiffConfig`, `&LlmConfig`, `&CacheConfig`, `&RetryConfig`, `&RulesConfig`) rather than `&Config`.
+
 ```rust
 pub struct Config {
-    pub provider: String,
-    pub model: String,
-    pub temperature: f32,
-    pub api_key: String,
-    pub github_token: Option<String>,
-    pub pr_number: Option<u64>,
-    pub repo_owner: Option<String>,
-    pub repo_name: Option<String>,
-    pub prompt: String,
+    pub diff: DiffConfig,       // size limits, path filters, chunking, ignore
+    pub llm: LlmConfig,         // provider, model, variant, prompt, pricing, multi-pass
+    pub github: GithubConfig,   // token, repo, PR, check run, inline comments
+    pub cache: CacheConfig,     // no_cache, cache_dir, auto_gitignore (resolved settings)
+    pub output: OutputConfig,   // format, important_threshold, findings, dry_run
+    pub retry: RetryConfig,     // circuit_breaker
+    pub rules: RulesConfig,     // project_rules, project_rules_file, rules_file
     pub is_ci: bool,
-    pub github_base_url: String,
-    pub provider_config: ProviderConfig,
-    pub no_cache: bool,
-    pub dry_run: bool,
-    pub cache_dir: Option<String>,
-    pub circuit_breaker: Option<CircuitBreaker>,
-    pub pricing: Option<HashMap<String, PricingTomlConfig>>,
-    pub auto_gitignore: bool,
-    pub chunk_head_lines: usize,
-    pub chunk_tail_lines: usize,
+    pub prompt_file_loaded: bool,
 }
 ```
+
+`config::CacheConfig` is the resolved CLI/env/TOML cache settings. It is distinct from `cache::CacheConfig`, the runtime cache engine (TTL, size limit, resolved directory). The pipeline converts the former into the latter when building `DiffCache`.
 
 ### `verdict::Verdict` and `verdict::ReviewState`
 
@@ -178,7 +171,9 @@ pub struct ProviderConfig {
 
 | Item                                               | Description                                   |
 | -------------------------------------------------- | --------------------------------------------- |
-| `Config`                                           | Resolved application configuration            |
+| `Config`                                           | Resolved application configuration (composition of focused sub-structs) |
+| `DiffConfig` / `LlmConfig` / `GithubConfig`        | Diff, LLM, and GitHub slices of `Config`      |
+| `CacheConfig` / `OutputConfig` / `RetryConfig` / `RulesConfig` | Cache, output, retry, and project-rules slices |
 | `Config::from_env(toml: Option<TomlConfig>)`       | Resolves env vars with optional TOML defaults |
 | `Config::apply_args(&mut self, args: &ReviewArgs)` | Applies CLI overrides                         |
 | `Config::load_prompt_file(&mut self, path: &Path)` | Loads prompt from file                        |
