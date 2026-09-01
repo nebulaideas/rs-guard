@@ -95,7 +95,7 @@ async fn main() {
     let project_rules_enabled =
         Config::resolve_project_rules_enabled(args.no_project_rules, toml_project_rules_enabled);
 
-    let mut rules_file = config.rules_file.clone();
+    let mut rules_file = config.rules.rules_file.clone();
 
     // In local mode with multiple detected rules files, prompt the user to pick
     // one. CI mode, explicit --rules-file, and a loaded custom prompt file skip
@@ -144,14 +144,15 @@ async fn main() {
 
     // Print notice when project rules are loaded (silent opt-out with --no-project-rules)
     if !args.no_project_rules {
-        if let (Some(ref rules), Some(ref path)) =
-            (&config.project_rules, &config.project_rules_file)
-        {
+        if let (Some(ref rules), Some(ref path)) = (
+            &config.rules.project_rules,
+            &config.rules.project_rules_file,
+        ) {
             if let Err(e) = output::print_project_rules_notice(
                 &mut std::io::stderr(),
                 path,
                 rules.len(),
-                config.rules_file.is_some(),
+                config.rules.rules_file.is_some(),
             ) {
                 log::warn!("Failed to print project rules notice: {}", e);
             }
@@ -169,8 +170,8 @@ async fn main() {
 
     log::info!(
         "rs-guard starting (provider: {}, model: {})",
-        config.provider,
-        config.model
+        config.llm.provider,
+        config.llm.model
     );
 
     let result = run_pipeline(config, diff_file).await;

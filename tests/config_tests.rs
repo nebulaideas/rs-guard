@@ -141,9 +141,9 @@ temperature = 0.5
         || {
             let toml = load_toml_config(file.path()).unwrap();
             let config = Config::from_env(toml).unwrap();
-            assert_eq!(config.provider, "openai");
-            assert_eq!(config.model, "gpt-4o");
-            assert!((config.temperature - 0.7).abs() < f32::EPSILON);
+            assert_eq!(config.llm.provider, "openai");
+            assert_eq!(config.llm.model, "gpt-4o");
+            assert!((config.llm.temperature - 0.7).abs() < f32::EPSILON);
         },
     );
 }
@@ -162,9 +162,9 @@ temperature = 0.5
         let toml = load_toml_config(file.path()).unwrap();
         let config = Config::from_env(toml).unwrap();
 
-        assert_eq!(config.provider, "kimi");
-        assert_eq!(config.model, "kimi-k2.5");
-        assert!((config.temperature - 0.5).abs() < f32::EPSILON);
+        assert_eq!(config.llm.provider, "kimi");
+        assert_eq!(config.llm.model, "kimi-k2.5");
+        assert!((config.llm.temperature - 0.5).abs() < f32::EPSILON);
     });
 }
 
@@ -187,13 +187,13 @@ fn test_provider_switch_via_apply_args() {
             });
 
             let mut config = Config::from_env(toml).unwrap();
-            assert_eq!(config.provider, "deepseek");
+            assert_eq!(config.llm.provider, "deepseek");
 
             let cli = rs_guard::cli::Cli::parse_from(["rs-guard", "--provider", "kimi"]);
             config.apply_args(&cli.review).unwrap();
 
-            assert_eq!(config.provider, "kimi");
-            assert_eq!(config.api_key, "test-kimi-key");
+            assert_eq!(config.llm.provider, "kimi");
+            assert_eq!(config.llm.api_key, "test-kimi-key");
         },
     );
 }
@@ -212,12 +212,12 @@ fn test_cli_model_override() {
         });
 
         let mut config = Config::from_env(toml).unwrap();
-        assert_eq!(config.model, "deepseek-v4-flash");
+        assert_eq!(config.llm.model, "deepseek-v4-flash");
 
         let cli = rs_guard::cli::Cli::parse_from(["rs-guard", "--model", "custom-model"]);
         config.apply_args(&cli.review).unwrap();
 
-        assert_eq!(config.model, "custom-model");
+        assert_eq!(config.llm.model, "custom-model");
     });
 }
 
@@ -236,14 +236,17 @@ fn test_cli_variant_override() {
         });
 
         let mut config = Config::from_env(toml).unwrap();
-        assert_eq!(config.variant, Some("flash".to_string()));
-        assert_eq!(config.provider_config.variant, Some("flash".to_string()));
+        assert_eq!(config.llm.variant, Some("flash".to_string()));
+        assert_eq!(
+            config.llm.provider_config.variant,
+            Some("flash".to_string())
+        );
 
         let cli = rs_guard::cli::Cli::parse_from(["rs-guard", "--variant", "pro"]);
         config.apply_args(&cli.review).unwrap();
 
-        assert_eq!(config.variant, Some("pro".to_string()));
-        assert_eq!(config.provider_config.variant, Some("pro".to_string()));
+        assert_eq!(config.llm.variant, Some("pro".to_string()));
+        assert_eq!(config.llm.provider_config.variant, Some("pro".to_string()));
     });
 }
 
@@ -257,9 +260,9 @@ fn test_env_variant_override() {
         ],
         || {
             let config = Config::from_env(None).unwrap();
-            assert_eq!(config.variant, Some("thinking-on".to_string()));
+            assert_eq!(config.llm.variant, Some("thinking-on".to_string()));
             assert_eq!(
-                config.provider_config.variant,
+                config.llm.provider_config.variant,
                 Some("thinking-on".to_string())
             );
         },
@@ -282,9 +285,9 @@ variant = "custom-variant"
         let toml = load_toml_config(file.path()).unwrap();
         let config = Config::from_env(toml).unwrap();
 
-        assert_eq!(config.variant, Some("custom-variant".to_string()));
+        assert_eq!(config.llm.variant, Some("custom-variant".to_string()));
         assert_eq!(
-            config.provider_config.variant,
+            config.llm.provider_config.variant,
             Some("custom-variant".to_string())
         );
     });
@@ -307,7 +310,7 @@ variant = "per-provider"
         let toml = load_toml_config(file.path()).unwrap();
         let config = Config::from_env(toml).unwrap();
 
-        assert_eq!(config.variant, Some("per-provider".to_string()));
+        assert_eq!(config.llm.variant, Some("per-provider".to_string()));
     });
 }
 
@@ -328,7 +331,7 @@ base_url = "http://localhost:11434/v1"
         let config = Config::from_env(toml).unwrap();
 
         assert_eq!(
-            config.provider_config.base_url,
+            config.llm.provider_config.base_url,
             Some("http://localhost:11434/v1".to_string())
         );
     });
@@ -349,7 +352,7 @@ api_key_env = "MY_CUSTOM_KEY"
         let toml = load_toml_config(file.path()).unwrap();
         let config = Config::from_env(toml).unwrap();
 
-        assert_eq!(config.api_key, "custom-key-value");
+        assert_eq!(config.llm.api_key, "custom-key-value");
     });
 }
 
@@ -383,13 +386,13 @@ fn test_model_resets_on_provider_change_when_not_explicit() {
             });
 
             let mut config = Config::from_env(toml).unwrap();
-            assert_eq!(config.model, "deepseek-v4-flash");
+            assert_eq!(config.llm.model, "deepseek-v4-flash");
 
             let cli = rs_guard::cli::Cli::parse_from(["rs-guard", "--provider", "kimi"]);
             config.apply_args(&cli.review).unwrap();
 
-            assert_eq!(config.provider, "kimi");
-            assert_eq!(config.model, "kimi-k2.5");
+            assert_eq!(config.llm.provider, "kimi");
+            assert_eq!(config.llm.model, "kimi-k2.5");
         },
     );
 }
@@ -413,13 +416,13 @@ fn test_toml_model_not_carried_across_provider_change() {
             });
 
             let mut config = Config::from_env(toml).unwrap();
-            assert_eq!(config.model, "my-custom-model");
+            assert_eq!(config.llm.model, "my-custom-model");
 
             let cli = rs_guard::cli::Cli::parse_from(["rs-guard", "--provider", "kimi"]);
             config.apply_args(&cli.review).unwrap();
 
-            assert_eq!(config.provider, "kimi");
-            assert_eq!(config.model, "kimi-k2.5");
+            assert_eq!(config.llm.provider, "kimi");
+            assert_eq!(config.llm.model, "kimi-k2.5");
         },
     );
 }
@@ -452,8 +455,8 @@ fn test_cli_model_preserved_across_provider_change() {
             ]);
             config.apply_args(&cli.review).unwrap();
 
-            assert_eq!(config.provider, "kimi");
-            assert_eq!(config.model, "cli-model");
+            assert_eq!(config.llm.provider, "kimi");
+            assert_eq!(config.llm.model, "cli-model");
         },
     );
 }
@@ -493,13 +496,13 @@ fn test_apply_args_respects_toml_api_key_env_on_switch() {
             });
 
             let mut config = Config::from_env(toml).unwrap();
-            assert_eq!(config.provider, "deepseek");
+            assert_eq!(config.llm.provider, "deepseek");
 
             let cli = rs_guard::cli::Cli::parse_from(["rs-guard", "--provider", "kimi"]);
             config.apply_args(&cli.review).unwrap();
 
-            assert_eq!(config.provider, "kimi");
-            assert_eq!(config.api_key, "custom-kimi-key");
+            assert_eq!(config.llm.provider, "kimi");
+            assert_eq!(config.llm.api_key, "custom-kimi-key");
         },
     );
 }
@@ -591,7 +594,7 @@ fn test_ssrf_allows_known_host_in_ci() {
 
             let config = Config::from_env(toml).unwrap();
             assert_eq!(
-                config.provider_config.base_url,
+                config.llm.provider_config.base_url,
                 Some("https://api.deepseek.com".to_string())
             );
         },
@@ -629,7 +632,7 @@ fn test_ssrf_allows_any_host_in_local_mode() {
 
         let config = Config::from_env(toml).unwrap();
         assert_eq!(
-            config.provider_config.base_url,
+            config.llm.provider_config.base_url,
             Some("https://my-local-llm.example.com/v1".to_string())
         );
     });
@@ -684,7 +687,7 @@ fn test_ssrf_rejection_on_apply_args_switch_in_ci() {
             });
 
             let mut config = Config::from_env(toml).unwrap();
-            assert_eq!(config.provider, "deepseek");
+            assert_eq!(config.llm.provider, "deepseek");
 
             let cli = rs_guard::cli::Cli::parse_from(["rs-guard", "--provider", "kimi"]);
             let result = config.apply_args(&cli.review);
@@ -735,14 +738,14 @@ fn test_base_url_cleared_on_switch_without_toml_entry() {
 
             let mut config = Config::from_env(toml).unwrap();
             assert_eq!(
-                config.provider_config.base_url,
+                config.llm.provider_config.base_url,
                 Some("https://api.deepseek.com".to_string())
             );
 
             let cli = rs_guard::cli::Cli::parse_from(["rs-guard", "--provider", "kimi"]);
             config.apply_args(&cli.review).unwrap();
-            assert_eq!(config.provider, "kimi");
-            assert_eq!(config.provider_config.base_url, None);
+            assert_eq!(config.llm.provider, "kimi");
+            assert_eq!(config.llm.provider_config.base_url, None);
         },
     );
 }
@@ -796,7 +799,7 @@ fn test_base_url_preserved_on_switch_with_toml_entry() {
             config.apply_args(&cli.review).unwrap();
 
             assert_eq!(
-                config.provider_config.base_url,
+                config.llm.provider_config.base_url,
                 Some("http://localhost:8080/v1".to_string())
             );
         },
@@ -822,7 +825,7 @@ fn test_model_synced_after_switch_with_cli_model() {
             });
 
             let mut config = Config::from_env(toml).unwrap();
-            assert_eq!(config.provider_config.model, "deepseek-v4-flash");
+            assert_eq!(config.llm.provider_config.model, "deepseek-v4-flash");
 
             let cli = rs_guard::cli::Cli::parse_from([
                 "rs-guard",
@@ -833,8 +836,8 @@ fn test_model_synced_after_switch_with_cli_model() {
             ]);
             config.apply_args(&cli.review).unwrap();
 
-            assert_eq!(config.model, "my-custom-model");
-            assert_eq!(config.provider_config.model, "my-custom-model");
+            assert_eq!(config.llm.model, "my-custom-model");
+            assert_eq!(config.llm.provider_config.model, "my-custom-model");
         },
     );
 }
@@ -904,7 +907,7 @@ fn test_valid_temperature_env_var_accepted() {
         || {
             let result = Config::from_env(None);
             assert!(result.is_ok(), "expected Ok for valid temperature 0.7");
-            assert!((result.unwrap().temperature - 0.7).abs() < f32::EPSILON);
+            assert!((result.unwrap().llm.temperature - 0.7).abs() < f32::EPSILON);
         },
     );
 }
@@ -1041,8 +1044,8 @@ chunk_tail_lines = 100
     with_env(&[("DEEPSEEK_API_KEY", "test-deepseek-key")], || {
         let toml = load_toml_config(file.path()).unwrap();
         let config = Config::from_env(toml).unwrap();
-        assert_eq!(config.chunk_head_lines, 200);
-        assert_eq!(config.chunk_tail_lines, 100);
+        assert_eq!(config.diff.chunk_head_lines, 200);
+        assert_eq!(config.diff.chunk_tail_lines, 100);
     });
 }
 
@@ -1053,11 +1056,11 @@ fn test_default_chunk_thresholds_when_not_set() {
     with_env(&[("DEEPSEEK_API_KEY", "test-deepseek-key")], || {
         let config = Config::from_env(None).unwrap();
         assert_eq!(
-            config.chunk_head_lines,
+            config.diff.chunk_head_lines,
             rs_guard::diff::DEFAULT_CHUNK_HEAD_LINES
         );
         assert_eq!(
-            config.chunk_tail_lines,
+            config.diff.chunk_tail_lines,
             rs_guard::diff::DEFAULT_CHUNK_TAIL_LINES
         );
     });
@@ -1074,7 +1077,7 @@ fn test_default_max_tokens_applied_when_not_set() {
     with_env(&[("DEEPSEEK_API_KEY", "test-deepseek-key")], || {
         let config = Config::from_env(None).unwrap();
         assert_eq!(
-            config.provider_config.max_tokens,
+            config.llm.provider_config.max_tokens,
             Some(rs_guard::config::THINKING_MIN_MAX_TOKENS),
             "deepseek max_tokens should use THINKING_MIN_MAX_TOKENS when not configured"
         );
@@ -1092,7 +1095,7 @@ fn test_thinking_min_max_tokens_applied_for_kimi() {
         || {
             let config = Config::from_env(None).unwrap();
             assert_eq!(
-                config.provider_config.max_tokens,
+                config.llm.provider_config.max_tokens,
                 Some(rs_guard::config::THINKING_MIN_MAX_TOKENS)
             );
         },
@@ -1110,7 +1113,7 @@ fn test_non_thinking_provider_keeps_default_max_tokens() {
         || {
             let config = Config::from_env(None).unwrap();
             assert_eq!(
-                config.provider_config.max_tokens,
+                config.llm.provider_config.max_tokens,
                 Some(rs_guard::config::DEFAULT_MAX_TOKENS)
             );
         },
@@ -1127,7 +1130,7 @@ fn test_env_max_tokens_overrides_default() {
         ],
         || {
             let config = Config::from_env(None).unwrap();
-            assert_eq!(config.provider_config.max_tokens, Some(8192));
+            assert_eq!(config.llm.provider_config.max_tokens, Some(8192));
         },
     );
 }
@@ -1143,7 +1146,7 @@ max_tokens = 2048
     with_env(&[("DEEPSEEK_API_KEY", "test-deepseek-key")], || {
         let toml = load_toml_config(file.path()).unwrap();
         let config = Config::from_env(toml).unwrap();
-        assert_eq!(config.provider_config.max_tokens, Some(2048));
+        assert_eq!(config.llm.provider_config.max_tokens, Some(2048));
     });
 }
 
@@ -1156,7 +1159,7 @@ max_tokens = 2048
 fn test_default_important_threshold_is_three() {
     with_env(&[("DEEPSEEK_API_KEY", "test-deepseek-key")], || {
         let config = Config::from_env(None).unwrap();
-        assert_eq!(config.important_threshold, 3);
+        assert_eq!(config.output.important_threshold, 3);
     });
 }
 
@@ -1171,7 +1174,7 @@ important_issues_threshold = 1
     with_env(&[("DEEPSEEK_API_KEY", "test-deepseek-key")], || {
         let toml = load_toml_config(file.path()).unwrap();
         let config = Config::from_env(toml).unwrap();
-        assert_eq!(config.important_threshold, 1);
+        assert_eq!(config.output.important_threshold, 1);
     });
 }
 
@@ -1191,7 +1194,7 @@ important_issues_threshold = 5
         || {
             let toml = load_toml_config(file.path()).unwrap();
             let config = Config::from_env(toml).unwrap();
-            assert_eq!(config.important_threshold, 2);
+            assert_eq!(config.output.important_threshold, 2);
         },
     );
 }
@@ -1213,7 +1216,7 @@ fn test_cli_important_threshold_overrides_env() {
             let mut config = Config::from_env(toml).unwrap();
             let cli = rs_guard::cli::Cli::parse_from(["rs-guard", "--important-threshold", "1"]);
             config.apply_args(&cli.review).unwrap();
-            assert_eq!(config.important_threshold, 1);
+            assert_eq!(config.output.important_threshold, 1);
         },
     );
 }
@@ -1229,7 +1232,7 @@ fn test_default_llm_timeout_secs_raised_for_deepseek() {
         let config = Config::from_env(None).unwrap();
         // Auto-raised for thinking models (deepseek-v4-pro etc.)
         assert_eq!(
-            config.llm_timeout_secs,
+            config.llm.llm_timeout_secs,
             rs_guard::config::THINKING_MIN_LLM_TIMEOUT_SECS,
             "deepseek should get auto-raised timeout (240s) when not explicit"
         );
@@ -1246,7 +1249,7 @@ fn test_env_llm_timeout_overrides_default() {
         ],
         || {
             let config = Config::from_env(None).unwrap();
-            assert_eq!(config.llm_timeout_secs, 180);
+            assert_eq!(config.llm.llm_timeout_secs, 180);
         },
     );
 }
@@ -1262,7 +1265,7 @@ llm_timeout_secs = 300
     with_env(&[("DEEPSEEK_API_KEY", "test-deepseek-key")], || {
         let toml = load_toml_config(file.path()).unwrap();
         let config = Config::from_env(toml).unwrap();
-        assert_eq!(config.llm_timeout_secs, 300);
+        assert_eq!(config.llm.llm_timeout_secs, 300);
     });
 }
 
@@ -1277,7 +1280,7 @@ fn test_non_thinking_provider_keeps_lower_default_timeout() {
         || {
             let config = Config::from_env(None).unwrap();
             assert_eq!(
-                config.llm_timeout_secs,
+                config.llm.llm_timeout_secs,
                 rs_guard::config::DEFAULT_LLM_TIMEOUT_SECS
             );
         },
@@ -1476,7 +1479,7 @@ fn test_config_empty_has_project_rules_none() {
     clean_env();
     let config = Config::empty();
     assert!(
-        config.project_rules.is_none(),
+        config.rules.project_rules.is_none(),
         "Config::empty() should have project_rules = None"
     );
 }
@@ -1490,7 +1493,7 @@ fn test_load_project_rules_disabled_sets_none() {
         .load_project_rules(std::path::Path::new("."), false, None)
         .expect("load_project_rules should not error when disabled");
     assert!(
-        config.project_rules.is_none(),
+        config.rules.project_rules.is_none(),
         "project_rules should be None when disabled"
     );
 }
@@ -1506,7 +1509,7 @@ fn test_load_project_rules_enabled_no_files_sets_none() {
         .load_project_rules(dir.path(), true, None)
         .expect("load_project_rules should not error when no files found");
     assert!(
-        config.project_rules.is_none(),
+        config.rules.project_rules.is_none(),
         "project_rules should be None when no rules files exist"
     );
 }
@@ -1524,7 +1527,7 @@ fn test_load_project_rules_enabled_finds_agents_md() {
         .expect("load_project_rules should succeed");
 
     assert_eq!(
-        config.project_rules.as_deref(),
+        config.rules.project_rules.as_deref(),
         Some("# Project rules\n"),
         "project_rules should contain the AGENTS.md content"
     );
@@ -1543,7 +1546,7 @@ fn test_load_project_rules_enabled_finds_claude_md() {
         .expect("load_project_rules should succeed");
 
     assert_eq!(
-        config.project_rules.as_deref(),
+        config.rules.project_rules.as_deref(),
         Some("# Claude rules\n"),
         "project_rules should contain the CLAUDE.md content"
     );
@@ -1557,7 +1560,7 @@ fn test_load_project_rules_does_not_overwrite_existing_when_disabled() {
     std::fs::write(dir.path().join("AGENTS.md"), "# Rules\n").expect("write AGENTS.md");
 
     let mut config = Config::empty();
-    config.project_rules = Some("pre-existing rules".to_string());
+    config.rules.project_rules = Some("pre-existing rules".to_string());
 
     // When disabled, should set to None even if a file exists
     config
@@ -1565,7 +1568,7 @@ fn test_load_project_rules_does_not_overwrite_existing_when_disabled() {
         .expect("should not error");
 
     assert!(
-        config.project_rules.is_none(),
+        config.rules.project_rules.is_none(),
         "disabled should clear project_rules to None even if file exists"
     );
 }
@@ -1625,11 +1628,11 @@ fn test_custom_prompt_file_suppresses_picker_but_keeps_rules_loading() {
         .expect("load_project_rules should succeed");
 
     assert_eq!(
-        config.prompt, "# Custom prompt\n",
+        config.llm.prompt, "# Custom prompt\n",
         "custom prompt should be preserved"
     );
     assert_eq!(
-        config.project_rules.as_deref(),
+        config.rules.project_rules.as_deref(),
         Some("# Agents rules\n"),
         "highest-priority rules file should still be loaded as supplemental context"
     );
@@ -1829,7 +1832,7 @@ fn test_from_env_rules_file_from_env() {
         || {
             let config = Config::from_env(None).unwrap();
             assert_eq!(
-                config.rules_file,
+                config.rules.rules_file,
                 Some(std::path::PathBuf::from("env-rules.md")),
                 "RS_GUARD_RULES_FILE env should set rules_file"
             );
@@ -1846,7 +1849,7 @@ fn test_from_env_rules_file_from_toml() {
         let toml = load_toml_config(file.path()).unwrap();
         let config = Config::from_env(toml).unwrap();
         assert_eq!(
-            config.rules_file,
+            config.rules.rules_file,
             Some(std::path::PathBuf::from("toml-rules.md")),
             "rules_file TOML key should set rules_file"
         );
@@ -1867,7 +1870,7 @@ fn test_from_env_rules_file_env_overrides_toml() {
             let toml = load_toml_config(file.path()).unwrap();
             let config = Config::from_env(toml).unwrap();
             assert_eq!(
-                config.rules_file,
+                config.rules.rules_file,
                 Some(std::path::PathBuf::from("env-rules.md")),
                 "RS_GUARD_RULES_FILE env should override rules_file TOML key"
             );
@@ -1891,7 +1894,7 @@ fn test_apply_args_rules_file_cli_override() {
             let cli = rs_guard::cli::Cli::parse_from(["rs-guard", "--rules-file", "cli-rules.md"]);
             config.apply_args(&cli.review).unwrap();
             assert_eq!(
-                config.rules_file,
+                config.rules.rules_file,
                 Some(std::path::PathBuf::from("cli-rules.md")),
                 "--rules-file CLI flag should override env and TOML"
             );
@@ -1943,18 +1946,18 @@ fn test_apply_args_rules_file_cli_override_then_loads_correct_file() {
         ]);
         config.apply_args(&cli.review).unwrap();
 
-        let rules_file = config.rules_file.clone();
+        let rules_file = config.rules.rules_file.clone();
         config
             .load_project_rules(dir.path(), true, rules_file.as_deref())
             .expect("load_project_rules should use the CLI-overridden rules_file");
 
         assert_eq!(
-            config.project_rules,
+            config.rules.project_rules,
             Some("# CLI rules\n".to_string()),
             "CLI --rules-file should win over TOML rules_file and be loaded"
         );
         assert_eq!(
-            config.project_rules_file,
+            config.rules.project_rules_file,
             Some(cli_path.to_string_lossy().into_owned()),
             "project_rules_file should reflect the CLI-overridden file"
         );
@@ -1975,12 +1978,12 @@ fn test_load_project_rules_explicit_file() {
         .expect("load_project_rules should load explicit file");
 
     assert_eq!(
-        config.project_rules,
+        config.rules.project_rules,
         Some("# Custom rules\n".to_string()),
         "explicit rules file content should be loaded"
     );
     assert_eq!(
-        config.project_rules_file,
+        config.rules.project_rules_file,
         Some(rules_path.to_string_lossy().into_owned()),
         "project_rules_file should store the path as given"
     );
@@ -2024,12 +2027,12 @@ fn test_load_project_rules_explicit_file_skips_auto_detection() {
         .expect("load_project_rules should succeed");
 
     assert_eq!(
-        config.project_rules,
+        config.rules.project_rules,
         Some("# Explicit rules\n".to_string()),
         "explicit file should take precedence over auto-detected AGENTS.md"
     );
     assert_eq!(
-        config.project_rules_file,
+        config.rules.project_rules_file,
         Some(explicit_path.to_string_lossy().into_owned()),
         "project_rules_file should reflect the explicit file"
     );
@@ -2049,12 +2052,12 @@ fn test_load_project_rules_explicit_file_overrides_enabled_false() {
         .expect("load_project_rules should load explicit file even when enabled=false");
 
     assert_eq!(
-        config.project_rules,
+        config.rules.project_rules,
         Some("# Explicit rules\n".to_string()),
         "explicit rules_file should override project_rules_enabled=false"
     );
     assert_eq!(
-        config.project_rules_file,
+        config.rules.project_rules_file,
         Some(explicit_path.to_string_lossy().into_owned()),
         "project_rules_file should reflect the explicit file"
     );
@@ -2074,7 +2077,7 @@ fn test_load_project_rules_explicit_file_soft_cap() {
         .load_project_rules(dir.path(), true, Some(&rules_path))
         .expect("load_project_rules should succeed");
 
-    let loaded = config.project_rules.expect("rules should be loaded");
+    let loaded = config.rules.project_rules.expect("rules should be loaded");
     assert!(
         loaded.contains("TRUNCATION WARNING"),
         "explicit rules file over cap should be truncated with warning banner"
@@ -2102,11 +2105,11 @@ fn test_apply_args_inline_comments_implies_findings() {
         let cli = rs_guard::cli::Cli::parse_from(["rs-guard", "--inline-comments"]);
         config.apply_args(&cli.review).unwrap();
         assert!(
-            config.inline_comments,
+            config.github.inline_comments,
             "--inline-comments should set inline_comments on Config"
         );
         assert!(
-            config.findings,
+            config.output.findings,
             "--inline-comments must imply findings on Config"
         );
     });
@@ -2123,9 +2126,12 @@ fn test_apply_args_findings_alone_does_not_set_inline_comments() {
         let mut config = Config::empty();
         let cli = rs_guard::cli::Cli::parse_from(["rs-guard", "--findings"]);
         config.apply_args(&cli.review).unwrap();
-        assert!(config.findings, "--findings should set findings on Config");
         assert!(
-            !config.inline_comments,
+            config.output.findings,
+            "--findings should set findings on Config"
+        );
+        assert!(
+            !config.github.inline_comments,
             "--findings alone must not set inline_comments"
         );
     });
@@ -2140,9 +2146,9 @@ fn test_apply_args_findings_and_inline_comments_default_off() {
         let mut config = Config::empty();
         let cli = rs_guard::cli::Cli::parse_from(["rs-guard"]);
         config.apply_args(&cli.review).unwrap();
-        assert!(!config.findings, "findings should default to false");
+        assert!(!config.output.findings, "findings should default to false");
         assert!(
-            !config.inline_comments,
+            !config.github.inline_comments,
             "inline_comments should default to false"
         );
     });

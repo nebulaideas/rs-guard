@@ -15,15 +15,15 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 fn ci_config(pr_number: u64, provider: &str, api_key: &str) -> Config {
     let mut c = Config::empty();
     c.is_ci = true;
-    c.pr_number = Some(pr_number);
-    c.repo_owner = Some("test-owner".into());
-    c.repo_name = Some("test-repo".into());
-    c.github_token = Some(api_key.into());
-    c.provider = provider.into();
-    c.model = "test-model".into();
-    c.temperature = 0.1;
-    c.prompt = "You are a code reviewer.".into();
-    c.api_key = "test-llm-key".into();
+    c.github.pr_number = Some(pr_number);
+    c.github.repo_owner = Some("test-owner".into());
+    c.github.repo_name = Some("test-repo".into());
+    c.github.github_token = Some(api_key.into());
+    c.llm.provider = provider.into();
+    c.llm.model = "test-model".into();
+    c.llm.temperature = 0.1;
+    c.llm.prompt = "You are a code reviewer.".into();
+    c.llm.api_key = "test-llm-key".into();
     c
 }
 
@@ -31,11 +31,11 @@ fn ci_config(pr_number: u64, provider: &str, api_key: &str) -> Config {
 fn local_config() -> Config {
     let mut c = Config::empty();
     c.is_ci = false;
-    c.provider = "deepseek".into();
-    c.model = "test-model".into();
-    c.temperature = 0.1;
-    c.prompt = "You are a code reviewer.".into();
-    c.api_key = "test-llm-key".into();
+    c.llm.provider = "deepseek".into();
+    c.llm.model = "test-model".into();
+    c.llm.temperature = 0.1;
+    c.llm.prompt = "You are a code reviewer.".into();
+    c.llm.api_key = "test-llm-key".into();
     c
 }
 
@@ -76,9 +76,9 @@ async fn test_full_pipeline_ci_approve() {
         .await;
 
     let mut config = ci_config(42, "deepseek", "test-token");
-    config.github_base_url = github.uri();
-    config.provider_config.base_url = Some(llm.uri());
-    config.no_cache = true; // Disable cache to avoid conflicts
+    config.github.github_base_url = github.uri();
+    config.llm.provider_config.base_url = Some(llm.uri());
+    config.cache.no_cache = true; // Disable cache to avoid conflicts
 
     let result = run_pipeline(config, None).await;
     assert!(matches!(result, Ok(PipelineResult::Success)));
@@ -112,9 +112,9 @@ async fn test_full_pipeline_ci_request_changes() {
         .await;
 
     let mut config = ci_config(42, "deepseek", "test-token");
-    config.github_base_url = github.uri();
-    config.provider_config.base_url = Some(llm.uri());
-    config.no_cache = true; // Disable cache to avoid conflicts
+    config.github.github_base_url = github.uri();
+    config.llm.provider_config.base_url = Some(llm.uri());
+    config.cache.no_cache = true; // Disable cache to avoid conflicts
 
     let result = run_pipeline(config, None).await;
     assert!(matches!(result, Ok(PipelineResult::Success)));
@@ -168,9 +168,9 @@ async fn test_full_pipeline_ci_dismisses_previous_reviews() {
         .await;
 
     let mut config = ci_config(42, "deepseek", "test-token");
-    config.github_base_url = github.uri();
-    config.provider_config.base_url = Some(llm.uri());
-    config.no_cache = true; // Disable cache to avoid conflicts
+    config.github.github_base_url = github.uri();
+    config.llm.provider_config.base_url = Some(llm.uri());
+    config.cache.no_cache = true; // Disable cache to avoid conflicts
 
     let result = run_pipeline(config, None).await;
     assert!(matches!(result, Ok(PipelineResult::Success)));
@@ -190,8 +190,8 @@ async fn test_full_pipeline_local_approve() {
         .await;
 
     let mut config = local_config();
-    config.provider_config.base_url = Some(llm.uri());
-    config.no_cache = true; // Disable cache to avoid conflicts
+    config.llm.provider_config.base_url = Some(llm.uri());
+    config.cache.no_cache = true; // Disable cache to avoid conflicts
 
     let dir = tempfile::tempdir().unwrap();
     let diff_path = dir.path().join("test.diff");
@@ -218,10 +218,10 @@ async fn test_full_pipeline_json_format_success() {
         .await;
 
     let mut config = local_config();
-    config.provider_config.base_url = Some(llm.uri());
-    config.no_cache = true;
-    config.dry_run = true;
-    config.output_format = OutputFormat::Json;
+    config.llm.provider_config.base_url = Some(llm.uri());
+    config.cache.no_cache = true;
+    config.output.dry_run = true;
+    config.output.output_format = OutputFormat::Json;
 
     let dir = tempfile::tempdir().unwrap();
     let diff_path = dir.path().join("test.diff");
@@ -276,8 +276,8 @@ async fn test_full_pipeline_empty_diff() {
         .await;
 
     let mut config = ci_config(42, "deepseek", "test-token");
-    config.github_base_url = github.uri();
-    config.no_cache = true; // Disable cache to avoid conflicts
+    config.github.github_base_url = github.uri();
+    config.cache.no_cache = true; // Disable cache to avoid conflicts
 
     let result = run_pipeline(config, None).await;
     assert!(matches!(result, Ok(PipelineResult::Success)));
@@ -310,11 +310,11 @@ async fn test_full_pipeline_ci_diff_too_large_submits_comment() {
         .await;
 
     let mut config = ci_config(42, "deepseek", "test-token");
-    config.github_base_url = github.uri();
-    config.no_cache = true;
+    config.github.github_base_url = github.uri();
+    config.cache.no_cache = true;
     // Keep this test independent of the raised default hard limits (5000 lines).
-    config.max_diff_lines = 1500;
-    config.max_diff_bytes = 100 * 1024;
+    config.diff.max_diff_lines = 1500;
+    config.diff.max_diff_bytes = 100 * 1024;
 
     let result = run_pipeline(config, None).await;
     assert!(
@@ -364,11 +364,11 @@ async fn test_full_pipeline_with_variant_deepseek_pro() {
         .await;
 
     let mut config = ci_config(42, "deepseek", "test-token");
-    config.github_base_url = github.uri();
-    config.provider_config.base_url = Some(llm.uri());
-    config.variant = Some("pro".to_string());
-    config.provider_config.variant = Some("pro".to_string());
-    config.no_cache = true; // Disable cache to avoid conflicts
+    config.github.github_base_url = github.uri();
+    config.llm.provider_config.base_url = Some(llm.uri());
+    config.llm.variant = Some("pro".to_string());
+    config.llm.provider_config.variant = Some("pro".to_string());
+    config.cache.no_cache = true; // Disable cache to avoid conflicts
 
     let result = run_pipeline(config, None).await;
     assert!(matches!(result, Ok(PipelineResult::Success)));
@@ -416,8 +416,8 @@ async fn test_full_pipeline_cache_hit() {
         .await;
 
     let mut config1 = ci_config(42, "deepseek", "test-token");
-    config1.github_base_url = github.uri();
-    config1.provider_config.base_url = Some(llm.uri());
+    config1.github.github_base_url = github.uri();
+    config1.llm.provider_config.base_url = Some(llm.uri());
 
     // First run - should call LLM
     let result1 = run_pipeline(config1, None).await;
@@ -425,8 +425,8 @@ async fn test_full_pipeline_cache_hit() {
 
     // Second run - should use cache
     let mut config2 = ci_config(42, "deepseek", "test-token");
-    config2.github_base_url = github.uri();
-    config2.provider_config.base_url = Some(llm.uri());
+    config2.github.github_base_url = github.uri();
+    config2.llm.provider_config.base_url = Some(llm.uri());
 
     let result2 = run_pipeline(config2, None).await;
     assert!(matches!(result2, Ok(PipelineResult::Success)));
@@ -473,9 +473,9 @@ async fn test_full_pipeline_chunked_diff() {
         .await;
 
     let mut config = ci_config(42, "deepseek", "test-token");
-    config.github_base_url = github.uri();
-    config.provider_config.base_url = Some(llm.uri());
-    config.no_cache = true; // Disable cache to avoid conflicts
+    config.github.github_base_url = github.uri();
+    config.llm.provider_config.base_url = Some(llm.uri());
+    config.cache.no_cache = true; // Disable cache to avoid conflicts
 
     let result = run_pipeline(config, None).await;
     assert!(matches!(result, Ok(PipelineResult::Success)));
@@ -512,9 +512,9 @@ async fn test_full_pipeline_metrics_file_created() {
         .await;
 
     let mut config = ci_config(42, "deepseek", "test-token");
-    config.github_base_url = github.uri();
-    config.provider_config.base_url = Some(llm.uri());
-    config.no_cache = true; // Disable cache to avoid conflicts
+    config.github.github_base_url = github.uri();
+    config.llm.provider_config.base_url = Some(llm.uri());
+    config.cache.no_cache = true; // Disable cache to avoid conflicts
 
     // Use temp file for metrics to ensure cleanup
     let metrics_file = tempfile::NamedTempFile::new().unwrap();
@@ -560,8 +560,8 @@ async fn test_full_pipeline_local_blocked() {
         .await;
 
     let mut config = local_config();
-    config.provider_config.base_url = Some(llm.uri());
-    config.no_cache = true; // Disable cache to avoid conflicts
+    config.llm.provider_config.base_url = Some(llm.uri());
+    config.cache.no_cache = true; // Disable cache to avoid conflicts
 
     let dir = tempfile::tempdir().unwrap();
     let diff_path = dir.path().join("test.diff");
@@ -591,9 +591,9 @@ async fn test_full_pipeline_llm_retries_exhausted() {
         .await;
 
     let mut config = ci_config(42, "deepseek", "test-token");
-    config.github_base_url = github.uri();
-    config.provider_config.base_url = Some(llm.uri());
-    config.no_cache = true; // Disable cache to avoid conflicts
+    config.github.github_base_url = github.uri();
+    config.llm.provider_config.base_url = Some(llm.uri());
+    config.cache.no_cache = true; // Disable cache to avoid conflicts
 
     // The call should fail after retries due to repeated 500 errors
     let result = run_pipeline(config, None).await;
@@ -630,9 +630,9 @@ async fn test_full_pipeline_ci_important_issues_yield_comment_not_blocked() {
         .await;
 
     let mut config = ci_config(42, "deepseek", "test-token");
-    config.github_base_url = github.uri();
-    config.provider_config.base_url = Some(llm.uri());
-    config.no_cache = true;
+    config.github.github_base_url = github.uri();
+    config.llm.provider_config.base_url = Some(llm.uri());
+    config.cache.no_cache = true;
 
     let result = run_pipeline(config, None).await;
     // Assert: pipeline succeeds — important issues produce COMMENT, not ReviewBlocked
@@ -689,9 +689,9 @@ async fn test_full_pipeline_grok_approve() {
         .await;
 
     let mut config = ci_config(42, "grok", "test-token");
-    config.github_base_url = github.uri();
-    config.provider_config.base_url = Some(llm.uri());
-    config.no_cache = true;
+    config.github.github_base_url = github.uri();
+    config.llm.provider_config.base_url = Some(llm.uri());
+    config.cache.no_cache = true;
 
     let result = run_pipeline(config, None).await;
     assert!(matches!(result, Ok(PipelineResult::Success)));
@@ -741,9 +741,9 @@ async fn test_full_pipeline_empty_content_retried_then_succeeds() {
         .await;
 
     let mut config = ci_config(42, "deepseek", "test-token");
-    config.github_base_url = github.uri();
-    config.provider_config.base_url = Some(llm.uri());
-    config.no_cache = true;
+    config.github.github_base_url = github.uri();
+    config.llm.provider_config.base_url = Some(llm.uri());
+    config.cache.no_cache = true;
 
     let result = run_pipeline(config, None).await;
     assert!(
@@ -801,9 +801,9 @@ async fn test_full_pipeline_empty_content_escalates_max_tokens() {
         .await;
 
     let mut config = ci_config(42, "deepseek", "test-token");
-    config.github_base_url = github.uri();
-    config.provider_config.base_url = Some(llm.uri());
-    config.no_cache = true;
+    config.github.github_base_url = github.uri();
+    config.llm.provider_config.base_url = Some(llm.uri());
+    config.cache.no_cache = true;
 
     let result = run_pipeline(config, None).await;
     assert!(
@@ -851,10 +851,10 @@ async fn test_full_pipeline_empty_content_not_cached_on_failure() {
         .await;
 
     let mut config = ci_config(42, "deepseek", "test-token");
-    config.github_base_url = github.uri();
-    config.provider_config.base_url = Some(llm.uri());
-    config.no_cache = false;
-    config.cache_dir = Some(cache_path.to_string_lossy().into_owned());
+    config.github.github_base_url = github.uri();
+    config.llm.provider_config.base_url = Some(llm.uri());
+    config.cache.no_cache = false;
+    config.cache.cache_dir = Some(cache_path.to_string_lossy().into_owned());
 
     let result = run_pipeline(config.clone(), None).await;
     assert!(
@@ -871,14 +871,14 @@ async fn test_full_pipeline_empty_content_not_cached_on_failure() {
     .unwrap();
     let cached = cache.get(
         &unique_diff,
-        &config.prompt,
-        &config.provider,
-        &config.model,
-        config.variant.as_deref(),
-        config.temperature,
-        config.provider_config.base_url.as_deref().unwrap_or(""),
-        config.provider_config.max_tokens,
-        config.provider_config.result_format.as_deref(),
+        &config.llm.prompt,
+        &config.llm.provider,
+        &config.llm.model,
+        config.llm.variant.as_deref(),
+        config.llm.temperature,
+        config.llm.provider_config.base_url.as_deref().unwrap_or(""),
+        config.llm.provider_config.max_tokens,
+        config.llm.provider_config.result_format.as_deref(),
         false,
     );
     assert!(
@@ -914,9 +914,9 @@ async fn test_full_pipeline_glm_approve() {
         .await;
 
     let mut config = ci_config(42, "glm", "test-token");
-    config.github_base_url = github.uri();
-    config.provider_config.base_url = Some(llm.uri());
-    config.no_cache = true;
+    config.github.github_base_url = github.uri();
+    config.llm.provider_config.base_url = Some(llm.uri());
+    config.cache.no_cache = true;
 
     let result = run_pipeline(config, None).await;
     assert!(matches!(result, Ok(PipelineResult::Success)));
@@ -958,11 +958,11 @@ async fn test_multi_pass_two_chunks_both_positive() {
         .await;
 
     let mut config = ci_config(42, "deepseek", "test-token");
-    config.github_base_url = github.uri();
-    config.provider_config.base_url = Some(llm.uri());
-    config.no_cache = true;
-    config.multi_pass = true;
-    config.multi_pass_max_chunks = 10;
+    config.github.github_base_url = github.uri();
+    config.llm.provider_config.base_url = Some(llm.uri());
+    config.cache.no_cache = true;
+    config.llm.multi_pass = true;
+    config.llm.multi_pass_max_chunks = 10;
 
     let result = run_pipeline(config, None).await;
     assert!(matches!(result, Ok(PipelineResult::Success)));
@@ -996,10 +996,10 @@ async fn test_multi_pass_one_chunk_negative_blocks() {
         .await;
 
     let mut config = ci_config(42, "deepseek", "test-token");
-    config.github_base_url = github.uri();
-    config.provider_config.base_url = Some(llm.uri());
-    config.no_cache = true;
-    config.multi_pass = true;
+    config.github.github_base_url = github.uri();
+    config.llm.provider_config.base_url = Some(llm.uri());
+    config.cache.no_cache = true;
+    config.llm.multi_pass = true;
 
     let result = run_pipeline(config, None).await;
     assert!(matches!(result, Ok(PipelineResult::ReviewBlocked)));
@@ -1033,10 +1033,10 @@ async fn test_multi_pass_single_file_diff_one_chunk() {
         .await;
 
     let mut config = ci_config(42, "deepseek", "test-token");
-    config.github_base_url = github.uri();
-    config.provider_config.base_url = Some(llm.uri());
-    config.no_cache = true;
-    config.multi_pass = true;
+    config.github.github_base_url = github.uri();
+    config.llm.provider_config.base_url = Some(llm.uri());
+    config.cache.no_cache = true;
+    config.llm.multi_pass = true;
 
     let result = run_pipeline(config, None).await;
     assert!(matches!(result, Ok(PipelineResult::Success)));
@@ -1072,12 +1072,12 @@ async fn test_multi_pass_max_chunks_merges_three_files_into_two() {
         .await;
 
     let mut config = ci_config(42, "deepseek", "test-token");
-    config.github_base_url = github.uri();
-    config.provider_config.base_url = Some(llm.uri());
-    config.no_cache = true;
-    config.multi_pass = true;
-    config.multi_pass_max_chunks = 2;
-    config.circuit_breaker = None;
+    config.github.github_base_url = github.uri();
+    config.llm.provider_config.base_url = Some(llm.uri());
+    config.cache.no_cache = true;
+    config.llm.multi_pass = true;
+    config.llm.multi_pass_max_chunks = 2;
+    config.retry.circuit_breaker = None;
 
     let result = run_pipeline(config, None).await;
     assert!(matches!(result, Ok(PipelineResult::Success)));
@@ -1089,9 +1089,9 @@ async fn test_multi_pass_local_mode_no_submission() {
     let llm = MockServer::start().await;
 
     let mut config = local_config();
-    config.provider_config.base_url = Some(llm.uri());
-    config.no_cache = true;
-    config.multi_pass = true;
+    config.llm.provider_config.base_url = Some(llm.uri());
+    config.cache.no_cache = true;
+    config.llm.multi_pass = true;
 
     // Use a diff file to avoid git dependency.
     let diff_path = write_temp_diff(MULTI_FILE_DIFF);
@@ -1146,11 +1146,11 @@ async fn test_multi_pass_partial_failure_forces_comment_not_approve() {
         .await;
 
     let mut config = ci_config(42, "deepseek", "test-token");
-    config.github_base_url = github.uri();
-    config.provider_config.base_url = Some(llm.uri());
-    config.no_cache = true;
-    config.multi_pass = true;
-    config.circuit_breaker = None;
+    config.github.github_base_url = github.uri();
+    config.llm.provider_config.base_url = Some(llm.uri());
+    config.cache.no_cache = true;
+    config.llm.multi_pass = true;
+    config.retry.circuit_breaker = None;
 
     let result = run_pipeline(config, None).await;
     // Partial failure must not produce Success (approve). It should be
@@ -1182,11 +1182,11 @@ async fn test_multi_pass_all_chunks_failed_returns_error() {
         .await;
 
     let mut config = ci_config(42, "deepseek", "test-token");
-    config.github_base_url = github.uri();
-    config.provider_config.base_url = Some(llm.uri());
-    config.no_cache = true;
-    config.multi_pass = true;
-    config.circuit_breaker = None;
+    config.github.github_base_url = github.uri();
+    config.llm.provider_config.base_url = Some(llm.uri());
+    config.cache.no_cache = true;
+    config.llm.multi_pass = true;
+    config.retry.circuit_breaker = None;
 
     let result = run_pipeline(config, None).await;
     // All chunks failed — should be an error.
@@ -1209,14 +1209,14 @@ async fn test_multi_pass_cost_guard_aborts_before_llm_calls() {
         .await;
 
     let mut config = ci_config(42, "deepseek", "test-token");
-    config.github_base_url = github.uri();
+    config.github.github_base_url = github.uri();
     // Point to the LLM server that has no mocks mounted — any call would
     // get a 404, not a cost error.
-    config.provider_config.base_url = Some(llm.uri());
-    config.no_cache = true;
-    config.multi_pass = true;
+    config.llm.provider_config.base_url = Some(llm.uri());
+    config.cache.no_cache = true;
+    config.llm.multi_pass = true;
     // Set cost cap to 0 — any non-zero estimate will exceed it.
-    config.multi_pass_max_cost_cents = Some(0.0);
+    config.llm.multi_pass_max_cost_cents = Some(0.0);
 
     let result = run_pipeline(config, None).await;
     // Cost guard should abort with an error mentioning cost.
@@ -1288,9 +1288,9 @@ async fn test_metrics_records_malformed_findings_on_blocking_preliminary() {
         .await;
 
     let mut config = ci_config(42, "deepseek", "test-token");
-    config.github_base_url = github.uri();
-    config.provider_config.base_url = Some(llm.uri());
-    config.no_cache = true;
+    config.github.github_base_url = github.uri();
+    config.llm.provider_config.base_url = Some(llm.uri());
+    config.cache.no_cache = true;
 
     let metrics = MetricsPathGuard::new();
     let result = run_pipeline(config, None).await;
@@ -1325,9 +1325,9 @@ async fn test_metrics_records_invalid_verdict_on_parse_failure() {
         .await;
 
     let mut config = ci_config(42, "deepseek", "test-token");
-    config.github_base_url = github.uri();
-    config.provider_config.base_url = Some(llm.uri());
-    config.no_cache = true;
+    config.github.github_base_url = github.uri();
+    config.llm.provider_config.base_url = Some(llm.uri());
+    config.cache.no_cache = true;
 
     let metrics = MetricsPathGuard::new();
     let result = run_pipeline(config, None).await;
@@ -1377,10 +1377,10 @@ async fn test_metrics_records_cache_hit_and_miss() {
         .await;
 
     let mut config1 = ci_config(42, "deepseek", "test-token");
-    config1.github_base_url = github.uri();
-    config1.provider_config.base_url = Some(llm.uri());
-    config1.cache_dir = Some(cache_dir.path().to_string_lossy().into_owned());
-    config1.auto_gitignore = false;
+    config1.github.github_base_url = github.uri();
+    config1.llm.provider_config.base_url = Some(llm.uri());
+    config1.cache.cache_dir = Some(cache_dir.path().to_string_lossy().into_owned());
+    config1.cache.auto_gitignore = false;
 
     let metrics_miss = MetricsPathGuard::new();
     let result1 = run_pipeline(config1, None).await;
@@ -1391,10 +1391,10 @@ async fn test_metrics_records_cache_hit_and_miss() {
     drop(metrics_miss);
 
     let mut config2 = ci_config(42, "deepseek", "test-token");
-    config2.github_base_url = github.uri();
-    config2.provider_config.base_url = Some(llm.uri());
-    config2.cache_dir = Some(cache_dir.path().to_string_lossy().into_owned());
-    config2.auto_gitignore = false;
+    config2.github.github_base_url = github.uri();
+    config2.llm.provider_config.base_url = Some(llm.uri());
+    config2.cache.cache_dir = Some(cache_dir.path().to_string_lossy().into_owned());
+    config2.cache.auto_gitignore = false;
 
     let metrics_hit = MetricsPathGuard::new();
     let result2 = run_pipeline(config2, None).await;
@@ -1441,11 +1441,11 @@ async fn test_metrics_records_diff_chunking() {
         .await;
 
     let mut config = ci_config(42, "deepseek", "test-token");
-    config.github_base_url = github.uri();
-    config.provider_config.base_url = Some(llm.uri());
-    config.no_cache = true;
-    config.chunk_head_lines = 2;
-    config.chunk_tail_lines = 2;
+    config.github.github_base_url = github.uri();
+    config.llm.provider_config.base_url = Some(llm.uri());
+    config.cache.no_cache = true;
+    config.diff.chunk_head_lines = 2;
+    config.diff.chunk_tail_lines = 2;
 
     let metrics = MetricsPathGuard::new();
     let result = run_pipeline(config, None).await;
@@ -1499,9 +1499,9 @@ async fn test_metrics_records_budget_escalation() {
         .await;
 
     let mut config = ci_config(42, "deepseek", "test-token");
-    config.github_base_url = github.uri();
-    config.provider_config.base_url = Some(llm.uri());
-    config.no_cache = true;
+    config.github.github_base_url = github.uri();
+    config.llm.provider_config.base_url = Some(llm.uri());
+    config.cache.no_cache = true;
 
     let metrics = MetricsPathGuard::new();
     let result = run_pipeline(config, None).await;

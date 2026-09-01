@@ -5,9 +5,11 @@
 //! Architecture: `docs/ARCHITECTURE.md`. Local vs CI detection:
 //! `docs/LOCAL_MODE.md` (`GITHUB_ACTIONS` absent → local).
 
-use crate::cache::{CacheConfig, DiffCache};
+use crate::cache::{CacheConfig as EngineCacheConfig, DiffCache};
 use crate::cli::OutputFormat;
-use crate::config::{CiConfig, Config, THINKING_MIN_MAX_TOKENS};
+use crate::config::{
+    CacheConfig, CiConfig, Config, DiffConfig, LlmConfig, RetryConfig, THINKING_MIN_MAX_TOKENS,
+};
 use crate::diff::{
     apply_path_filters_with_ignore, chunk_diff_with_params, fetch_file_diff, fetch_local_diff,
     fetch_pr_diff, fetch_range_diff, split_diff_by_files, DiffLimits, DiffResult,
@@ -139,10 +141,10 @@ enum DiffFetchOutcome {
 /// Reads from `diff_file` when provided, otherwise fetches from GitHub in CI
 /// mode or from the local git index in local mode. Empty or oversized diffs
 /// produce an early [`PipelineResult`] rather than an error.
-fn config_diff_limits(config: &Config) -> DiffLimits {
+fn config_diff_limits(diff: &DiffConfig) -> DiffLimits {
     DiffLimits {
-        max_bytes: config.max_diff_bytes,
-        max_lines: config.max_diff_lines,
+        max_bytes: diff.max_diff_bytes,
+        max_lines: diff.max_diff_lines,
     }
 }
 
@@ -192,7 +194,7 @@ async fn fetch_diff(config: &Config, diff_file: Option<&str>) -> anyhow::Result<
                 .await
                 .map(Into::into),
         }
-    } else if let Some(ref base) = config.diff_base {
+    } else if let Some(ref base) = config.diff.diff_base {
         log::info!(
             "Local mode with --base: fetching range diff {}...HEAD",
             base
@@ -257,23 +259,23 @@ fn chunk_diff(diff: &DiffResult, head_lines: usize, tail_lines: usize) -> (Strin
 }
 
 /// Builds the response cache from configuration.
-fn build_cache(config: &Config) -> anyhow::Result<DiffCache> {
-    let cache_config = CacheConfig {
-        enabled: !config.no_cache,
-        cache_dir: config
+fn build_cache(cache: &CacheConfig) -> anyhow::Result<DiffCache> {
+    let cache_config = EngineCacheConfig {
+        enabled: !cache.no_cache,
+        cache_dir: cache
             .cache_dir
             .as_ref()
             .map(PathBuf::from)
-            .unwrap_or_else(|| CacheConfig::default().cache_dir),
-        auto_gitignore: config.auto_gitignore,
-        ..CacheConfig::default()
+            .unwrap_or_else(|| EngineCacheConfig::default().cache_dir),
+        auto_gitignore: cache.auto_gitignore,
+        ..EngineCacheConfig::default()
     };
     DiffCache::new(cache_config).context("Failed to initialize response cache")
 }
 
 /// Computes the effective cache key base URL for the configured provider.
-fn effective_base_url(config: &Config) -> &str {
-    config.provider_config.base_url.as_deref().unwrap_or("")
+fn effective_base_url(llm: &LlmConfig) -> &str {
+    llm.provider_config.base_url.as_deref().unwrap_or("")
 }
 
 /// Outcome of a single LLM obtain step (cache lookup or live call).
@@ -303,24 +305,24 @@ async fn obtain_llm_response_with_composed_prompt(
     diff_content: &str,
     composed_prompt: &str,
 ) -> anyhow::Result<LlmCallOutcome> {
-    let base_url = effective_base_url(config);
+    let base_url = effective_base_url(&config.llm);
 
     if let Some(cached) = cache.get_with_project_rules(
         diff_content,
         composed_prompt,
-        config.project_rules.as_deref(),
-        &config.provider,
-        &config.model,
-        config.variant.as_deref(),
+        config.rules.project_rules.as_deref(),
+        &config.llm.provider,
+        &config.llm.model,
+        config.llm.variant.as_deref(),
         effective_temperature(
-            &config.provider,
-            config.variant.as_deref(),
-            config.temperature,
+            &config.llm.provider,
+            config.llm.variant.as_deref(),
+            config.llm.temperature,
         ),
         base_url,
-        config.provider_config.max_tokens,
-        config.provider_config.result_format.as_deref(),
-        config.findings,
+        config.llm.provider_config.max_tokens,
+        config.llm.provider_config.result_format.as_deref(),
+        config.output.findings,
     ) {
         log::info!("Cache hit — using cached LLM response");
         // Cache hits don't have usage data — fall back to estimates.
@@ -334,21 +336,24 @@ async fn obtain_llm_response_with_composed_prompt(
     }
 
     if !config.is_ci {
-        let msg = format!("🤖 Calling {} ({})...", config.provider, config.model);
-        if config.output_format == OutputFormat::Json {
+        let msg = format!(
+            "🤖 Calling {} ({})...",
+            config.llm.provider, config.llm.model
+        );
+        if config.output.output_format == OutputFormat::Json {
             eprintln!("{}", msg);
         } else {
             println!("{}", msg);
         }
     }
     let (result, budget_escalations) =
-        call_llm_with_budget_escalation(config, composed_prompt, diff_content)
+        call_llm_with_budget_escalation(&config.llm, &config.retry, composed_prompt, diff_content)
             .await
             .context("LLM API call failed")?;
 
     if !config.is_ci {
         let msg = format!("✅ Response received ({} chars)", result.content.len());
-        if config.output_format == OutputFormat::Json {
+        if config.output.output_format == OutputFormat::Json {
             eprintln!("{}", msg);
         } else {
             println!("{}", msg);
@@ -357,7 +362,7 @@ async fn obtain_llm_response_with_composed_prompt(
 
     Ok(LlmCallOutcome {
         content: result.content,
-        should_cache: !config.no_cache,
+        should_cache: !config.cache.no_cache,
         cache_hit: false,
         usage: result.usage,
         budget_escalations,
@@ -399,18 +404,19 @@ fn next_escalated_max_tokens(current: Option<u32>) -> Option<u32> {
 /// successful escalated response is cached under the original configuration
 /// and reused on the next run without repeating the escalation.
 async fn call_llm_with_budget_escalation(
-    config: &Config,
+    llm: &LlmConfig,
+    retry: &RetryConfig,
     composed_prompt: &str,
     diff_content: &str,
 ) -> anyhow::Result<(crate::llm::ChatCompletionResult, u32)> {
-    let mut attempt_max_tokens = config.provider_config.max_tokens;
+    let mut attempt_max_tokens = llm.provider_config.max_tokens;
     let mut budget_escalations = 0u32;
 
     loop {
         let provider = create_provider_with_max_tokens(
-            &config.provider,
-            &config.api_key,
-            &config.provider_config,
+            &llm.provider,
+            &llm.api_key,
+            &llm.provider_config,
             attempt_max_tokens,
         )
         .context("Failed to create LLM provider")?;
@@ -418,10 +424,10 @@ async fn call_llm_with_budget_escalation(
         let result = with_retry_predicated(
             || async {
                 provider
-                    .chat_completion(composed_prompt, diff_content, config.temperature)
+                    .chat_completion(composed_prompt, diff_content, llm.temperature)
                     .await
             },
-            config.circuit_breaker.as_ref(),
+            retry.circuit_breaker.as_ref(),
             should_retry_llm_error,
         )
         .await;
@@ -438,7 +444,7 @@ async fn call_llm_with_budget_escalation(
                         log::warn!(
                             "[{}] Reasoning exhausted the output budget — retrying with \
                              max_tokens {} (was {:?}, cap {})",
-                            config.provider,
+                            llm.provider,
                             next,
                             attempt_max_tokens,
                             MAX_TOKENS_ESCALATION_CAP
@@ -469,19 +475,19 @@ fn cache_response(
     if let Err(e) = cache.set_with_project_rules(
         diff_content,
         composed_prompt,
-        config.project_rules.as_deref(),
-        &config.provider,
-        &config.model,
-        config.variant.as_deref(),
+        config.rules.project_rules.as_deref(),
+        &config.llm.provider,
+        &config.llm.model,
+        config.llm.variant.as_deref(),
         effective_temperature(
-            &config.provider,
-            config.variant.as_deref(),
-            config.temperature,
+            &config.llm.provider,
+            config.llm.variant.as_deref(),
+            config.llm.temperature,
         ),
-        effective_base_url(config),
-        config.provider_config.max_tokens,
-        config.provider_config.result_format.as_deref(),
-        config.findings,
+        effective_base_url(&config.llm),
+        config.llm.provider_config.max_tokens,
+        config.llm.provider_config.result_format.as_deref(),
+        config.output.findings,
         llm_response,
     ) {
         log::warn!("Failed to cache LLM response: {}", e);
@@ -574,9 +580,9 @@ fn build_review_metrics(
     error_path: &ErrorPathCounters,
 ) -> ReviewMetrics {
     ReviewMetrics {
-        provider: config.provider.clone(),
-        model: config.model.clone(),
-        variant: config.variant.clone(),
+        provider: config.llm.provider.clone(),
+        model: config.llm.model.clone(),
+        variant: config.llm.variant.clone(),
         estimated_tokens_in: tokens_in as usize,
         estimated_tokens_out: tokens_out as usize,
         token_source: token_source.to_string(),
@@ -585,7 +591,7 @@ fn build_review_metrics(
         diff_lines: diff.line_count,
         verdict: verdict.to_string(),
         state: state.to_string(),
-        project_rules_file: config.project_rules_file.clone(),
+        project_rules_file: config.rules.project_rules_file.clone(),
         secrets_redacted_count,
         multi_pass_chunk_count,
         multi_pass_failed_chunks,
@@ -616,7 +622,7 @@ async fn submit_ci_review(
         .validate_for_ci()
         .context("CI configuration validation failed")?;
 
-    if config.dry_run {
+    if config.output.dry_run {
         println!("🔍 DRY RUN — would submit review: {}", state);
         log::info!("Dry-run mode: skipping GitHub review submission");
         return Ok(());
@@ -656,7 +662,7 @@ async fn submit_ci_review(
 
 /// Creates a GitHub Check Run for the current review (non-blocking).
 ///
-/// Called from [`handle_ci_output`] when `config.check_run` is enabled. The
+/// Called from [`handle_ci_output`] when `config.github.check_run` is enabled. The
 /// Check Run conclusion is derived from `state`. Failures are logged as
 /// warnings and never propagated — a Check Run is a status-reporting side
 /// channel and must not fail an otherwise-successful review.
@@ -679,7 +685,7 @@ async fn submit_ci_check_run(
         verdict.suggestions,
     );
 
-    let head_sha = match resolve_check_run_sha(config.check_run_sha.as_deref()) {
+    let head_sha = match resolve_check_run_sha(config.github.check_run_sha.as_deref()) {
         Ok(sha) => sha,
         Err(e) => {
             log::warn!("Skipping Check Run — could not resolve head SHA: {}", e);
@@ -687,10 +693,10 @@ async fn submit_ci_check_run(
         }
     };
 
-    if config.dry_run {
+    if config.output.dry_run {
         println!(
             "🔍 DRY RUN — would create check run '{}' on {} with conclusion: {}",
-            config.check_run_name, head_sha, conclusion
+            config.github.check_run_name, head_sha, conclusion
         );
         log::info!("Dry-run mode: skipping GitHub Check Run creation");
         return;
@@ -708,7 +714,7 @@ async fn submit_ci_check_run(
         &ci_config.github_base_url,
         &ci_config.repo_owner,
         &ci_config.repo_name,
-        &config.check_run_name,
+        &config.github.check_run_name,
         &head_sha,
         state,
         &check_summary,
@@ -735,14 +741,14 @@ fn print_ci_summary(
     estimated_cost_cents: Option<f64>,
 ) {
     println!("rs-guard Review Complete");
-    if config.dry_run {
+    if config.output.dry_run {
         println!("============================");
         println!("🔍 DRY RUN — no changes submitted");
     }
     println!("============================");
-    println!("Provider:    {}", config.provider);
-    println!("Model:       {}", config.model);
-    if let Some(ref v) = config.variant {
+    println!("Provider:    {}", config.llm.provider);
+    println!("Model:       {}", config.llm.model);
+    if let Some(ref v) = config.llm.variant {
         println!("Variant:       {}", v);
     }
     let token_label = match token_source {
@@ -798,7 +804,7 @@ async fn handle_ci_output(
     };
 
     // Submit inline comments if enabled and findings are available
-    if config.inline_comments && verdict.has_findings() {
+    if config.github.inline_comments && verdict.has_findings() {
         let diff_pos_map = build_diff_position_map(&diff.content);
         let mut inline_comments = Vec::new();
         let mut unmappable = Vec::new();
@@ -822,7 +828,7 @@ async fn handle_ci_output(
                 .validate_for_ci()
                 .context("CI configuration validation failed")?;
 
-            if config.dry_run {
+            if config.output.dry_run {
                 println!(
                     "🔍 DRY RUN — would submit {} inline comment(s)",
                     inline_comments.len()
@@ -871,11 +877,11 @@ async fn handle_ci_output(
     }
 
     // Create a GitHub Check Run if enabled (non-blocking: failure is a warning).
-    if config.check_run {
+    if config.github.check_run {
         submit_ci_check_run(config, state, verdict, &sanitized_response).await;
     }
 
-    if config.output_format == OutputFormat::Text {
+    if config.output.output_format == OutputFormat::Text {
         print_ci_summary(
             config,
             diff,
@@ -912,7 +918,7 @@ fn handle_local_output(
 
     let sanitized_response = redact_secrets(llm_response);
     let prose_response = strip_findings_json(&sanitized_response);
-    if config.output_format == OutputFormat::Text {
+    if config.output.output_format == OutputFormat::Text {
         print_colored_summary(
             prose_response,
             verdict,
@@ -923,8 +929,8 @@ fn handle_local_output(
         .context("Failed to print review summary")?;
     }
 
-    if config.dry_run {
-        if config.output_format == OutputFormat::Text {
+    if config.output.dry_run {
+        if config.output.output_format == OutputFormat::Text {
             println!(
                 "\n🔍 DRY RUN — would exit with: {}",
                 if *state == ReviewState::RequestChanges {
@@ -989,33 +995,33 @@ async fn run_multi_pass_pipeline(
     composed_prompt: &str,
     secrets_redacted_count: u32,
 ) -> anyhow::Result<PipelineResult> {
-    let chunks = split_diff_by_files(&diff.content, config.multi_pass_max_chunks);
+    let chunks = split_diff_by_files(&diff.content, config.llm.multi_pass_max_chunks);
     let chunk_count = chunks.len();
 
     log::info!(
         "Multi-pass: split diff into {} chunk(s) (max_chunks={})",
         chunk_count,
-        config.multi_pass_max_chunks
+        config.llm.multi_pass_max_chunks
     );
     if !config.is_ci {
         eprintln!(
             "info: multi-pass review — {} chunk(s), max {} concurrent",
-            chunk_count, config.multi_pass_max_concurrent
+            chunk_count, config.llm.multi_pass_max_concurrent
         );
     }
 
     // Cost guard: estimate total cost before making any calls.
-    if let Some(max_cost) = config.multi_pass_max_cost_cents {
+    if let Some(max_cost) = config.llm.multi_pass_max_cost_cents {
         let total_estimated_tokens: usize = chunks
             .iter()
             .map(|c| estimate_tokens(composed_prompt) + estimate_tokens(&c.content))
             .sum();
         // Rough cost estimate: assume 1:1 input/output ratio for estimation.
         let estimated_cost = estimate_cost_cents(
-            &config.provider,
+            &config.llm.provider,
             total_estimated_tokens as u64,
             total_estimated_tokens as u64 / 4,
-            config.pricing.as_ref(),
+            config.llm.pricing.as_ref(),
         )
         .unwrap_or(0.0);
         if estimated_cost > max_cost {
@@ -1033,7 +1039,7 @@ async fn run_multi_pass_pipeline(
         );
     }
 
-    let max_concurrent = config.multi_pass_max_concurrent.max(1);
+    let max_concurrent = config.llm.multi_pass_max_concurrent.max(1);
     let start = std::time::Instant::now();
 
     // Use a semaphore to bound concurrency.
@@ -1060,6 +1066,7 @@ async fn run_multi_pass_pipeline(
 
             // Check cache.
             let base_url = config_clone
+                .llm
                 .provider_config
                 .base_url
                 .as_deref()
@@ -1067,25 +1074,27 @@ async fn run_multi_pass_pipeline(
             let cached = cache_ref.get_with_project_rules(
                 &redacted_content,
                 &prompt,
-                config_clone.project_rules.as_deref(),
-                &config_clone.provider,
-                &config_clone.model,
-                config_clone.variant.as_deref(),
+                config_clone.rules.project_rules.as_deref(),
+                &config_clone.llm.provider,
+                &config_clone.llm.model,
+                config_clone.llm.variant.as_deref(),
                 effective_temperature(
-                    &config_clone.provider,
-                    config_clone.variant.as_deref(),
-                    config_clone.temperature,
+                    &config_clone.llm.provider,
+                    config_clone.llm.variant.as_deref(),
+                    config_clone.llm.temperature,
                 ),
                 base_url,
-                config_clone.provider_config.max_tokens,
-                config_clone.provider_config.result_format.as_deref(),
-                config_clone.findings,
+                config_clone.llm.provider_config.max_tokens,
+                config_clone.llm.provider_config.result_format.as_deref(),
+                config_clone.output.findings,
             );
 
             if let Some(cached_response) = cached {
                 log::info!("Chunk {} — cache hit", chunk_index);
-                let (parsed, parse_errors) =
-                    parse_verdict_metrics(&cached_response, config_clone.important_threshold);
+                let (parsed, parse_errors) = parse_verdict_metrics(
+                    &cached_response,
+                    config_clone.output.important_threshold,
+                );
                 let result = match parsed {
                     Ok((verdict, state)) => Ok(ChunkResult {
                         index: chunk_index,
@@ -1110,39 +1119,43 @@ async fn run_multi_pass_pipeline(
             if !config_clone.is_ci {
                 eprintln!(
                     "🤖 Chunk {} — calling {} ({})...",
-                    chunk_index, config_clone.provider, config_clone.model
+                    chunk_index, config_clone.llm.provider, config_clone.llm.model
                 );
             }
 
-            let (result, budget_escalations) =
-                call_llm_with_budget_escalation(&config_clone, &prompt, &redacted_content)
-                    .await
-                    .context("LLM API call failed for chunk")?;
+            let (result, budget_escalations) = call_llm_with_budget_escalation(
+                &config_clone.llm,
+                &config_clone.retry,
+                &prompt,
+                &redacted_content,
+            )
+            .await
+            .context("LLM API call failed for chunk")?;
 
             // Cache the response.
-            if !config_clone.no_cache {
+            if !config_clone.cache.no_cache {
                 cache_ref.set_with_project_rules(
                     &redacted_content,
                     &prompt,
-                    config_clone.project_rules.as_deref(),
-                    &config_clone.provider,
-                    &config_clone.model,
-                    config_clone.variant.as_deref(),
+                    config_clone.rules.project_rules.as_deref(),
+                    &config_clone.llm.provider,
+                    &config_clone.llm.model,
+                    config_clone.llm.variant.as_deref(),
                     effective_temperature(
-                        &config_clone.provider,
-                        config_clone.variant.as_deref(),
-                        config_clone.temperature,
+                        &config_clone.llm.provider,
+                        config_clone.llm.variant.as_deref(),
+                        config_clone.llm.temperature,
                     ),
                     base_url,
-                    config_clone.provider_config.max_tokens,
-                    config_clone.provider_config.result_format.as_deref(),
-                    config_clone.findings,
+                    config_clone.llm.provider_config.max_tokens,
+                    config_clone.llm.provider_config.result_format.as_deref(),
+                    config_clone.output.findings,
                     &result.content,
                 )?;
             }
 
             let (parsed, parse_errors) =
-                parse_verdict_metrics(&result.content, config_clone.important_threshold);
+                parse_verdict_metrics(&result.content, config_clone.output.important_threshold);
             let chunk_result =
                 match parsed {
                     Ok((verdict, state)) => Ok(ChunkResult {
@@ -1223,9 +1236,11 @@ async fn run_multi_pass_pipeline(
 
     // Aggregate verdicts.
     let verdicts: Vec<Verdict> = results.iter().map(|r| r.verdict.clone()).collect();
-    let aggregated_verdict = Verdict::merge_multi(&verdicts, config.important_threshold);
-    let mut aggregated_state =
-        crate::verdict::determine_review_state(&aggregated_verdict, config.important_threshold);
+    let aggregated_verdict = Verdict::merge_multi(&verdicts, config.output.important_threshold);
+    let mut aggregated_state = crate::verdict::determine_review_state(
+        &aggregated_verdict,
+        config.output.important_threshold,
+    );
 
     // Security: when chunks failed, the review is incomplete. Force a
     // non-approving state so unreviewed code cannot pass the gate.
@@ -1265,10 +1280,10 @@ async fn run_multi_pass_pipeline(
     let token_source = if has_api_usage { "api" } else { "estimate" };
 
     let estimated_cost_cents = estimate_cost_cents(
-        &config.provider,
+        &config.llm.provider,
         total_tokens_in,
         total_tokens_out,
-        config.pricing.as_ref(),
+        config.llm.pricing.as_ref(),
     );
 
     // Compose review body from all chunk responses.
@@ -1290,11 +1305,11 @@ async fn run_multi_pass_pipeline(
 
     // Write outputs (artifact + metrics).
     let review_config = ReviewConfig {
-        provider: config.provider.clone(),
-        model: config.model.clone(),
-        variant: config.variant.clone(),
-        temperature: config.temperature,
-        pr_number: config.pr_number,
+        provider: config.llm.provider.clone(),
+        model: config.llm.model.clone(),
+        variant: config.llm.variant.clone(),
+        temperature: config.llm.temperature,
+        pr_number: config.github.pr_number,
         diff_size_bytes: diff.size_bytes,
         diff_line_count: diff.line_count,
     };
@@ -1339,7 +1354,7 @@ async fn run_multi_pass_pipeline(
     ));
 
     // JSON output.
-    if config.output_format == OutputFormat::Json {
+    if config.output.output_format == OutputFormat::Json {
         let json = ReviewResultJson {
             verdict: aggregated_verdict.verdict.clone(),
             critical_issues: aggregated_verdict.critical_issues,
@@ -1347,17 +1362,17 @@ async fn run_multi_pass_pipeline(
             important_issues: aggregated_verdict.important_issues,
             suggestions: aggregated_verdict.suggestions,
             state: aggregated_state.to_string(),
-            provider: config.provider.clone(),
-            model: config.model.clone(),
-            variant: config.variant.clone(),
+            provider: config.llm.provider.clone(),
+            model: config.llm.model.clone(),
+            variant: config.llm.variant.clone(),
             estimated_tokens_in: total_tokens_in as usize,
             estimated_tokens_out: total_tokens_out as usize,
             token_source: token_source.to_string(),
             latency_secs: total_latency.as_secs_f64(),
             estimated_cost_cents,
             diff_lines: diff.line_count,
-            project_rules_file: config.project_rules_file.clone(),
-            dry_run: config.dry_run,
+            project_rules_file: config.rules.project_rules_file.clone(),
+            dry_run: config.output.dry_run,
         };
         write_json_result(&json, &mut std::io::stdout())
             .context("Failed to write JSON review result")?;
@@ -1469,15 +1484,15 @@ async fn handle_ci_output_multi_pass(
     submit_ci_review(config, state, &full_body).await?;
 
     // Check Run (non-blocking).
-    if config.check_run {
-        let sha = resolve_check_run_sha(config.check_run_sha.as_deref())
+    if config.github.check_run {
+        let sha = resolve_check_run_sha(config.github.check_run_sha.as_deref())
             .map_err(|e| anyhow::anyhow!("Failed to resolve Check Run SHA: {}", e))?;
         let conclusion = review_state_to_conclusion(state);
         if let Err(e) = create_check_run(
             &ci_config.github_base_url,
             &ci_config.repo_owner,
             &ci_config.repo_name,
-            &config.check_run_name,
+            &config.github.check_run_name,
             &sha,
             state,
             conclusion,
@@ -1522,12 +1537,12 @@ pub async fn run_pipeline(
         DiffFetchOutcome::Complete(result) => return Ok(result),
     };
 
-    let limits = config_diff_limits(&config);
+    let limits = config_diff_limits(&config.diff);
     let diff = match apply_path_filters_with_ignore(
         diff,
-        &config.include_paths,
-        &config.exclude_paths,
-        &config.ignore_patterns,
+        &config.diff.include_paths,
+        &config.diff.exclude_paths,
+        &config.diff.ignore_patterns,
         limits,
     ) {
         Ok(d) => d,
@@ -1541,8 +1556,11 @@ pub async fn run_pipeline(
         }
     };
 
-    let (diff_content, was_chunked, removed_lines) =
-        chunk_diff(&diff, config.chunk_head_lines, config.chunk_tail_lines);
+    let (diff_content, was_chunked, removed_lines) = chunk_diff(
+        &diff,
+        config.diff.chunk_head_lines,
+        config.diff.chunk_tail_lines,
+    );
 
     // Redact secrets from the outbound diff before cache keying and the LLM call.
     let (diff_content, secrets_redacted_count) =
@@ -1560,7 +1578,7 @@ pub async fn run_pipeline(
         }
     }
 
-    let cache = build_cache(&config)?;
+    let cache = build_cache(&config.cache)?;
 
     // Only auto-add to .gitignore in local mode — CI environments are often read-only
     if !config.is_ci {
@@ -1571,32 +1589,33 @@ pub async fn run_pipeline(
 
     // Compose the final prompt with project rules layering (before token estimation)
     // Auto-select a language-aware prompt when enabled and no custom prompt was loaded.
-    let effective_prompt = if config.auto_prompt && config.prompt == crate::config::DEFAULT_PROMPT {
-        let selected = crate::prompt_select::auto_select_prompt(&diff_content);
-        if selected != crate::config::DEFAULT_PROMPT {
-            log::info!("Auto-selected language-aware prompt template based on diff content");
-            if !config.is_ci {
-                eprintln!(
-                    "info: auto-selected prompt template based on detected languages in diff"
-                );
+    let effective_prompt =
+        if config.llm.auto_prompt && config.llm.prompt == crate::config::DEFAULT_PROMPT {
+            let selected = crate::prompt_select::auto_select_prompt(&diff_content);
+            if selected != crate::config::DEFAULT_PROMPT {
+                log::info!("Auto-selected language-aware prompt template based on diff content");
+                if !config.is_ci {
+                    eprintln!(
+                        "info: auto-selected prompt template based on detected languages in diff"
+                    );
+                }
+                selected
+            } else {
+                config.llm.prompt.as_str()
             }
-            selected
         } else {
-            config.prompt.as_str()
-        }
-    } else {
-        config.prompt.as_str()
-    };
-    let rules_path = config.project_rules_file.as_deref();
+            config.llm.prompt.as_str()
+        };
+    let rules_path = config.rules.project_rules_file.as_deref();
     let composed_prompt = compose_prompt(
         effective_prompt,
-        config.project_rules.as_deref(),
+        config.rules.project_rules.as_deref(),
         rules_path,
-        config.findings,
+        config.output.findings,
     );
 
     // Multi-pass branch: split diff by files and review each chunk independently.
-    if config.multi_pass {
+    if config.llm.multi_pass {
         log::info!("Multi-pass review enabled — splitting diff by file sections");
         return run_multi_pass_pipeline(
             &config,
@@ -1612,9 +1631,9 @@ pub async fn run_pipeline(
     let estimated_tokens_in = estimate_tokens(&composed_prompt) + estimate_tokens(&diff_content);
 
     if let Some(context_window) =
-        crate::llm::providers::get_provider_context_window(&config.provider)
+        crate::llm::providers::get_provider_context_window(&config.llm.provider)
     {
-        check_token_warning(estimated_tokens_in, context_window, &config.provider);
+        check_token_warning(estimated_tokens_in, context_window, &config.llm.provider);
     }
 
     let llm_outcome =
@@ -1651,15 +1670,16 @@ pub async fn run_pipeline(
     };
 
     let estimated_cost_cents = estimate_cost_cents(
-        &config.provider,
+        &config.llm.provider,
         tokens_in,
         tokens_out,
-        config.pricing.as_ref(),
+        config.llm.pricing.as_ref(),
     );
 
     log_response_diagnostics(&llm_response);
 
-    let (parsed, parse_errors) = parse_verdict_metrics(&llm_response, config.important_threshold);
+    let (parsed, parse_errors) =
+        parse_verdict_metrics(&llm_response, config.output.important_threshold);
     let error_path = ErrorPathCounters {
         verdict_parse_errors: parse_errors,
         budget_escalations: llm_outcome.budget_escalations,
@@ -1712,11 +1732,11 @@ pub async fn run_pipeline(
     );
 
     let review_config = ReviewConfig {
-        provider: config.provider.clone(),
-        model: config.model.clone(),
-        variant: config.variant.clone(),
-        temperature: config.temperature,
-        pr_number: config.pr_number,
+        provider: config.llm.provider.clone(),
+        model: config.llm.model.clone(),
+        variant: config.llm.variant.clone(),
+        temperature: config.llm.temperature,
+        pr_number: config.github.pr_number,
         diff_size_bytes: diff.size_bytes,
         diff_line_count: diff.line_count,
     };
@@ -1737,7 +1757,7 @@ pub async fn run_pipeline(
         &error_path,
     )?;
 
-    if config.output_format == OutputFormat::Json {
+    if config.output.output_format == OutputFormat::Json {
         let json = ReviewResultJson {
             verdict: verdict.verdict.clone(),
             critical_issues: verdict.critical_issues,
@@ -1745,17 +1765,17 @@ pub async fn run_pipeline(
             important_issues: verdict.important_issues,
             suggestions: verdict.suggestions,
             state: state.to_string(),
-            provider: config.provider.clone(),
-            model: config.model.clone(),
-            variant: config.variant.clone(),
+            provider: config.llm.provider.clone(),
+            model: config.llm.model.clone(),
+            variant: config.llm.variant.clone(),
             estimated_tokens_in: tokens_in as usize,
             estimated_tokens_out: tokens_out as usize,
             token_source: token_source.to_string(),
             latency_secs: latency.as_secs_f64(),
             estimated_cost_cents,
             diff_lines: diff.line_count,
-            project_rules_file: config.project_rules_file.clone(),
-            dry_run: config.dry_run,
+            project_rules_file: config.rules.project_rules_file.clone(),
+            dry_run: config.output.dry_run,
         };
         write_json_result(&json, &mut std::io::stdout())
             .context("Failed to write JSON review result")?;
@@ -2280,7 +2300,7 @@ mod tests {
 
         let mut config = Config::empty();
         config.is_ci = false;
-        config.diff_base = Some("base".into());
+        config.diff.diff_base = Some("base".into());
 
         let outcome = fetch_diff(&config, None).await;
         let _ = std::env::set_current_dir(&original);
@@ -2308,7 +2328,7 @@ mod tests {
 
         let mut config = Config::empty();
         config.is_ci = false;
-        config.diff_base = Some("definitely-missing-ref".into());
+        config.diff.diff_base = Some("definitely-missing-ref".into());
 
         let outcome = fetch_diff(&config, None).await;
         let _ = std::env::set_current_dir(&original);
@@ -2338,7 +2358,7 @@ mod tests {
 
         let mut config = Config::empty();
         config.is_ci = false;
-        config.diff_base = Some("base".into());
+        config.diff.diff_base = Some("base".into());
 
         let outcome = fetch_diff(&config, Some(file_path.to_str().unwrap())).await;
         let _ = std::env::set_current_dir(&original);
@@ -2512,10 +2532,10 @@ Some review text.
             .await;
 
         let mut config = Config::empty();
-        config.check_run = true;
-        config.dry_run = true;
-        config.check_run_name = "rs-guard".into();
-        config.check_run_sha = Some("explicit-sha".into());
+        config.github.check_run = true;
+        config.output.dry_run = true;
+        config.github.check_run_name = "rs-guard".into();
+        config.github.check_run_sha = Some("explicit-sha".into());
 
         let state = ReviewState::Approve;
         let verdict = check_run_verdict();
@@ -2543,16 +2563,16 @@ Some review text.
             .await;
 
         let mut config = Config::empty();
-        config.check_run = true;
-        config.dry_run = false;
-        config.check_run_name = "rs-guard".into();
-        config.check_run_sha = Some("explicit-sha".into());
+        config.github.check_run = true;
+        config.output.dry_run = false;
+        config.github.check_run_name = "rs-guard".into();
+        config.github.check_run_sha = Some("explicit-sha".into());
         config.is_ci = true;
-        config.github_base_url = github.uri();
-        config.repo_owner = Some("test-owner".into());
-        config.repo_name = Some("test-repo".into());
-        config.pr_number = Some(42);
-        config.github_token = Some("test-token".into());
+        config.github.github_base_url = github.uri();
+        config.github.repo_owner = Some("test-owner".into());
+        config.github.repo_name = Some("test-repo".into());
+        config.github.pr_number = Some(42);
+        config.github.github_token = Some("test-token".into());
 
         let state = ReviewState::Approve;
         let verdict = check_run_verdict();
@@ -2573,16 +2593,16 @@ Some review text.
             .await;
 
         let mut config = Config::empty();
-        config.check_run = true;
-        config.dry_run = false;
-        config.check_run_name = "rs-guard".into();
-        config.check_run_sha = Some("explicit-sha".into());
+        config.github.check_run = true;
+        config.output.dry_run = false;
+        config.github.check_run_name = "rs-guard".into();
+        config.github.check_run_sha = Some("explicit-sha".into());
         config.is_ci = true;
-        config.github_base_url = github.uri();
-        config.repo_owner = Some("test-owner".into());
-        config.repo_name = Some("test-repo".into());
-        config.pr_number = Some(42);
-        config.github_token = Some("test-token".into());
+        config.github.github_base_url = github.uri();
+        config.github.repo_owner = Some("test-owner".into());
+        config.github.repo_name = Some("test-repo".into());
+        config.github.pr_number = Some(42);
+        config.github.github_token = Some("test-token".into());
 
         let state = ReviewState::Approve;
         let verdict = check_run_verdict();
@@ -2607,10 +2627,10 @@ Some review text.
         let _g_event = EnvGuard::remove("GITHUB_EVENT_PATH");
 
         let mut config = Config::empty();
-        config.check_run = true;
-        config.dry_run = false;
-        config.check_run_name = "rs-guard".into();
-        config.check_run_sha = None; // no explicit, no env → unresolvable
+        config.github.check_run = true;
+        config.output.dry_run = false;
+        config.github.check_run_name = "rs-guard".into();
+        config.github.check_run_sha = None; // no explicit, no env → unresolvable
 
         let state = ReviewState::Approve;
         let verdict = check_run_verdict();
@@ -2631,8 +2651,8 @@ Some review text.
             .await;
 
         let mut config = Config::empty();
-        config.check_run = false; // disabled
-        config.check_run_sha = Some("explicit-sha".into());
+        config.github.check_run = false; // disabled
+        config.github.check_run_sha = Some("explicit-sha".into());
 
         let state = ReviewState::Approve;
         let verdict = check_run_verdict();

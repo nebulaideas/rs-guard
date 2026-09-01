@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`Config` split into focused sub-structs** (issue #158) — `Config` is now a
+  composition of `DiffConfig`, `LlmConfig`, `GithubConfig`, `CacheConfig`,
+  `OutputConfig`, `RetryConfig`, and `RulesConfig`, plus `is_ci` and
+  construction-time bookkeeping. Pipeline helpers that only need one concern
+  take that sub-struct (`&DiffConfig`, `&LlmConfig`, `&CacheConfig`,
+  `&RetryConfig`, `&RulesConfig`) instead of `&Config`. `run_pipeline` still
+  takes `Config` by value. `config::CacheConfig` is the resolved CLI/env/TOML
+  cache settings and is distinct from the runtime `cache::CacheConfig` engine.
+  Graphify degree <20 was not re-measured in this worktree (graphify
+  unavailable); not treated as a merge gate.
+
 - **Thinking-model LLM timeout floor is now 240s** (was 180s) for `deepseek`
   and `kimi` when `llm_timeout_secs` is not set explicitly. DeepSeek V4 pro
   thinking on large diffs routinely exceeded 180s in CI (issue #163).
