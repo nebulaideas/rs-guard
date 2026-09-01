@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Nothing yet.
+
+## [1.8.3] - 2026-09-01
+
 ### Changed
 
 - **`Config` split into focused sub-structs** (issue #158) — `Config` is now a
@@ -61,6 +67,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Findings can escalate counts and force `NEGATIVE`, never drop below the
   preliminary counts or silently approve. The 9 handwritten invariant tests
   remain as regression examples.
+
+### Documentation
+
+- Two-tier `DiffLimits` rustdoc (`raw_fetch` vs user limits) with a lockfile
+  example (issue #157). Cross-links between isolated doc concepts and code
+  symbols, plus remaining thin communities (issues #164, #162).
 
 ## [1.8.2] - 2026-08-26
 
