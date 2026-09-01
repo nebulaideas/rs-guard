@@ -677,24 +677,21 @@ repository's `.gitignore`. Instead, add one global entry to your
 project is covered at once:
 
 ```bash
-# Point at a global excludes file only if none is configured —
-# never clobber an existing setting.
-if ! git config --global --get core.excludesFile >/dev/null 2>&1; then
+# Set a global excludes file only if none is configured at any scope
+# (system, global, or local) — never clobber an existing setting.
+if ! git config --get core.excludesFile >/dev/null 2>&1; then
   git config --global core.excludesFile '~/.gitignore_global'
 fi
 
 # Append to whatever file is actually in effect (existing or just-set).
-GLOBAL_IGNORE="$(git config --global --get core.excludesFile)"
-GLOBAL_IGNORE="${GLOBAL_IGNORE/#\~/$HOME}"
+# `--path` expands `~` and `~user` the same way git itself does.
+GLOBAL_IGNORE="$(git config --path --get core.excludesFile)"
 cat >> "$GLOBAL_IGNORE" <<'EOF'
 # rs-guard local review artifacts
 .rs-guard/
 rs-guard-metrics.json
 EOF
 ```
-
-`git` tilde-expands the stored value when matching ignores; the parameter
-expansion handles the shell-side append.
 
 `.rs-guard/` also covers the cache directory, so one entry suffices. Opt
 back into per-repo `.gitignore` management with `auto_gitignore = true` in

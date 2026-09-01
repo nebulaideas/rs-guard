@@ -2616,7 +2616,7 @@ mod tests {
     fn test_auto_gitignore_toml_true_propagates() {
         // Explicit TOML opt-in must override the new `false` default.
         // Note: `auto_gitignore` is TOML-only — there is no RS_GUARD_* env
-        // fallback (resolve in from_env), so no env var needs clearing here.
+        // fallback (resolved in from_env), so no env var needs clearing here.
         let toml = TomlConfig {
             auto_gitignore: Some(true),
             ..Default::default()
