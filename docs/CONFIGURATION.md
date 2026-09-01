@@ -118,7 +118,7 @@ base_url = "https://generativelanguage.googleapis.com/v1beta/openai"
 | `output_format` | string | `\"text\"` | Output format: `\"text\"` or `\"json\"`. Equivalent to `--format` / `RS_GUARD_FORMAT`. |
 | `check_run` | boolean | `false` | Create a GitHub Check Run in addition to the PR review. Requires `checks: write` permission. Equivalent to `--check-run` / `RS_GUARD_CHECK_RUN`. |
 | `check_run_name` | string | `\"rs-guard\"` | Custom name for the GitHub Check Run. Equivalent to `--check-run-name` / `RS_GUARD_CHECK_RUN_NAME`. |
-| `ignore_file` | string | `.rs-guardignore` | Path to a `.rs-guardignore` file with gitignore-style patterns for excluding paths from the review diff. Equivalent to `--ignore-file` / `RS_GUARD_IGNORE_FILE`. **In CI mode, the default repo-root path is NOT auto-loaded** — an explicit path must be provided to prevent PR-controlled ignore patterns from bypassing review. |
+| `ignore_file` | string | `.rs-guardignore` | Path to a `.rs-guardignore` file with gitignore-style patterns for excluding paths from the review diff. Parsed by `parse_rs_guard_ignore()` and applied by `apply_path_filters_with_ignore()` in `src/diff.rs`. Equivalent to `--ignore-file` / `RS_GUARD_IGNORE_FILE`. **In CI mode, the default repo-root path is NOT auto-loaded** — an explicit path must be provided to prevent PR-controlled ignore patterns from bypassing review. See `docs/USAGE.md` §Ignore File. |
 | `auto_prompt` | boolean | `true` | Whether to auto-select a language-aware prompt template based on changed file extensions. Disabled via `--no-auto-prompt` / `RS_GUARD_NO_AUTO_PROMPT=1`. Explicit `--prompt-file` always wins. |
 
 #### Provider Section Fields
@@ -487,7 +487,9 @@ or `a*b*c`) never match. Prefer simple documented forms only.
 
 ## Local branch-range review (`diff_base`)
 
-In **local mode**, you can review a branch range instead of staged changes:
+In **local mode**, you can review a branch range instead of staged changes.
+Implemented by `fetch_range_diff()` in `src/diff.rs`, which returns a
+`DiffResult` (same type as `fetch_local_diff()`).
 
 | Source | Key / flag |
 |--------|------------|

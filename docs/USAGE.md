@@ -327,7 +327,10 @@ is skipped.
 ## Ignore File (v1.8)
 
 rs-guard supports a `.rs-guardignore` file (gitignore syntax) for excluding
-paths from the review diff before size checks and LLM review.
+paths from the review diff before size checks and LLM review. Patterns are
+parsed by `parse_rs_guard_ignore()` and applied by
+`apply_path_filters_with_ignore()` in `src/diff.rs` (`ignore_file` in
+`docs/CONFIGURATION.md`).
 
 ### Usage
 

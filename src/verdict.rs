@@ -542,6 +542,8 @@ pub fn determine_review_state(verdict: &Verdict, important_threshold: u32) -> Re
 
 /// Parses an LLM response into a verdict and corresponding review state.
 ///
+/// Sample POSITIVE fixture: `tests/test_data/verdict_positive.txt`.
+///
 /// First validates the response is not empty or whitespace-only, then:
 /// 1. Extracts the metadata block to get the verdict string and counts.
 ///    Falls back to tag counting if no metadata block is present.

@@ -44,6 +44,10 @@ In local mode, rs-guard:
 
 ### Option 1: Copy the Example Hook
 
+The example hook (`examples/local-review/pre-commit-hook.sh`) runs `rs-guard`
+on staged changes (`run_pipeline()` in `src/pipeline.rs`). Alternatively
+install it with `scripts/install-hooks.sh`.
+
 ```bash
 cp examples/local-review/pre-commit-hook.sh .git/hooks/pre-commit
 chmod +x .git/hooks/pre-commit
@@ -209,9 +213,12 @@ States are color-coded:
 
 ## Branch-range review (`--base`)
 
-By default local mode reviews **staged** changes (`git diff --cached`).
+By default local mode reviews **staged** changes via `fetch_local_diff()`
+(`git diff --cached` → `DiffResult` in `src/diff.rs`).
 
-To review an entire branch the way a PR would look, pass a base ref:
+To review an entire branch the way a PR would look, pass a base ref;
+`fetch_range_diff()` in `src/diff.rs` runs `git diff <base>...HEAD` and
+returns the same `DiffResult` type.
 
 ```bash
 rs-guard --base origin/main
@@ -227,7 +234,7 @@ Or set a project default in `.reviewer.toml`:
 diff_base = "origin/main"
 ```
 
-This runs `git diff <base>...HEAD` (three-dot, merge-base aware). The base ref
+This runs `fetch_range_diff()` → `git diff <base>...HEAD` (three-dot, merge-base aware). The base ref
 is trimmed; blank/`--base ""` is treated as unset (staged diff). Non-empty values must not contain `..`, internal whitespace/NUL, or start with `-` (rejected to avoid
 git option injection). Precedence:
 

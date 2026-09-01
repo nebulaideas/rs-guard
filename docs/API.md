@@ -192,9 +192,9 @@ pub struct ProviderConfig {
 | `fetch_pr_diff(base_url, owner, repo, pr, token)` | Fetches PR diff via GitHub API             |
 | `fetch_local_diff()`                              | Runs `git diff --cached`                   |
 | `fetch_file_diff(path)`                           | Reads diff from a file                     |
-| `chunk_diff(content: &str)`                       | Truncates large diffs to 400 head + 400 tail (`src/diff.rs`) |
-| `chunk_diff_with_params(content, head, tail)`     | Same as `chunk_diff`, with explicit head/tail; returns `Cow<str>` |
-| `DiffResult`                                      | Struct holding diff content and metadata (`content`, `size_bytes`, `line_count`) |
+| `chunk_diff(content: &str)`                       | Truncates large diffs to 400 head + 400 tail (`src/diff.rs`); returns `(Cow<str>, was_truncated, removed_lines)` |
+| `chunk_diff_with_params(content, head, tail)`     | Same as `chunk_diff`, with explicit head/tail; same tuple return |
+| `DiffResult`                                      | Struct in `src/diff.rs` (`content`, `size_bytes`, `line_count`); produced by `fetch_pr_diff` / `fetch_local_diff` / `fetch_file_diff` / `fetch_range_diff` |
 
 ### `github`
 
