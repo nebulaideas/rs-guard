@@ -130,6 +130,10 @@ cargo install --path .
 
 ## Platform-Specific Instructions
 
+rs-guard is a single static binary (`src/main.rs` → `run_pipeline()` in
+`src/pipeline.rs`). Linux, macOS, and Windows share the same code path;
+only install location and PATH differ.
+
 ### Linux
 
 #### Add to PATH (if not using sudo)

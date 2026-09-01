@@ -6,7 +6,10 @@ rs-guard supports local pre-commit execution, analyzing `git diff --cached` outp
 
 ## Detection
 
-Local mode is automatically detected when the `GITHUB_ACTIONS` environment variable is **absent**.
+Local mode is automatically detected when the `GITHUB_ACTIONS` environment
+variable is **absent** (`Config.is_ci` in `src/config.rs`; branched in
+`run_pipeline()` in `src/pipeline.rs`). Staged diffs come from
+`fetch_local_diff()` in `src/diff.rs`.
 
 ```bash
 # Local mode (no GITHUB_ACTIONS)

@@ -368,6 +368,8 @@ impl DiffPositionMap {
 
 /// Builds a diff position map from a unified diff string.
 ///
+/// Diff hunk parser for inline comments (`docs/v1.7.md` `#108a`).
+///
 /// Parses the unified diff to map each `(file_path, line_number)` pair to
 /// the 1-based GitHub diff position index. Per GitHub API docs: "The
 /// position value equals the number of lines down from the first `@@`
@@ -483,6 +485,8 @@ fn severity_emoji(severity: &FindingSeverity) -> &'static str {
 }
 
 /// Formats a finding as an inline review comment body.
+///
+/// Used by the v1.7 inline-review path (`docs/v1.7.md` `#108b`).
 pub fn format_inline_comment(finding: &Finding) -> String {
     let emoji = severity_emoji(&finding.severity);
     let mut body = format!("{} **[{}]** {}", emoji, finding.severity, finding.message);
@@ -703,6 +707,9 @@ pub fn resolve_check_run_sha(explicit_sha: Option<&str>) -> Result<String, RsGua
 }
 
 /// Creates a GitHub Check Run for the current commit.
+///
+/// See `docs/v1.7.md` §GitHub Check Runs (`#109`) and
+/// `docs/CONFIGURATION.md` §GitHub Check Runs.
 ///
 /// The Check Run is created with `status: "completed"` and a conclusion
 /// derived from the review state. The `head_sha` is resolved via

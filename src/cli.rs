@@ -1,4 +1,6 @@
 //! CLI argument definitions using `clap` derive macros.
+//!
+//! Flag surface: `docs/USAGE.md` §CLI Reference. JSON mode is [`OutputFormat::Json`].
 
 use clap::{Parser, Subcommand, ValueEnum};
 use std::path::PathBuf;

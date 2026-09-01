@@ -15,7 +15,7 @@ const USER_AGENT: &str = concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VE
 /// Builds a [`reqwest::Client`] with a standard timeout.
 ///
 /// Shared helper to avoid duplicating client construction across modules
-/// that communicate with the GitHub API.
+/// that communicate with the GitHub API. See `docs/API.md` §http.
 ///
 /// Note: User-Agent is added per-request via [`github_headers()`].
 ///

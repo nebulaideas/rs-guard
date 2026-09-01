@@ -737,11 +737,20 @@ The release binary is already small (~5 MB). Further size reductions are possibl
 
 ### `Cow<str>` for Diff Chunking
 
-`chunk_diff()` returns `Cow<str>` — borrowed when no truncation is needed (zero allocation in the common case where the diff fits within limits). Only when truncation occurs is an `Owned` string allocated.
+Uses `Cow<str>` for zero-allocation when no truncation is needed — see
+`chunk_diff_with_params()` in `src/diff.rs`. The function returns
+`Cow::Borrowed` (zero allocation) when the diff fits within
+`head_lines + tail_lines`, and `Cow::Owned` only when the middle
+section is replaced with a placeholder. `chunk_diff()` is a thin
+wrapper that uses `DEFAULT_CHUNK_HEAD_LINES` / `DEFAULT_CHUNK_TAIL_LINES`.
 
 ### Integer Cents for Cost Calculation
 
-`estimate_cost_cents()` in `pipeline.rs` returns `u64` cents instead of `f64` dollars. This avoids floating-point precision issues (e.g., `0.1 + 0.2 != 0.3`). Display converts to dollars: `$0.34` = `34 cents / 100.0`.
+`estimate_cost_cents()` in `src/pipeline.rs` returns `Option<f64>` **cents**
+(not dollars) so small diffs are not truncated to zero by integer division.
+`None` means the provider has no verified price (`default_pricing()`).
+Display converts to dollars: `$0.34` = `34 cents / 100.0`. Override via
+`.reviewer.toml` `[pricing.<provider>]` (`docs/CONFIGURATION.md`).
 
 ### Benchmarking with Criterion
 
