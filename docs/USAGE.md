@@ -313,7 +313,9 @@ the review body.
 ### Metrics
 
 The `rs-guard-metrics.json` file includes `multi_pass_chunk_count` and
-`multi_pass_failed_chunks` fields when multi-pass is active.
+`multi_pass_failed_chunks` fields when multi-pass is active. Every run also
+records error-path counters: `verdict_parse_errors`, `budget_escalations`,
+`cache_hits`, `cache_misses`, `diff_chunked`, and `diff_removed_lines`.
 
 ### Cost warning
 

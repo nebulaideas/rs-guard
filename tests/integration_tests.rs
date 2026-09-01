@@ -521,6 +521,16 @@ async fn test_full_pipeline_metrics_file_created() {
     assert!(content.contains("estimated_tokens_out"));
     assert!(content.contains("latency_secs"));
     assert!(content.contains("estimated_cost_cents"));
+    let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
+    assert!(parsed["verdict_parse_errors"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+    assert_eq!(parsed["budget_escalations"], 0);
+    assert_eq!(parsed["cache_hits"], 0);
+    assert_eq!(parsed["cache_misses"], 1);
+    assert_eq!(parsed["diff_chunked"], false);
+    assert_eq!(parsed["diff_removed_lines"], 0);
 
     // Temp file is automatically cleaned up on drop
     std::env::remove_var("RS_GUARD_METRICS_PATH");
@@ -1192,6 +1202,287 @@ async fn test_multi_pass_cost_guard_aborts_before_llm_calls() {
         "Error should mention cost: {}",
         err_msg
     );
+}
+
+const MALFORMED_BLOCKING_RESPONSE: &str = "Found issues.\n\n[RS_GUARD_VERDICT_METADATA]\nVerdict: NEGATIVE\nCriticalIssues: 1\nSecurityIssues: 0\nImportantIssues: 0\nSuggestions: 0\n\n[RS_GUARD_VERDICT_FINDINGS]\n[{\"path\":\"a.rs\"}]";
+
+const INVALID_VERDICT_RESPONSE: &str = "Unclear.\n\n[RS_GUARD_VERDICT_METADATA]\nVerdict: MAYBE\nCriticalIssues: 0\nSecurityIssues: 0\nImportantIssues: 0\nSuggestions: 0";
+
+struct MetricsPathGuard {
+    file: tempfile::NamedTempFile,
+}
+
+impl MetricsPathGuard {
+    fn new() -> Self {
+        let file = tempfile::NamedTempFile::new().unwrap();
+        std::env::set_var("RS_GUARD_METRICS_PATH", file.path());
+        Self { file }
+    }
+
+    fn read_json(&self) -> serde_json::Value {
+        serde_json::from_str(&std::fs::read_to_string(self.file.path()).unwrap()).unwrap()
+    }
+}
+
+impl Drop for MetricsPathGuard {
+    fn drop(&mut self) {
+        std::env::remove_var("RS_GUARD_METRICS_PATH");
+    }
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn test_metrics_records_malformed_findings_on_blocking_preliminary() {
+    let github = MockServer::start().await;
+    let llm = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path_regex(r"/repos/test-owner/test-repo/pulls/\d+"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(VALID_DIFF))
+        .mount(&github)
+        .await;
+
+    Mock::given(method("POST"))
+        .and(path_regex(r"/chat/completions"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "choices": [{"message": {"content": MALFORMED_BLOCKING_RESPONSE}}],
+            "model": "test-model"
+        })))
+        .mount(&llm)
+        .await;
+
+    Mock::given(method("POST"))
+        .and(path_regex(r"/repos/test-owner/test-repo/pulls/\d+/reviews"))
+        .respond_with(ResponseTemplate::new(200))
+        .mount(&github)
+        .await;
+
+    let mut config = ci_config(42, "deepseek", "test-token");
+    config.github_base_url = github.uri();
+    config.provider_config.base_url = Some(llm.uri());
+    config.no_cache = true;
+
+    let metrics = MetricsPathGuard::new();
+    let result = run_pipeline(config, None).await;
+    assert!(matches!(result, Ok(PipelineResult::Success)));
+
+    let parsed = metrics.read_json();
+    let errors = parsed["verdict_parse_errors"].as_array().unwrap();
+    assert_eq!(errors.len(), 1);
+    assert_eq!(errors[0]["error_type"], "malformed_findings");
+    assert_eq!(errors[0]["preliminary_blocking"], true);
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn test_metrics_records_invalid_verdict_on_parse_failure() {
+    let github = MockServer::start().await;
+    let llm = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path_regex(r"/repos/test-owner/test-repo/pulls/\d+"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(VALID_DIFF))
+        .mount(&github)
+        .await;
+
+    Mock::given(method("POST"))
+        .and(path_regex(r"/chat/completions"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "choices": [{"message": {"content": INVALID_VERDICT_RESPONSE}}],
+            "model": "test-model"
+        })))
+        .mount(&llm)
+        .await;
+
+    let mut config = ci_config(42, "deepseek", "test-token");
+    config.github_base_url = github.uri();
+    config.provider_config.base_url = Some(llm.uri());
+    config.no_cache = true;
+
+    let metrics = MetricsPathGuard::new();
+    let result = run_pipeline(config, None).await;
+    assert!(result.is_err());
+
+    let parsed = metrics.read_json();
+    let errors = parsed["verdict_parse_errors"].as_array().unwrap();
+    assert_eq!(errors.len(), 1);
+    assert_eq!(errors[0]["error_type"], "invalid_verdict");
+    assert_eq!(parsed["verdict"], "PARSE_ERROR");
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn test_metrics_records_cache_hit_and_miss() {
+    let cache_dir = tempfile::tempdir().unwrap();
+    let github = MockServer::start().await;
+    let llm = MockServer::start().await;
+
+    let unique_id = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let unique_diff =
+        format!("diff --git a/metrics{unique_id}.rs b/metrics{unique_id}.rs\n+line42");
+
+    Mock::given(method("GET"))
+        .and(path_regex(r"/repos/test-owner/test-repo/pulls/\d+"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(&unique_diff))
+        .mount(&github)
+        .await;
+
+    Mock::given(method("POST"))
+        .and(path_regex(r"/chat/completions"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "choices": [{"message": {"content": POSITIVE_RESPONSE}}], "model": "test-model"
+        })))
+        .expect(1)
+        .mount(&llm)
+        .await;
+
+    Mock::given(method("POST"))
+        .and(path_regex(r"/repos/test-owner/test-repo/pulls/\d+/reviews"))
+        .respond_with(ResponseTemplate::new(200))
+        .expect(2)
+        .mount(&github)
+        .await;
+
+    let mut config1 = ci_config(42, "deepseek", "test-token");
+    config1.github_base_url = github.uri();
+    config1.provider_config.base_url = Some(llm.uri());
+    config1.cache_dir = Some(cache_dir.path().to_string_lossy().into_owned());
+    config1.auto_gitignore = false;
+
+    let metrics_miss = MetricsPathGuard::new();
+    let result1 = run_pipeline(config1, None).await;
+    assert!(matches!(result1, Ok(PipelineResult::Success)));
+    let miss = metrics_miss.read_json();
+    assert_eq!(miss["cache_hits"], 0);
+    assert_eq!(miss["cache_misses"], 1);
+    drop(metrics_miss);
+
+    let mut config2 = ci_config(42, "deepseek", "test-token");
+    config2.github_base_url = github.uri();
+    config2.provider_config.base_url = Some(llm.uri());
+    config2.cache_dir = Some(cache_dir.path().to_string_lossy().into_owned());
+    config2.auto_gitignore = false;
+
+    let metrics_hit = MetricsPathGuard::new();
+    let result2 = run_pipeline(config2, None).await;
+    assert!(matches!(result2, Ok(PipelineResult::Success)));
+    let hit = metrics_hit.read_json();
+    assert_eq!(hit["cache_hits"], 1);
+    assert_eq!(hit["cache_misses"], 0);
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn test_metrics_records_diff_chunking() {
+    let github = MockServer::start().await;
+    let llm = MockServer::start().await;
+
+    let large_diff: String = (0..20)
+        .map(|i| {
+            format!(
+                "diff --git a/file{}.rs b/file{}.rs\n--- a/file{}.rs\n+++ b/file{}.rs\n@@ -1,1 +1,1 @@\n-old line {}\n+new line {}\n",
+                i, i, i, i, i, i
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    Mock::given(method("GET"))
+        .and(path_regex(r"/repos/test-owner/test-repo/pulls/\d+"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(large_diff))
+        .mount(&github)
+        .await;
+
+    Mock::given(method("POST"))
+        .and(path_regex(r"/chat/completions"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "choices": [{"message": {"content": POSITIVE_RESPONSE}}], "model": "test-model"
+        })))
+        .mount(&llm)
+        .await;
+
+    Mock::given(method("POST"))
+        .and(path_regex(r"/repos/test-owner/test-repo/pulls/\d+/reviews"))
+        .respond_with(ResponseTemplate::new(200))
+        .mount(&github)
+        .await;
+
+    let mut config = ci_config(42, "deepseek", "test-token");
+    config.github_base_url = github.uri();
+    config.provider_config.base_url = Some(llm.uri());
+    config.no_cache = true;
+    config.chunk_head_lines = 2;
+    config.chunk_tail_lines = 2;
+
+    let metrics = MetricsPathGuard::new();
+    let result = run_pipeline(config, None).await;
+    assert!(matches!(result, Ok(PipelineResult::Success)));
+
+    let parsed = metrics.read_json();
+    assert_eq!(parsed["diff_chunked"], true);
+    assert!(parsed["diff_removed_lines"].as_u64().unwrap() > 0);
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn test_metrics_records_budget_escalation() {
+    let github = MockServer::start().await;
+    let llm = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path_regex(r"/repos/test-owner/test-repo/pulls/\d+"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(VALID_DIFF))
+        .mount(&github)
+        .await;
+
+    Mock::given(method("POST"))
+        .and(path_regex(r"/chat/completions"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "choices": [{
+                "message": {
+                    "content": "",
+                    "reasoning_content": "long internal chain of thought"
+                }
+            }],
+            "model": "test-model"
+        })))
+        .up_to_n_times(1)
+        .mount(&llm)
+        .await;
+
+    Mock::given(method("POST"))
+        .and(path_regex(r"/chat/completions"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "choices": [{"message": {"content": POSITIVE_RESPONSE}}],
+            "model": "test-model"
+        })))
+        .mount(&llm)
+        .await;
+
+    Mock::given(method("POST"))
+        .and(path_regex(r"/repos/test-owner/test-repo/pulls/\d+/reviews"))
+        .respond_with(ResponseTemplate::new(200))
+        .mount(&github)
+        .await;
+
+    let mut config = ci_config(42, "deepseek", "test-token");
+    config.github_base_url = github.uri();
+    config.provider_config.base_url = Some(llm.uri());
+    config.no_cache = true;
+
+    let metrics = MetricsPathGuard::new();
+    let result = run_pipeline(config, None).await;
+    assert!(
+        matches!(result, Ok(PipelineResult::Success)),
+        "pipeline failed: {:?}",
+        result.err().map(|e| e.to_string())
+    );
+
+    let parsed = metrics.read_json();
+    assert_eq!(parsed["budget_escalations"], 1);
 }
 
 /// Writes a diff string to a temporary file and returns the path.

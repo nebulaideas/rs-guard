@@ -10,9 +10,29 @@
 
 use crate::error::RsGuardError;
 use regex::Regex;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::LazyLock;
+
+/// Recorded verdict-parse issue for `rs-guard-metrics.json`.
+///
+/// `error_type` is one of `"malformed_findings"`, `"empty_response"`, or
+/// `"invalid_verdict"`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct VerdictParseError {
+    /// Machine-readable class of the parse failure.
+    pub error_type: String,
+    /// Whether the preliminary verdict was already blocking when this error
+    /// occurred. Always `false` for empty responses (no preliminary exists).
+    pub preliminary_blocking: bool,
+}
+
+/// Metrics `error_type` for a malformed `[RS_GUARD_VERDICT_FINDINGS]` block.
+pub const PARSE_ERROR_MALFORMED_FINDINGS: &str = "malformed_findings";
+/// Metrics `error_type` for an empty or whitespace-only LLM response.
+pub const PARSE_ERROR_EMPTY_RESPONSE: &str = "empty_response";
+/// Metrics `error_type` for a verdict value other than POSITIVE/NEGATIVE.
+pub const PARSE_ERROR_INVALID_VERDICT: &str = "invalid_verdict";
 
 /// Maximum bytes to scan after the metadata marker for fields.
 /// Increased to 4096 to handle large LLM responses where the metadata block
@@ -571,11 +591,37 @@ pub fn parse_verdict(
     response: &str,
     important_threshold: u32,
 ) -> Result<(Verdict, ReviewState), RsGuardError> {
+    parse_verdict_metrics(response, important_threshold).0
+}
+
+/// Parses an LLM response and records verdict-parse issues for metrics.
+///
+/// The [`Result`] is identical to [`parse_verdict`]. The `Vec` is empty on a
+/// clean parse. Fatal failures still return `Err` and include a matching
+/// [`VerdictParseError`]. Recoverable malformed findings with a blocking
+/// preliminary return `Ok` and record `"malformed_findings"` with
+/// `preliminary_blocking: true`.
+pub fn parse_verdict_metrics(
+    response: &str,
+    important_threshold: u32,
+) -> (
+    Result<(Verdict, ReviewState), RsGuardError>,
+    Vec<VerdictParseError>,
+) {
+    let mut parse_errors = Vec::new();
+
     // Validate response is not empty or whitespace-only
     if response.trim().is_empty() {
-        return Err(RsGuardError::VerdictParse(
-            "LLM response is empty or whitespace-only. Cannot determine verdict.".to_string(),
-        ));
+        parse_errors.push(VerdictParseError {
+            error_type: PARSE_ERROR_EMPTY_RESPONSE.to_string(),
+            preliminary_blocking: false,
+        });
+        return (
+            Err(RsGuardError::VerdictParse(
+                "LLM response is empty or whitespace-only. Cannot determine verdict.".to_string(),
+            )),
+            parse_errors,
+        );
     }
 
     // Step 1: extract the metadata block to get the preliminary verdict
@@ -600,10 +646,11 @@ pub fn parse_verdict(
             // normalized to "NEGATIVE" when the preliminary counts would
             // have produced a blocking review, so callers cannot observe
             // a "POSITIVE" verdict alongside a blocking review state.
-            let preliminary_blocks = preliminary.verdict == "NEGATIVE"
-                || preliminary.critical_issues > 0
-                || preliminary.security_issues > 0
-                || (important_threshold > 0 && preliminary.important_issues >= important_threshold);
+            let preliminary_blocks = is_blocking_verdict(&preliminary, important_threshold);
+            parse_errors.push(VerdictParseError {
+                error_type: PARSE_ERROR_MALFORMED_FINDINGS.to_string(),
+                preliminary_blocking: preliminary_blocks,
+            });
             if preliminary_blocks {
                 log::warn!(
                     "Ignoring malformed [RS_GUARD_VERDICT_FINDINGS] block: {}. \
@@ -616,20 +663,35 @@ pub fn parse_verdict(
                 }
                 v
             } else {
-                return Err(e);
+                return (Err(e), parse_errors);
             }
         }
     };
 
     if verdict.verdict != "POSITIVE" && verdict.verdict != "NEGATIVE" {
-        return Err(RsGuardError::VerdictParse(format!(
-            "Invalid verdict value: {}. Expected POSITIVE or NEGATIVE.",
-            verdict.verdict
-        )));
+        parse_errors.push(VerdictParseError {
+            error_type: PARSE_ERROR_INVALID_VERDICT.to_string(),
+            preliminary_blocking: is_blocking_verdict(&verdict, important_threshold),
+        });
+        return (
+            Err(RsGuardError::VerdictParse(format!(
+                "Invalid verdict value: {}. Expected POSITIVE or NEGATIVE.",
+                verdict.verdict
+            ))),
+            parse_errors,
+        );
     }
 
     let state = determine_review_state(&verdict, important_threshold);
-    Ok((verdict, state))
+    (Ok((verdict, state)), parse_errors)
+}
+
+/// Whether counts / verdict string would produce [`ReviewState::RequestChanges`].
+fn is_blocking_verdict(verdict: &Verdict, important_threshold: u32) -> bool {
+    verdict.verdict == "NEGATIVE"
+        || verdict.security_issues > 0
+        || verdict.critical_issues > 0
+        || (important_threshold > 0 && verdict.important_issues >= important_threshold)
 }
 
 /// Maximum bytes allowed in the findings JSON block after the marker.
@@ -1608,6 +1670,54 @@ mod tests {
             result.unwrap_err().to_string().contains("malformed"),
             "error should explain JSON is malformed"
         );
+    }
+
+    #[test]
+    fn test_parse_verdict_metrics_records_empty_response() {
+        let (result, errors) = parse_verdict_metrics("", 3);
+        assert!(result.is_err());
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].error_type, PARSE_ERROR_EMPTY_RESPONSE);
+        assert!(!errors[0].preliminary_blocking);
+    }
+
+    #[test]
+    fn test_parse_verdict_metrics_records_invalid_verdict() {
+        let response =
+            "[RS_GUARD_VERDICT_METADATA]\nVerdict: MAYBE\nCriticalIssues: 0\nSecurityIssues: 0\nImportantIssues: 0\nSuggestions: 0";
+        let (result, errors) = parse_verdict_metrics(response, 3);
+        assert!(result.is_err());
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].error_type, PARSE_ERROR_INVALID_VERDICT);
+        assert!(!errors[0].preliminary_blocking);
+    }
+
+    #[test]
+    fn test_parse_verdict_metrics_records_malformed_findings_non_blocking() {
+        let response = "[RS_GUARD_VERDICT_METADATA]\nVerdict: POSITIVE\nCriticalIssues: 0\nSecurityIssues: 0\nImportantIssues: 0\nSuggestions: 0\n\n[RS_GUARD_VERDICT_FINDINGS]\n[{\"path\":\"a.rs\"}]";
+        let (result, errors) = parse_verdict_metrics(response, 3);
+        assert!(result.is_err());
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].error_type, PARSE_ERROR_MALFORMED_FINDINGS);
+        assert!(!errors[0].preliminary_blocking);
+    }
+
+    #[test]
+    fn test_parse_verdict_metrics_records_malformed_findings_blocking() {
+        let response = "[RS_GUARD_VERDICT_METADATA]\nVerdict: NEGATIVE\nCriticalIssues: 0\nSecurityIssues: 0\nImportantIssues: 0\nSuggestions: 0\n\n[RS_GUARD_VERDICT_FINDINGS]\n[{\"path\":\"a.rs\"}]";
+        let (result, errors) = parse_verdict_metrics(response, 3);
+        assert!(result.is_ok(), "blocking preliminary must still parse");
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].error_type, PARSE_ERROR_MALFORMED_FINDINGS);
+        assert!(errors[0].preliminary_blocking);
+    }
+
+    #[test]
+    fn test_parse_verdict_metrics_clean_parse_has_no_errors() {
+        let response = "[RS_GUARD_VERDICT_METADATA]\nVerdict: POSITIVE\nCriticalIssues: 0\nSecurityIssues: 0\nImportantIssues: 0\nSuggestions: 0";
+        let (result, errors) = parse_verdict_metrics(response, 3);
+        assert!(result.is_ok());
+        assert!(errors.is_empty());
     }
 
     /// Regression: when the preliminary verdict is already blocking (NEGATIVE

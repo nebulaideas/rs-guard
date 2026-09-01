@@ -26,7 +26,8 @@ use crate::output::{
 use crate::redact::{log_redacted, redact_secrets};
 use crate::retry::{should_retry_llm_error, with_retry_predicated};
 use crate::verdict::{
-    parse_metadata_block, parse_verdict, strip_findings_json, ReviewState, Verdict,
+    parse_metadata_block, parse_verdict_metrics, strip_findings_json, ReviewState, Verdict,
+    VerdictParseError,
 };
 use anyhow::Context;
 use std::path::PathBuf;
@@ -275,13 +276,33 @@ fn effective_base_url(config: &Config) -> &str {
     config.provider_config.base_url.as_deref().unwrap_or("")
 }
 
+/// Outcome of a single LLM obtain step (cache lookup or live call).
+struct LlmCallOutcome {
+    content: String,
+    should_cache: bool,
+    cache_hit: bool,
+    usage: Option<crate::llm::TokenUsage>,
+    budget_escalations: u32,
+}
+
+/// Error-path counters written into [`ReviewMetrics`].
+#[derive(Debug, Clone, Default)]
+struct ErrorPathCounters {
+    verdict_parse_errors: Vec<VerdictParseError>,
+    budget_escalations: u32,
+    cache_hits: u32,
+    cache_misses: u32,
+    diff_chunked: bool,
+    diff_removed_lines: usize,
+}
+
 /// Obtains an LLM response with an already-composed prompt.
 async fn obtain_llm_response_with_composed_prompt(
     config: &Config,
     cache: &DiffCache,
     diff_content: &str,
     composed_prompt: &str,
-) -> anyhow::Result<(String, bool, Option<crate::llm::TokenUsage>)> {
+) -> anyhow::Result<LlmCallOutcome> {
     let base_url = effective_base_url(config);
 
     if let Some(cached) = cache.get_with_project_rules(
@@ -303,7 +324,13 @@ async fn obtain_llm_response_with_composed_prompt(
     ) {
         log::info!("Cache hit — using cached LLM response");
         // Cache hits don't have usage data — fall back to estimates.
-        return Ok((cached, false, None));
+        return Ok(LlmCallOutcome {
+            content: cached,
+            should_cache: false,
+            cache_hit: true,
+            usage: None,
+            budget_escalations: 0,
+        });
     }
 
     if !config.is_ci {
@@ -314,9 +341,10 @@ async fn obtain_llm_response_with_composed_prompt(
             println!("{}", msg);
         }
     }
-    let result = call_llm_with_budget_escalation(config, composed_prompt, diff_content)
-        .await
-        .context("LLM API call failed")?;
+    let (result, budget_escalations) =
+        call_llm_with_budget_escalation(config, composed_prompt, diff_content)
+            .await
+            .context("LLM API call failed")?;
 
     if !config.is_ci {
         let msg = format!("✅ Response received ({} chars)", result.content.len());
@@ -327,7 +355,13 @@ async fn obtain_llm_response_with_composed_prompt(
         }
     }
 
-    Ok((result.content, !config.no_cache, result.usage))
+    Ok(LlmCallOutcome {
+        content: result.content,
+        should_cache: !config.no_cache,
+        cache_hit: false,
+        usage: result.usage,
+        budget_escalations,
+    })
 }
 
 /// Upper bound for automatic `max_tokens` escalation when a thinking model
@@ -368,8 +402,9 @@ async fn call_llm_with_budget_escalation(
     config: &Config,
     composed_prompt: &str,
     diff_content: &str,
-) -> anyhow::Result<crate::llm::ChatCompletionResult> {
+) -> anyhow::Result<(crate::llm::ChatCompletionResult, u32)> {
     let mut attempt_max_tokens = config.provider_config.max_tokens;
+    let mut budget_escalations = 0u32;
 
     loop {
         let provider = create_provider_with_max_tokens(
@@ -392,7 +427,7 @@ async fn call_llm_with_budget_escalation(
         .await;
 
         match result {
-            Ok(response) => return Ok(response),
+            Ok(response) => return Ok((response, budget_escalations)),
             Err(err) => {
                 if !err.is_reasoning_budget_exhausted() {
                     return Err(err.into());
@@ -409,6 +444,7 @@ async fn call_llm_with_budget_escalation(
                             MAX_TOKENS_ESCALATION_CAP
                         );
                         attempt_max_tokens = Some(next);
+                        budget_escalations += 1;
                     }
                     None => return Err(err.into()),
                 }
@@ -488,6 +524,7 @@ fn write_review_outputs(
     latency: std::time::Duration,
     estimated_cost_cents: Option<f64>,
     secrets_redacted_count: u32,
+    error_path: &ErrorPathCounters,
 ) -> anyhow::Result<()> {
     let sanitized_response = redact_secrets(llm_response);
 
@@ -500,7 +537,43 @@ fn write_review_outputs(
     )
     .context("Failed to write review artifact")?;
 
-    let metrics = ReviewMetrics {
+    persist_metrics(&build_review_metrics(
+        config,
+        diff,
+        &verdict.verdict,
+        &state.to_string(),
+        tokens_in,
+        tokens_out,
+        token_source,
+        latency,
+        estimated_cost_cents,
+        secrets_redacted_count,
+        1,
+        0,
+        error_path,
+    ));
+
+    Ok(())
+}
+
+/// Builds the per-run [`ReviewMetrics`] artifact payload.
+#[allow(clippy::too_many_arguments)]
+fn build_review_metrics(
+    config: &Config,
+    diff: &DiffResult,
+    verdict: &str,
+    state: &str,
+    tokens_in: u64,
+    tokens_out: u64,
+    token_source: &str,
+    latency: std::time::Duration,
+    estimated_cost_cents: Option<f64>,
+    secrets_redacted_count: u32,
+    multi_pass_chunk_count: u32,
+    multi_pass_failed_chunks: u32,
+    error_path: &ErrorPathCounters,
+) -> ReviewMetrics {
+    ReviewMetrics {
         provider: config.provider.clone(),
         model: config.model.clone(),
         variant: config.variant.clone(),
@@ -510,21 +583,27 @@ fn write_review_outputs(
         latency_secs: latency.as_secs_f64(),
         estimated_cost_cents,
         diff_lines: diff.line_count,
-        verdict: verdict.verdict.clone(),
+        verdict: verdict.to_string(),
         state: state.to_string(),
         project_rules_file: config.project_rules_file.clone(),
         secrets_redacted_count,
-        multi_pass_chunk_count: 1,
-        multi_pass_failed_chunks: 0,
-    };
+        multi_pass_chunk_count,
+        multi_pass_failed_chunks,
+        verdict_parse_errors: error_path.verdict_parse_errors.clone(),
+        budget_escalations: error_path.budget_escalations,
+        cache_hits: error_path.cache_hits,
+        cache_misses: error_path.cache_misses,
+        diff_chunked: error_path.diff_chunked,
+        diff_removed_lines: error_path.diff_removed_lines,
+    }
+}
 
+fn persist_metrics(metrics: &ReviewMetrics) {
     let metrics_path =
         std::env::var("RS_GUARD_METRICS_PATH").unwrap_or_else(|_| METRICS_FILENAME.to_string());
-    if let Err(e) = write_metrics(&metrics, &metrics_path) {
+    if let Err(e) = write_metrics(metrics, &metrics_path) {
         log::warn!("Failed to write metrics: {}", e);
     }
-
-    Ok(())
 }
 
 /// Submits the review to GitHub in CI mode.
@@ -882,6 +961,14 @@ struct ChunkResult {
     latency: std::time::Duration,
 }
 
+/// Per-chunk task output, including counters from failed parse attempts.
+struct ChunkTaskOutput {
+    result: Result<ChunkResult, anyhow::Error>,
+    parse_errors: Vec<VerdictParseError>,
+    budget_escalations: u32,
+    cache_hit: bool,
+}
+
 /// Runs the multi-pass review pipeline.
 ///
 /// Splits the diff by file sections into chunks, reviews each chunk
@@ -997,17 +1084,26 @@ async fn run_multi_pass_pipeline(
 
             if let Some(cached_response) = cached {
                 log::info!("Chunk {} — cache hit", chunk_index);
-                let (verdict, state) =
-                    parse_verdict(&cached_response, config_clone.important_threshold)
-                        .context("Failed to parse verdict from cached chunk response")?;
-                return Ok::<_, anyhow::Error>(ChunkResult {
-                    index: chunk_index,
-                    response: cached_response,
-                    verdict,
-                    state,
-                    usage: None,
+                let (parsed, parse_errors) =
+                    parse_verdict_metrics(&cached_response, config_clone.important_threshold);
+                let result = match parsed {
+                    Ok((verdict, state)) => Ok(ChunkResult {
+                        index: chunk_index,
+                        response: cached_response,
+                        verdict,
+                        state,
+                        usage: None,
+                        cache_hit: true,
+                        latency: chunk_start.elapsed(),
+                    }),
+                    Err(e) => Err(anyhow::Error::from(e)
+                        .context("Failed to parse verdict from cached chunk response")),
+                };
+                return Ok::<_, anyhow::Error>(ChunkTaskOutput {
+                    result,
+                    parse_errors,
+                    budget_escalations: 0,
                     cache_hit: true,
-                    latency: chunk_start.elapsed(),
                 });
             }
 
@@ -1018,9 +1114,10 @@ async fn run_multi_pass_pipeline(
                 );
             }
 
-            let result = call_llm_with_budget_escalation(&config_clone, &prompt, &redacted_content)
-                .await
-                .context("LLM API call failed for chunk")?;
+            let (result, budget_escalations) =
+                call_llm_with_budget_escalation(&config_clone, &prompt, &redacted_content)
+                    .await
+                    .context("LLM API call failed for chunk")?;
 
             // Cache the response.
             if !config_clone.no_cache {
@@ -1044,17 +1141,27 @@ async fn run_multi_pass_pipeline(
                 )?;
             }
 
-            let (verdict, state) = parse_verdict(&result.content, config_clone.important_threshold)
-                .context("Failed to parse verdict from chunk response")?;
-
-            Ok(ChunkResult {
-                index: chunk_index,
-                response: result.content,
-                verdict,
-                state,
-                usage: result.usage,
+            let (parsed, parse_errors) =
+                parse_verdict_metrics(&result.content, config_clone.important_threshold);
+            let chunk_result =
+                match parsed {
+                    Ok((verdict, state)) => Ok(ChunkResult {
+                        index: chunk_index,
+                        response: result.content,
+                        verdict,
+                        state,
+                        usage: result.usage,
+                        cache_hit: false,
+                        latency: chunk_start.elapsed(),
+                    }),
+                    Err(e) => Err(anyhow::Error::from(e)
+                        .context("Failed to parse verdict from chunk response")),
+                };
+            Ok(ChunkTaskOutput {
+                result: chunk_result,
+                parse_errors,
+                budget_escalations,
                 cache_hit: false,
-                latency: chunk_start.elapsed(),
             })
         });
     }
@@ -1062,10 +1169,26 @@ async fn run_multi_pass_pipeline(
     // Collect results, tolerating partial failures.
     let mut results: Vec<ChunkResult> = Vec::new();
     let mut failed_count = 0u32;
+    let mut error_path = ErrorPathCounters::default();
 
     while let Some(res) = join_set.join_next().await {
         match res {
-            Ok(Ok(chunk_result)) => results.push(chunk_result),
+            Ok(Ok(output)) => {
+                error_path.verdict_parse_errors.extend(output.parse_errors);
+                error_path.budget_escalations += output.budget_escalations;
+                if output.cache_hit {
+                    error_path.cache_hits += 1;
+                } else {
+                    error_path.cache_misses += 1;
+                }
+                match output.result {
+                    Ok(chunk_result) => results.push(chunk_result),
+                    Err(e) => {
+                        failed_count += 1;
+                        log::warn!("Multi-pass chunk failed: {}", e);
+                    }
+                }
+            }
             Ok(Err(e)) => {
                 failed_count += 1;
                 log::warn!("Multi-pass chunk failed: {}", e);
@@ -1195,32 +1318,25 @@ async fn run_multi_pass_pipeline(
         total_latency,
         estimated_cost_cents,
         secrets_redacted_count,
+        &error_path,
     )?;
 
     // Write metrics with multi-pass fields.
-    let metrics = ReviewMetrics {
-        provider: config.provider.clone(),
-        model: config.model.clone(),
-        variant: config.variant.clone(),
-        estimated_tokens_in: total_tokens_in as usize,
-        estimated_tokens_out: total_tokens_out as usize,
-        token_source: token_source.to_string(),
-        latency_secs: total_latency.as_secs_f64(),
+    persist_metrics(&build_review_metrics(
+        config,
+        diff,
+        &aggregated_verdict.verdict,
+        &aggregated_state.to_string(),
+        total_tokens_in,
+        total_tokens_out,
+        token_source,
+        total_latency,
         estimated_cost_cents,
-        diff_lines: diff.line_count,
-        verdict: aggregated_verdict.verdict.clone(),
-        state: aggregated_state.to_string(),
-        project_rules_file: config.project_rules_file.clone(),
         secrets_redacted_count,
-        multi_pass_chunk_count: chunk_count as u32,
-        multi_pass_failed_chunks: failed_count,
-    };
-
-    let metrics_path =
-        std::env::var("RS_GUARD_METRICS_PATH").unwrap_or_else(|_| METRICS_FILENAME.to_string());
-    if let Err(e) = write_metrics(&metrics, &metrics_path) {
-        log::warn!("Failed to write metrics: {}", e);
-    }
+        chunk_count as u32,
+        failed_count,
+        &error_path,
+    ));
 
     // JSON output.
     if config.output_format == OutputFormat::Json {
@@ -1501,9 +1617,12 @@ pub async fn run_pipeline(
         check_token_warning(estimated_tokens_in, context_window, &config.provider);
     }
 
-    let (llm_response, should_cache, api_usage) =
+    let llm_outcome =
         obtain_llm_response_with_composed_prompt(&config, &cache, &diff_content, &composed_prompt)
             .await?;
+    let llm_response = llm_outcome.content;
+    let should_cache = llm_outcome.should_cache;
+    let api_usage = llm_outcome.usage;
     let latency = start.elapsed();
 
     // Prefer API-reported token usage over char heuristics (v1.8 #115).
@@ -1540,8 +1659,38 @@ pub async fn run_pipeline(
 
     log_response_diagnostics(&llm_response);
 
-    let (verdict, state) = parse_verdict(&llm_response, config.important_threshold)
-        .context("Failed to parse verdict from LLM response")?;
+    let (parsed, parse_errors) = parse_verdict_metrics(&llm_response, config.important_threshold);
+    let error_path = ErrorPathCounters {
+        verdict_parse_errors: parse_errors,
+        budget_escalations: llm_outcome.budget_escalations,
+        cache_hits: u32::from(llm_outcome.cache_hit),
+        cache_misses: u32::from(!llm_outcome.cache_hit),
+        diff_chunked: was_chunked,
+        diff_removed_lines: removed_lines,
+    };
+    let secrets_redacted = u32::try_from(secrets_redacted_count).unwrap_or(u32::MAX);
+
+    let (verdict, state) = match parsed {
+        Ok(vs) => vs,
+        Err(e) => {
+            persist_metrics(&build_review_metrics(
+                &config,
+                &diff,
+                "PARSE_ERROR",
+                "PARSE_ERROR",
+                tokens_in,
+                tokens_out,
+                token_source,
+                latency,
+                estimated_cost_cents,
+                secrets_redacted,
+                1,
+                0,
+                &error_path,
+            ));
+            return Err(e).context("Failed to parse verdict from LLM response");
+        }
+    };
 
     cache_response(
         &cache,
@@ -1584,7 +1733,8 @@ pub async fn run_pipeline(
         token_source,
         latency,
         estimated_cost_cents,
-        u32::try_from(secrets_redacted_count).unwrap_or(u32::MAX),
+        secrets_redacted,
+        &error_path,
     )?;
 
     if config.output_format == OutputFormat::Json {
@@ -2294,7 +2444,7 @@ Some review text.
   }
 ]
 ";
-        let (verdict, state) = parse_verdict(response, 3)
+        let (verdict, state) = crate::verdict::parse_verdict(response, 3)
             .expect("response conforming to FINDINGS_INSTRUCTIONS must parse");
         // Findings override metadata counts via max-rule merge.
         assert_eq!(verdict.critical_issues, 1);

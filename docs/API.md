@@ -167,6 +167,8 @@ pub struct ProviderConfig {
 | Item                               | Description                                                                       |
 | ---------------------------------- | --------------------------------------------------------------------------------- |
 | `parse_verdict(response: &str, important_threshold: u32)` | Extracts `[RS_GUARD_VERDICT_METADATA]` block and returns `(Verdict, ReviewState)` |
+| `parse_verdict_metrics(response, important_threshold)` | Same as `parse_verdict`, plus recorded [`VerdictParseError`]s for metrics |
+| `VerdictParseError`                | Parse-issue record: `error_type` + `preliminary_blocking`                         |
 | `Verdict`                          | Review verdict with bug/security counts                                           |
 | `ReviewState`                      | `Approve` / `RequestChanges` / `Comment`                                          |
 | `evaluate_by_tags(response: &str)` | Tag-based fallback for when metadata block is missing                             |
@@ -241,7 +243,8 @@ pub struct ProviderConfig {
 | `print_colored_summary(msg, verdict, state, config, writer)` | Full colored summary with metrics                                    |
 | `write_artifact(msg, verdict, state, config, path)`          | Write `review-result.txt` via `write_artifact()` in `src/output.rs` (no `Artifact` struct; uses `ARTIFACT_FILENAME`) |
 | `write_metrics(metrics, path)`                               | Write `rs-guard-metrics.json`                                        |
-| `ReviewMetrics`                                              | JSON metrics: provider, model, tokens, latency, cost, verdict, state |
+| `ReviewMetrics`                                              | JSON metrics: provider, model, tokens, latency, cost, verdict, state, error-path counters (`verdict_parse_errors`, `budget_escalations`, `cache_hits`, `cache_misses`, `diff_chunked`, `diff_removed_lines`) |
+| `VerdictParseError`                                          | Recorded parse issue: `error_type` (`malformed_findings` / `empty_response` / `invalid_verdict`) and `preliminary_blocking` |
 | `ARTIFACT_FILENAME`                                          | `"review-result.txt"`                                                |
 | `METRICS_FILENAME`                                           | `"rs-guard-metrics.json"`                                            |
 

@@ -577,3 +577,10 @@ The `rs-guard-metrics.json` file includes two multi-pass fields:
 
 - `multi_pass_chunk_count` — Number of chunks reviewed (1 for single-pass).
 - `multi_pass_failed_chunks` — Number of chunks that failed (0 for single-pass or full success).
+
+Error-path counters (always present):
+
+- `verdict_parse_errors` — Array of `{ error_type, preliminary_blocking }`. `error_type` is `malformed_findings`, `empty_response`, or `invalid_verdict`. Written even when parsing fails so CI can count malformed findings without scraping logs.
+- `budget_escalations` — Times `max_tokens` was doubled after a thinking model exhausted the output budget.
+- `cache_hits` / `cache_misses` — LLM response cache lookups this run.
+- `diff_chunked` / `diff_removed_lines` — Whether head/tail chunking omitted middle lines, and how many.
