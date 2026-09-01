@@ -86,6 +86,14 @@ pub enum RsGuardError {
 pub(crate) const REASONING_BUDGET_EXHAUSTED_MARKER: &str =
     "reasoning may have consumed the token budget";
 
+/// Prefix for LLM HTTP-client / kernel timeouts. Distinct from body-decode
+/// failures so logs never report a serde mismatch as a generic timeout.
+pub(crate) const LLM_TIMEOUT_MARKER: &str = "Request timed out";
+
+/// Prefix for permanent LLM response-body decode / JSON-shape failures.
+/// These are not transport timeouts and must not be retried as such.
+pub(crate) const LLM_DECODE_MARKER: &str = "Failed to decode LLM response body (not a timeout)";
+
 impl RsGuardError {
     /// Returns `true` if this error is transient and the operation should be retried.
     ///
@@ -124,6 +132,33 @@ impl RsGuardError {
                 message,
                 ..
             } if message.contains(REASONING_BUDGET_EXHAUSTED_MARKER)
+        )
+    }
+
+    /// Returns `true` if this is a full-duration LLM HTTP client timeout.
+    ///
+    /// A timeout has already waited the configured `llm_timeout_secs` budget;
+    /// retrying it repeats that wait (often minutes on DeepSeek V4 thinking).
+    /// Connection resets and DNS failures stay retryable and do **not** match.
+    pub fn is_request_timeout(&self) -> bool {
+        matches!(
+            self,
+            RsGuardError::LlmApi {
+                status: 0,
+                message,
+                ..
+            } if message.contains(LLM_TIMEOUT_MARKER)
+        )
+    }
+
+    /// Returns `true` if this is a permanent LLM response-body decode failure.
+    ///
+    /// Distinct from [`is_request_timeout`]: a serde/JSON mismatch is not a
+    /// timeout even when the Display string used to be status 0.
+    pub fn is_response_decode_failure(&self) -> bool {
+        matches!(
+            self,
+            RsGuardError::LlmApi { message, .. } if message.contains(LLM_DECODE_MARKER)
         )
     }
 
@@ -262,6 +297,57 @@ mod tests {
             message: "reasoning may have consumed the token budget".to_string(),
         };
         assert!(!http.is_reasoning_budget_exhausted());
+    }
+
+    #[test]
+    fn test_is_request_timeout_true() {
+        let err = RsGuardError::LlmApi {
+            provider: "deepseek".to_string(),
+            status: 0,
+            message: format!(
+                "{LLM_TIMEOUT_MARKER} (HTTP client timeout). This is a transport timeout, not a response-body decode failure."
+            ),
+        };
+        assert!(err.is_request_timeout());
+        assert!(err.is_retryable());
+        assert!(!err.is_response_decode_failure());
+    }
+
+    #[test]
+    fn test_is_request_timeout_false_for_decode() {
+        let err = RsGuardError::LlmApi {
+            provider: "deepseek".to_string(),
+            status: 400,
+            message: format!(
+                "{LLM_DECODE_MARKER}: invalid JSON: expected value at line 1 (body_len=16)"
+            ),
+        };
+        assert!(!err.is_request_timeout());
+        assert!(err.is_response_decode_failure());
+        assert!(!err.is_retryable());
+    }
+
+    #[test]
+    fn test_is_request_timeout_false_for_connection_reset() {
+        let err = RsGuardError::LlmApi {
+            provider: "deepseek".to_string(),
+            status: 0,
+            message: "connection reset by peer".to_string(),
+        };
+        assert!(!err.is_request_timeout());
+        assert!(!err.is_response_decode_failure());
+        assert!(err.is_retryable());
+    }
+
+    #[test]
+    fn test_is_response_decode_failure_false_for_timeout() {
+        let err = RsGuardError::LlmApi {
+            provider: "deepseek".to_string(),
+            status: 0,
+            message: format!("{LLM_TIMEOUT_MARKER} after 240s"),
+        };
+        assert!(err.is_request_timeout());
+        assert!(!err.is_response_decode_failure());
     }
 
     #[test]

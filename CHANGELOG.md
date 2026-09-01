@@ -7,9 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Thinking-model LLM timeout floor is now 240s** (was 180s) for `deepseek`
+  and `kimi` when `llm_timeout_secs` is not set explicitly. DeepSeek V4 pro
+  thinking on large diffs routinely exceeded 180s in CI (issue #163).
+
+### Fixed
+- **Explicit `ClientStrategy` on `ProviderMeta`** (issue #156) — factory
+  routing is a 2-arm match on `Kernel` vs `Generic`, computed once at
+  metadata definition. Config-level `result_format` and metadata overrides
+  (`force_generic_client`, ExtraBody variants) still force the generic
+  client. DeepSeek stays on `GenericOpenAiCompatibleClient`.
+
+- **`create_provider_with_max_tokens`** (issue #161) — budget escalation
+  no longer clones `ProviderConfig` per attempt. The released 3-argument
+  `create_provider` is preserved and delegates with `None`.
+
 ### Added
 
-- Nothing yet.
+- **DeepSeek CI timeouts vs payload errors** (issue #163) —
+  Generic-client JSON parse and empty-`choices` failures now map to HTTP
+  status 400 with the prefix `Failed to decode LLM response body (not a timeout)`,
+  so they are not retried as status-0 timeouts. Full HTTP client timeouts
+  use the prefix `Request timed out` and are **not** retried (the call already
+  waited `llm_timeout_secs`). Connection resets stay retryable.
+  This repo's `rs-guard-review.yml` now installs **1.8.2** (was 1.8.0) so CI
+  uses the generic DeepSeek client that accepts V4 `tool_calls: null`.
+  Restoring DeepSeek on `KernelBackedClient` remains blocked on llm-kernel
+  serde (issue #152).
+- **Property tests for `merge_with_findings` fail-safe invariant** (issue #160) —
+  `proptest` (dev-dependency only) generates 256 cases each for
+  `merge_never_de_escalates` and `malformed_findings_never_silently_approves`.
+  Findings can escalate counts and force `NEGATIVE`, never drop below the
+  preliminary counts or silently approve. The 9 handwritten invariant tests
+  remain as regression examples.
 
 ## [1.8.2] - 2026-08-26
 

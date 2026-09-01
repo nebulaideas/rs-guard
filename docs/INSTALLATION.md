@@ -253,7 +253,7 @@ jobs:
         uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c
 
       - name: Install rs-guard
-        run: cargo install rs-guard --locked --version "1.8.0"
+        run: cargo install rs-guard --locked --version "1.8.2"
 
       - name: AI Code Review
         run: rs-guard

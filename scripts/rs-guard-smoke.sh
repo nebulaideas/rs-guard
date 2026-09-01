@@ -18,7 +18,7 @@ echo "==> Installing rs-guard from crates.io"
 OUTPUT_FILE="$(mktemp)"
 trap cleanup EXIT
 
-cargo install rs-guard --locked --version "1.8.0"
+cargo install rs-guard --locked --version "1.8.2"
 DRY_RUN_BIN="rs-guard"
 
 # Fallback for local development if rs-guard is not on PATH.

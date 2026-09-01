@@ -5,8 +5,8 @@
 //! by the generic OpenAI-compatible client. Direct per-client construction is
 //! not part of the public surface.
 
-use rs_guard::llm::factory::create_provider;
-use rs_guard::llm::providers::{find_provider, ProviderMeta};
+use rs_guard::llm::factory::{create_provider, create_provider_with_max_tokens};
+use rs_guard::llm::providers::{find_provider, ClientStrategy, ProviderMeta};
 use rs_guard::llm::{LlmProvider, ProviderConfig};
 use wiremock::matchers::{body_partial_json, header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -325,6 +325,76 @@ async fn test_factory_applies_max_tokens() {
 }
 
 #[tokio::test]
+async fn test_factory_max_tokens_override_wins_without_cloning_config() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/chat/completions"))
+        .and(body_partial_json(serde_json::json!({
+            "max_tokens": 8192
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "choices": [{ "message": { "content": "override max_tokens applied" } }],
+            "model": "test-model"
+        })))
+        .mount(&mock_server)
+        .await;
+
+    let mut config = config_at("deepseek", &mock_server.uri());
+    config.max_tokens = Some(4096);
+
+    let provider =
+        create_provider_with_max_tokens("deepseek", "test-key", &config, Some(8192)).unwrap();
+    assert_eq!(
+        config.max_tokens,
+        Some(4096),
+        "override must not mutate the caller's ProviderConfig"
+    );
+    let result = provider
+        .chat_completion("You are a reviewer.", "diff content", 0.1)
+        .await;
+    assert!(result.is_ok());
+    assert!(result
+        .unwrap()
+        .content
+        .contains("override max_tokens applied"));
+}
+
+#[tokio::test]
+async fn test_factory_max_tokens_override_wins_on_kernel_client() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/chat/completions"))
+        .and(body_partial_json(serde_json::json!({
+            "max_tokens": 8192
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "choices": [{ "message": { "content": "kernel override max_tokens applied" } }],
+            "model": "test-model"
+        })))
+        .mount(&mock_server)
+        .await;
+
+    let mut config = config_at("openai", &mock_server.uri());
+    config.max_tokens = Some(4096);
+
+    let provider =
+        create_provider_with_max_tokens("openai", "test-key", &config, Some(8192)).unwrap();
+    assert_eq!(
+        config.max_tokens,
+        Some(4096),
+        "override must not mutate the caller's ProviderConfig"
+    );
+    let result = provider
+        .chat_completion("You are a reviewer.", "diff content", 0.1)
+        .await;
+    assert!(result.is_ok());
+    assert!(result
+        .unwrap()
+        .content
+        .contains("kernel override max_tokens applied"));
+}
+
+#[tokio::test]
 async fn test_factory_applies_result_format_override() {
     let mock_server = MockServer::start().await;
     Mock::given(method("POST"))
@@ -638,6 +708,11 @@ fn test_deepseek_metadata_contract() {
     assert!(
         meta.force_generic_client,
         "DeepSeek must force the generic client until llm-kernel accepts null tool_calls"
+    );
+    assert_eq!(
+        meta.strategy,
+        ClientStrategy::Generic,
+        "DeepSeek must declare ClientStrategy::Generic until llm-kernel accepts null tool_calls"
     );
 }
 

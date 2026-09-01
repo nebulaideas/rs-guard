@@ -56,12 +56,11 @@ retryable empty-content error (with `max_tokens` escalation), same as before.
 
 ### Factory routing
 
-The factory (`create_provider`) routes automatically based on provider metadata
-and config. Providers with `force_generic_client`, `result_format`, or
-`ExtraBody` variants, or a config-level `result_format` override, use
-`GenericOpenAiCompatibleClient`; all others use `KernelBackedClient`. Both
-implement the `LlmProvider` trait, so the pipeline is agnostic to the
-underlying client.
+The factory (`create_provider`) matches on `ProviderMeta.strategy`
+(`ClientStrategy::Kernel` or `ClientStrategy::Generic`). Config-level
+`result_format` and metadata overrides (`force_generic_client`, ExtraBody
+variants) still force `GenericOpenAiCompatibleClient`. Both clients implement
+the `LlmProvider` trait, so the pipeline is agnostic to the underlying client.
 
 ### Shared TLS stack
 
@@ -109,11 +108,11 @@ DeepSeek V4 exposes multiple models. Use the generic `variant` mechanism (CLI `-
 - Treats empty final content **without** reasoning as a transient error (up to 3 attempts with backoff).
 - Skips caching the response until a successful verdict is parsed.
 - Raises the `max_tokens` floor to **16,384** when you do not set an explicit value.
-- Raises the LLM timeout floor to **180s** (from 120s) for `deepseek` / `kimi` when not explicitly set.
+- Raises the LLM timeout floor to **240s** (from 120s) for `deepseek` / `kimi` when not explicitly set.
 
 **Best practices for deepseek-v4-pro**
 - Set `max_tokens` to at least 16,384 (or higher for very thorough reviews).
-- Use a longer timeout (180–300s) because reasoning can take significant time.
+- Use a longer timeout (240–300s) because reasoning can take significant time.
 - Prefer the `pro` **variant** over the raw model name — it is clearer and future-proof.
 - In CI (GitHub Actions), always pin explicit values and give the step enough `timeout-minutes`.
 
@@ -131,7 +130,7 @@ DeepSeek V4 exposes multiple models. Use the generic `variant` mechanism (CLI `-
   env:
     DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
   # Give the step headroom — the model itself can be slow
-  timeout-minutes: 10
+  timeout-minutes: 15
 ```
 
 Or with environment variables (cleaner in workflows):
@@ -214,7 +213,7 @@ base_url = "https://api.deepseek.com"
 2. Environment variables (`RS_GUARD_VARIANT`, `RS_GUARD_MODEL`, ...)
 3. `[providers.deepseek]` section in TOML
 4. Top-level keys in TOML (`variant = "pro"`, `max_tokens = ...`)
-5. Built-in defaults (`deepseek-v4-flash`, 120s / auto-raised 180s timeout for deepseek, auto 16k `max_tokens`)
+5. Built-in defaults (`deepseek-v4-flash`, 120s / auto-raised 240s timeout for deepseek, auto 16k `max_tokens`)
 
 ### API Key Acquisition
 

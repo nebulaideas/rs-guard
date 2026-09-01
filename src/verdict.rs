@@ -768,6 +768,7 @@ pub fn strip_findings_json(response: &str) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
 
     // ─── Verdict::merge_multi tests ───
 
@@ -1798,5 +1799,104 @@ mod tests {
             .expect("should parse with json fence")
             .expect("should be Some");
         assert_eq!(findings.len(), 1);
+    }
+
+    fn finding(severity: FindingSeverity) -> Finding {
+        Finding {
+            path: "a.rs".into(),
+            line: 1,
+            severity,
+            message: "generated".into(),
+            suggestion: None,
+        }
+    }
+
+    fn build_findings(critical: u32, security: u32, important: u32) -> Vec<Finding> {
+        let mut findings = Vec::new();
+        for _ in 0..critical {
+            findings.push(finding(FindingSeverity::Critical));
+        }
+        for _ in 0..security {
+            findings.push(finding(FindingSeverity::Security));
+        }
+        for _ in 0..important {
+            findings.push(finding(FindingSeverity::Important));
+        }
+        findings
+    }
+
+    fn build_response_with_malformed_findings(
+        prelim_verdict: &str,
+        prelim_critical: u32,
+    ) -> String {
+        format!(
+            "[RS_GUARD_VERDICT_METADATA]\nVerdict: {prelim_verdict}\nCriticalIssues: {prelim_critical}\nSecurityIssues: 0\nImportantIssues: 0\nSuggestions: 0\n\n[RS_GUARD_VERDICT_FINDINGS]\n[{{\"path\":\"a.rs\"}}]"
+        )
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(256))]
+
+        /// Fail-safe merge: findings may raise counts / force NEGATIVE, never drop
+        /// below the preliminary counts or un-block a blocking preliminary.
+        #[test]
+        fn merge_never_de_escalates(
+            prelim_critical in 0u32..10,
+            prelim_security in 0u32..10,
+            prelim_important in 0u32..10,
+            findings_critical in 0u32..10,
+            findings_security in 0u32..10,
+            findings_important in 0u32..10,
+            threshold in 0u32..10,
+        ) {
+            let preliminary = make_verdict(
+                "POSITIVE",
+                prelim_critical,
+                prelim_security,
+                prelim_important,
+                0,
+            );
+            let findings = build_findings(
+                findings_critical,
+                findings_security,
+                findings_important,
+            );
+            let merged = Verdict::merge_with_findings(&preliminary, findings, threshold);
+
+            prop_assert!(merged.critical_issues >= prelim_critical);
+            prop_assert!(merged.security_issues >= prelim_security);
+            prop_assert!(merged.important_issues >= prelim_important);
+            prop_assert!(merged.critical_issues >= findings_critical);
+            prop_assert!(merged.security_issues >= findings_security);
+            prop_assert!(merged.important_issues >= findings_important);
+
+            let prelim_blocks = prelim_critical > 0
+                || prelim_security > 0
+                || (threshold > 0 && prelim_important >= threshold);
+            let findings_block = findings_critical > 0
+                || findings_security > 0
+                || (threshold > 0 && findings_important >= threshold);
+            if prelim_blocks || findings_block {
+                prop_assert_eq!(merged.verdict, "NEGATIVE");
+            }
+        }
+
+        /// A malformed findings block must never produce Approve: either the
+        /// parse errors, or the review stays non-approving.
+        #[test]
+        fn malformed_findings_never_silently_approves(
+            prelim_verdict in "POSITIVE|NEGATIVE",
+            prelim_critical in 0u32..5,
+            threshold in 0u32..5,
+        ) {
+            let response =
+                build_response_with_malformed_findings(&prelim_verdict, prelim_critical);
+            let result = parse_verdict(&response, threshold);
+            // Err is fail-closed (caller cannot submit Approve). Ok must not
+            // be Approve either — that is the silent-approve hole.
+            if let Ok((_, state)) = result {
+                prop_assert_ne!(state, ReviewState::Approve);
+            }
+        }
     }
 }
