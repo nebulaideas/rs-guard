@@ -607,8 +607,7 @@ review:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
   script:
     - cargo install rs-guard --locked --version "1.8.2"
-    - git fetch origin $CI_MERGE_REQUEST_TARGET_BRANCH_NAME
-    - git diff origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME...HEAD > /tmp/mr.diff
+    - git diff "$CI_MERGE_REQUEST_DIFF_BASE_SHA"..."$CI_MERGE_REQUEST_SOURCE_BRANCH_SHA" > /tmp/mr.diff
     - rs-guard --diff-file /tmp/mr.diff --llm-timeout 240
   artifacts:
     when: always
