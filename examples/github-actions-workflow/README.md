@@ -18,7 +18,7 @@ All workflows include:
 - **Concurrency groups** — Only one review runs per PR at a time. New pushes cancel in-progress reviews.
 - **Draft PR skipping** — Reviews are skipped while a PR is in draft state.
 - **Minimal permissions** — Uses `contents: read` and `pull-requests: write` only.
-- **Reproducible install** — rs-guard is installed from crates.io via `cargo install rs-guard --locked --version "1.8.0"`, which uses the published `Cargo.lock` for a reproducible build.
+- **Reproducible install** — rs-guard is installed from crates.io via `cargo install rs-guard --locked --version "1.8.2"`, which uses the published `Cargo.lock` for a reproducible build.
 
 ## Quick Start
 
@@ -58,7 +58,7 @@ The example workflows use the following security defaults:
   the default `write-all` token scope.
 - **Concurrency groups** — Prevents stale reviews and resource waste.
 - **Reproducible install** — The `Install rs-guard` step runs
-  `cargo install rs-guard --locked --version "1.8.0"`, which builds the binary from source
+  `cargo install rs-guard --locked --version "1.8.2"`, which builds the binary from source
   using the published `Cargo.lock` and places it on `PATH` for subsequent steps.
 - **Locked dependencies** — The `--locked` flag ensures the build uses the
   exact dependency versions from the published `Cargo.lock`, giving you a

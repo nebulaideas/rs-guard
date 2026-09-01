@@ -228,6 +228,41 @@ pub struct ProviderConfig {
     pub timeout_secs: Option<u64>,
 }
 
+/// Classifies a reqwest failure as a transport timeout vs a generic send error.
+fn classify_reqwest_error(e: reqwest::Error, provider_name: &str) -> LlmError {
+    if e.is_timeout() {
+        return llm_timeout_error(provider_name, e);
+    }
+    LlmError {
+        provider: provider_name.to_string(),
+        status: e.status().map(|s| s.as_u16()).unwrap_or(0),
+        message: e.to_string(),
+    }
+}
+
+/// Permanent JSON / response-shape failure. Status 400 so it is not retried
+/// as a timeout (status 0).
+fn llm_decode_error(provider_name: &str, detail: impl std::fmt::Display) -> LlmError {
+    LlmError {
+        provider: provider_name.to_string(),
+        status: 400,
+        message: format!("{}: {detail}", crate::error::LLM_DECODE_MARKER),
+    }
+}
+
+/// Full-duration HTTP client timeout. Status 0 (retryable at the type level)
+/// but tagged so the LLM retry predicate can fail fast.
+fn llm_timeout_error(provider_name: &str, cause: impl std::fmt::Display) -> LlmError {
+    LlmError {
+        provider: provider_name.to_string(),
+        status: 0,
+        message: format!(
+            "{} (HTTP client timeout). This is a transport timeout, not a response-body decode failure. Cause: {cause}",
+            crate::error::LLM_TIMEOUT_MARKER
+        ),
+    }
+}
+
 /// Sends a chat completion HTTP request and parses the response.
 ///
 /// Shared implementation used by all provider modules to avoid duplication
@@ -256,14 +291,12 @@ pub(crate) async fn send_chat_request<B: Serialize + Send>(
         url
     );
 
-    let response = client.post(url).json(request).send().await.map_err(|e| {
-        let status = e.status().map(|s| s.as_u16()).unwrap_or(0);
-        LlmError {
-            provider: provider_name.to_string(),
-            status,
-            message: e.to_string(),
-        }
-    })?;
+    let response = client
+        .post(url)
+        .json(request)
+        .send()
+        .await
+        .map_err(|e| classify_reqwest_error(e, provider_name))?;
 
     let status = response.status();
 
@@ -309,11 +342,10 @@ pub(crate) async fn send_chat_request<B: Serialize + Send>(
         );
     }
 
-    let body = response.text().await.map_err(|e| LlmError {
-        provider: provider_name.to_string(),
-        status: 0,
-        message: format!("Failed to read response body: {e}"),
-    })?;
+    let body = response
+        .text()
+        .await
+        .map_err(|e| classify_reqwest_error(e, provider_name))?;
 
     if !status.is_success() {
         return Err(LlmError {
@@ -337,29 +369,21 @@ fn parse_completion_response_body(
     body: &str,
     provider_name: &str,
 ) -> Result<ChatCompletionResult, LlmError> {
-    let value: Value = serde_json::from_str(body).map_err(|e| LlmError {
-        provider: provider_name.to_string(),
-        status: 0,
-        message: format!(
-            "Failed to parse response JSON: {e} (body_len={})",
-            body.len()
-        ),
+    let value: Value = serde_json::from_str(body).map_err(|e| {
+        llm_decode_error(
+            provider_name,
+            format!("invalid JSON: {e} (body_len={})", body.len()),
+        )
     })?;
 
     let choices = value
         .get("choices")
         .and_then(Value::as_array)
         .filter(|c| !c.is_empty())
-        .ok_or_else(|| LlmError {
-            provider: provider_name.to_string(),
-            status: 0,
-            message: "Empty response from LLM".to_string(),
-        })?;
+        .ok_or_else(|| llm_decode_error(provider_name, "Empty response from LLM"))?;
 
-    let message = choices[0].get("message").ok_or_else(|| LlmError {
-        provider: provider_name.to_string(),
-        status: 0,
-        message: "LLM response missing choices[0].message".to_string(),
+    let message = choices[0].get("message").ok_or_else(|| {
+        llm_decode_error(provider_name, "LLM response missing choices[0].message")
     })?;
 
     let content = extract_text_field(message.get("content"));
@@ -699,12 +723,29 @@ mod tests {
         .await;
 
         assert!(result.is_err());
-        let err = result.unwrap_err().to_string();
-        assert!(
-            err.contains("Empty response from LLM"),
-            "Expected empty choices error, got: {}",
-            err
-        );
+        let err = result.unwrap_err();
+        match &err {
+            RsGuardError::LlmApi {
+                status, message, ..
+            } => {
+                assert_eq!(
+                    *status, 400,
+                    "empty choices is a payload error, not a timeout"
+                );
+                assert!(
+                    message.contains("Empty response from LLM"),
+                    "Expected empty choices error, got: {message}"
+                );
+                assert!(
+                    message.contains(crate::error::LLM_DECODE_MARKER),
+                    "payload error must be labelled as not a timeout, got: {message}"
+                );
+            }
+            other => panic!("expected LlmApi, got {other:?}"),
+        }
+        assert!(!err.is_retryable());
+        assert!(err.is_response_decode_failure());
+        assert!(!err.is_request_timeout());
     }
 
     #[tokio::test]
@@ -737,11 +778,134 @@ mod tests {
         .await;
 
         assert!(result.is_err());
-        let err = result.unwrap_err().to_string();
+        let err = result.unwrap_err();
+        match &err {
+            RsGuardError::LlmApi {
+                status, message, ..
+            } => {
+                assert_eq!(
+                    *status, 400,
+                    "decode failures must not use timeout status 0"
+                );
+                assert!(
+                    message.contains(crate::error::LLM_DECODE_MARKER),
+                    "decode error must be labelled as not a timeout, got: {message}"
+                );
+                assert!(
+                    message.contains("invalid JSON"),
+                    "Expected parse error, got: {message}"
+                );
+            }
+            other => panic!("expected LlmApi, got {other:?}"),
+        }
+        assert!(!err.is_retryable());
+        assert!(err.is_response_decode_failure());
+        assert!(!err.is_request_timeout());
+    }
+
+    #[tokio::test]
+    async fn test_send_chat_request_timeout_is_not_labelled_decode() {
+        use std::time::Duration;
+        use wiremock::matchers::method;
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mock_server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(200).set_delay(Duration::from_secs(2)))
+            .mount(&mock_server)
+            .await;
+
+        let client = build_llm_client("deepseek", "key", &[], Duration::from_millis(150)).unwrap();
+        let request = ChatRequest {
+            model: "deepseek-v4-pro".to_string(),
+            messages: chat_messages("system", "user"),
+            temperature: 0.1,
+            max_tokens: None,
+            result_format: None,
+            extra_body: HashMap::new(),
+        };
+        let result = send_chat_request(
+            &client,
+            &format!("{}/chat/completions", mock_server.uri()),
+            &request,
+            "deepseek",
+        )
+        .await;
+
+        let err = result.expect_err("client timeout must surface as an error");
+        match &err {
+            RsGuardError::LlmApi {
+                status, message, ..
+            } => {
+                assert_eq!(*status, 0);
+                assert!(
+                    message.contains(crate::error::LLM_TIMEOUT_MARKER),
+                    "timeout must use the timeout marker, got: {message}"
+                );
+                assert!(
+                    !message.contains(crate::error::LLM_DECODE_MARKER),
+                    "timeout must not be labelled as a decode failure, got: {message}"
+                );
+            }
+            other => panic!("expected LlmApi, got {other:?}"),
+        }
+        assert!(err.is_request_timeout());
+        assert!(!err.is_response_decode_failure());
+        assert!(err.is_retryable());
+        assert!(!crate::retry::should_retry_llm_error(&err));
+    }
+
+    #[tokio::test]
+    async fn test_send_chat_request_deepseek_v4_success_with_tool_calls_null() {
+        use wiremock::matchers::method;
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mock_server = MockServer::start().await;
+        // Live DeepSeek V4 thinking success shape: final content string,
+        // reasoning_content present, tool_calls explicitly null.
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": "chatcmpl-v4",
+                "object": "chat.completion",
+                "created": 1705651092,
+                "model": "deepseek-v4-pro",
+                "choices": [{
+                    "index": 0,
+                    "finish_reason": "stop",
+                    "message": {
+                        "role": "assistant",
+                        "content": "VERDICT: APPROVE",
+                        "reasoning_content": "internal chain of thought",
+                        "tool_calls": null
+                    }
+                }]
+            })))
+            .mount(&mock_server)
+            .await;
+
+        let client =
+            build_llm_client("deepseek", "key", &[], std::time::Duration::from_secs(60)).unwrap();
+        let request = ChatRequest {
+            model: "deepseek-v4-pro".to_string(),
+            messages: chat_messages("system", "user"),
+            temperature: 0.1,
+            max_tokens: Some(4096),
+            result_format: None,
+            extra_body: HashMap::new(),
+        };
+        let result = send_chat_request(
+            &client,
+            &format!("{}/chat/completions", mock_server.uri()),
+            &request,
+            "deepseek",
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(result.content, "VERDICT: APPROVE");
         assert!(
-            err.contains("Failed to parse response"),
-            "Expected parse error, got: {}",
-            err
+            !result.content.contains("internal chain of thought"),
+            "reasoning_content must not leak into returned content"
         );
     }
 

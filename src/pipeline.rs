@@ -24,7 +24,7 @@ use crate::output::{
     ReviewMetrics, ReviewResultJson, ARTIFACT_FILENAME, METRICS_FILENAME,
 };
 use crate::redact::{log_redacted, redact_secrets};
-use crate::retry::with_retry_predicated;
+use crate::retry::{should_retry_llm_error, with_retry_predicated};
 use crate::verdict::{
     parse_metadata_block, parse_verdict, strip_findings_json, ReviewState, Verdict,
 };
@@ -356,9 +356,10 @@ fn next_escalated_max_tokens(current: Option<u32>) -> Option<u32> {
 /// Instead, the request is re-sent with a doubled `max_tokens`
 /// (capped at [`MAX_TOKENS_ESCALATION_CAP`]) and a fresh provider instance.
 ///
-/// All other transient errors keep the standard [`with_retry_predicated`]
-/// behaviour (up to 3 retries with exponential backoff). Empty content
-/// **without** reasoning is treated as a plain transient failure and retried.
+/// Transient transport errors keep the standard [`with_retry_predicated`]
+/// behaviour (up to 3 retries with exponential backoff). Full HTTP client
+/// timeouts and response-body decode failures are **not** retried. Empty
+/// content **without** reasoning is treated as a plain transient failure.
 ///
 /// The response cache is keyed on the *configured* `max_tokens`, so a
 /// successful escalated response is cached under the original configuration
@@ -386,7 +387,7 @@ async fn call_llm_with_budget_escalation(
                     .await
             },
             config.circuit_breaker.as_ref(),
-            |err| !err.is_reasoning_budget_exhausted(),
+            should_retry_llm_error,
         )
         .await;
 

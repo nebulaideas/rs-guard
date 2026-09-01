@@ -478,7 +478,7 @@ jobs:
       - name: Cache cargo build
         uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c
       - name: Install rs-guard
-        run: cargo install rs-guard --locked --version "1.8.0"
+        run: cargo install rs-guard --locked --version "1.8.2"
 
       - name: AI Code Review
         run: rs-guard
@@ -518,7 +518,7 @@ jobs:
       - name: Cache cargo build
         uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c
       - name: Install rs-guard
-        run: cargo install rs-guard --locked --version "1.8.0"
+        run: cargo install rs-guard --locked --version "1.8.2"
 
       - name: AI Code Review
         run: rs-guard --config .reviewer.toml
@@ -566,7 +566,7 @@ jobs:
       - name: Cache cargo build
         uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c
       - name: Install rs-guard
-        run: cargo install rs-guard --locked --version "1.8.0"
+        run: cargo install rs-guard --locked --version "1.8.2"
       - name: AI Code Review
         run: rs-guard --check-run
         env:
@@ -869,7 +869,7 @@ jobs:
       - name: Cache cargo build
         uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c
       - name: Install rs-guard
-        run: cargo install rs-guard --locked --version "1.8.0"
+        run: cargo install rs-guard --locked --version "1.8.2"
 
       - name: AI Code Review
         run: rs-guard
@@ -890,7 +890,7 @@ Then add your API key in **Settings → Secrets and variables → Actions → `D
 Install rs-guard:
 
 ```bash
-cargo install rs-guard --locked --version "1.8.0"
+cargo install rs-guard --locked --version "1.8.2"
 ```
 
 Create `.git/hooks/pre-commit`:
@@ -1000,7 +1000,7 @@ rs-guard detects this shape and **automatically escalates**: instead of blindly 
 
 **Fixes if escalation still fails at the cap:**
 - Raise `max_tokens` explicitly (env `RS_GUARD_MAX_TOKENS`, `--max-tokens`, or TOML). For deepseek/kimi the default is auto-raised to 16,384 **only** when you have not set an explicit value.
-- Consider `--llm-timeout 180` or `RS_GUARD_LLM_TIMEOUT=180` if the model needs more wall time for reasoning.
+- Consider `--llm-timeout 240` or `RS_GUARD_LLM_TIMEOUT=240` if the model needs more wall time for reasoning.
 - Use a cheaper/faster variant when possible (e.g. `flash`).
 
 You will see a warning in logs containing the length of `reasoning_content` and the escalation steps.

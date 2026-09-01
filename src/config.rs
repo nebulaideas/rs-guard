@@ -38,8 +38,9 @@ pub const DEFAULT_LLM_TIMEOUT_SECS: u64 = 120;
 /// reasoning by default (DeepSeek V4 "pro", Kimi with thinking-on, etc.).
 ///
 /// These models can take substantially longer to produce the final `content`
-/// because they spend tokens on internal reasoning first.
-pub const THINKING_MIN_LLM_TIMEOUT_SECS: u64 = 180;
+/// because they spend tokens on internal reasoning first. Raised from 180s
+/// after DeepSeek V4 pro CI runs exceeded 180s on large diffs (issue #163).
+pub const THINKING_MIN_LLM_TIMEOUT_SECS: u64 = 240;
 
 /// Default system prompt embedded in the binary.
 ///

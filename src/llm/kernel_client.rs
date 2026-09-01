@@ -277,10 +277,19 @@ fn map_kernel_error(e: KernelError, provider_name: &str) -> RsGuardError {
         KernelError::RateLimited(retry_after) => {
             (429, format!("Rate limited (retry after {retry_after}s)"))
         }
-        KernelError::Timeout(secs) => (0, format!("Request timed out after {secs}s")),
+        KernelError::Timeout(secs) => (
+            0,
+            format!(
+                "{} after {secs}s. This is a transport timeout, not a response-body decode failure.",
+                crate::error::LLM_TIMEOUT_MARKER
+            ),
+        ),
         KernelError::Config(msg) => (400, format!("Config error: {msg}")),
         KernelError::Serialization(e) => (400, format!("Serialization error: {e}")),
-        KernelError::LlmApi(msg) if is_response_body_decode_failure(&msg) => (400, msg),
+        KernelError::LlmApi(msg) if is_response_body_decode_failure(&msg) => (
+            400,
+            format!("{}: {msg}", crate::error::LLM_DECODE_MARKER),
+        ),
         KernelError::LlmApi(msg) => (0, msg),
         other => (0, other.to_string()),
     };
@@ -357,10 +366,25 @@ mod tests {
     fn test_map_kernel_error_timeout_is_retryable() {
         let err = map_kernel_error(KernelError::Timeout(60), "deepseek");
         assert!(err.is_retryable());
-        match err {
-            RsGuardError::LlmApi { status, .. } => assert_eq!(status, 0),
+        assert!(err.is_request_timeout());
+        assert!(!err.is_response_decode_failure());
+        match &err {
+            RsGuardError::LlmApi {
+                status, message, ..
+            } => {
+                assert_eq!(*status, 0);
+                assert!(
+                    message.contains(crate::error::LLM_TIMEOUT_MARKER),
+                    "timeout message must be labelled as a timeout, got: {message}"
+                );
+                assert!(
+                    !message.contains(crate::error::LLM_DECODE_MARKER),
+                    "timeout must not be labelled as a decode failure, got: {message}"
+                );
+            }
             _ => panic!("expected LlmApi"),
         }
+        assert!(!crate::retry::should_retry_llm_error(&err));
     }
 
     #[test]
@@ -416,14 +440,22 @@ mod tests {
                 status, message, ..
             } => {
                 assert_eq!(*status, 400);
-                assert_eq!(
-                    message,
-                    "error decoding response body for url (https://api.deepseek.com/chat/completions)"
+                assert!(
+                    message.contains(crate::error::LLM_DECODE_MARKER),
+                    "decode must be labelled as not a timeout, got: {message}"
+                );
+                assert!(
+                    message.contains(
+                        "error decoding response body for url (https://api.deepseek.com/chat/completions)"
+                    ),
+                    "original decode text must be preserved, got: {message}"
                 );
             }
             _ => panic!("expected LlmApi"),
         }
         assert!(!err.is_retryable());
+        assert!(err.is_response_decode_failure());
+        assert!(!err.is_request_timeout());
     }
 
     #[test]

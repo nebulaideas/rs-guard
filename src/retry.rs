@@ -314,6 +314,18 @@ where
     Err(last_error.unwrap_or_else(|| RsGuardError::Config("Max retries exceeded".to_string())))
 }
 
+/// Whether an LLM chat-completion error should be blindly retried.
+///
+/// Excludes:
+/// - reasoning-budget exhaustion (caller escalates `max_tokens` instead)
+/// - full-duration HTTP client timeouts (already waited `llm_timeout_secs`)
+/// - response-body decode / JSON-shape failures (permanent; not a timeout)
+pub(crate) fn should_retry_llm_error(err: &RsGuardError) -> bool {
+    !err.is_reasoning_budget_exhausted()
+        && !err.is_request_timeout()
+        && !err.is_response_decode_failure()
+}
+
 /// Executes an async operation with automatic retry (no circuit breaker).
 ///
 /// Convenience wrapper for [`with_retry`] when circuit breaking is not needed.
@@ -633,6 +645,67 @@ mod tests {
         assert!(result.is_err());
         // The predicate excludes the error from retries: exactly one attempt.
         assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn test_with_retry_predicated_surfaces_request_timeout_immediately() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let calls = AtomicUsize::new(0);
+        let timeout = || RsGuardError::LlmApi {
+            provider: "deepseek".to_string(),
+            status: 0,
+            message: format!(
+                "{} after 240s. This is a transport timeout, not a response-body decode failure.",
+                crate::error::LLM_TIMEOUT_MARKER
+            ),
+        };
+
+        let result: Result<(), RsGuardError> = with_retry_predicated(
+            || async {
+                calls.fetch_add(1, Ordering::SeqCst);
+                Err(timeout())
+            },
+            None,
+            should_retry_llm_error,
+        )
+        .await;
+
+        assert!(result.is_err());
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert!(result.unwrap_err().is_request_timeout());
+    }
+
+    #[test]
+    fn test_should_retry_llm_error_table() {
+        let timeout = RsGuardError::LlmApi {
+            provider: "deepseek".to_string(),
+            status: 0,
+            message: crate::error::LLM_TIMEOUT_MARKER.to_string(),
+        };
+        let decode = RsGuardError::LlmApi {
+            provider: "deepseek".to_string(),
+            status: 400,
+            message: format!("{}: invalid JSON", crate::error::LLM_DECODE_MARKER),
+        };
+        let reset = RsGuardError::LlmApi {
+            provider: "deepseek".to_string(),
+            status: 0,
+            message: "connection reset by peer".to_string(),
+        };
+        let budget = RsGuardError::LlmApi {
+            provider: "deepseek".to_string(),
+            status: 0,
+            message: format!(
+                "Empty assistant content ({})",
+                crate::error::REASONING_BUDGET_EXHAUSTED_MARKER
+            ),
+        };
+
+        assert!(!should_retry_llm_error(&timeout));
+        assert!(!should_retry_llm_error(&decode));
+        assert!(should_retry_llm_error(&reset));
+        assert!(!should_retry_llm_error(&budget));
     }
 
     #[tokio::test]
