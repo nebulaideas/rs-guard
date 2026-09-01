@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **`auto_gitignore` now defaults to `false`** — local runs no longer append
+  `.rs-guard/cache/` to the repository `.gitignore` on every run. Put
+  `.rs-guard/` and `rs-guard-metrics.json` in a global gitignore
+  (`core.excludesFile`) instead — see the new "Global gitignore" section in
+  docs/USAGE.md. Opt back in per-repo with `auto_gitignore = true`.
+
 ### Added
 
 - Nothing yet.

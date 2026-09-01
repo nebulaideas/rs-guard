@@ -1344,24 +1344,17 @@ impl Default for GithubConfig {
 /// Distinct from [`crate::cache::CacheConfig`], which is the runtime cache
 /// engine (TTL, size limit, resolved directory). The pipeline converts this
 /// into the engine config when building [`crate::cache::DiffCache`].
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct CacheConfig {
     /// Bypass the response cache, forcing an LLM API call.
     pub no_cache: bool,
     /// Custom cache directory path.
     pub cache_dir: Option<String>,
-    /// Whether to automatically add the cache directory to `.gitignore`.
+    /// Whether to append the cache directory to the **repository** `.gitignore`.
+    ///
+    /// Default is `false`. Prefer a [global excludes file](https://git-scm.com/docs/gitignore)
+    /// so local reviews do not rewrite every project's `.gitignore`.
     pub auto_gitignore: bool,
-}
-
-impl Default for CacheConfig {
-    fn default() -> Self {
-        Self {
-            no_cache: false,
-            cache_dir: None,
-            auto_gitignore: true,
-        }
-    }
 }
 
 /// Terminal output format, verdict threshold, findings, and dry-run.
@@ -1593,7 +1586,10 @@ impl Config {
         let cache_dir = toml.as_ref().and_then(|t| t.cache_dir.clone());
         let circuit_breaker = resolve_circuit_breaker(toml.as_ref());
         let pricing = toml.as_ref().and_then(|t| t.pricing.clone());
-        let auto_gitignore = toml.as_ref().and_then(|t| t.auto_gitignore).unwrap_or(true);
+        let auto_gitignore = toml
+            .as_ref()
+            .and_then(|t| t.auto_gitignore)
+            .unwrap_or(false);
         let rules_file = resolve_rules_file_from_env_and_toml(toml.as_ref());
         let output_format = resolve_output_format(toml.as_ref())?;
         let diff_base = resolve_diff_base_from_toml(toml.as_ref());
@@ -2599,7 +2595,7 @@ mod tests {
         let config = Config::from_env(None).unwrap();
         assert_eq!(config.llm.provider, "deepseek");
         assert_eq!(config.llm.api_key, "test-key");
-        assert!(config.cache.auto_gitignore);
+        assert!(!config.cache.auto_gitignore);
         assert_eq!(config.output.important_threshold, 3);
         assert!(config.diff.include_paths.is_empty());
         std::env::remove_var("DEEPSEEK_API_KEY");

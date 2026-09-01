@@ -213,5 +213,7 @@ This ensures cache correctness but means that configuration changes will
 invalidate cached responses.
 
 - Bypass with `--no-cache` for fresh reviews.
-- The cache is size-bounded (100 MB default, LRU-evicted) and auto-gitignored.
+- The cache is size-bounded (100 MB default, LRU-evicted). It is not auto-added
+  to `.gitignore` — prefer a [global gitignore](USAGE.md#global-gitignore), or
+  opt in per-repo with `auto_gitignore = true`.
 - See [docs/CONFIGURATION.md](CONFIGURATION.md) for cache tuning options.

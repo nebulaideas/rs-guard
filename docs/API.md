@@ -215,12 +215,12 @@ pub struct ProviderConfig {
 | --------------------------------- | ----------------------------------------- |
 | `DiffCache`                       | Cache using SHA-256 keyed filenames       |
 | `CacheConfig`                     | TTL, max size, and enable/disable options |
-| `CacheConfig::default()`          | 24h TTL, 100 MB limit, enabled by default |
+| `CacheConfig::default()`          | 24h TTL, 100 MB limit, enabled, `auto_gitignore: false` |
 | `DiffCache::new(config)`          | Creates cache instance                    |
 | `DiffCache::get()`                | Check cache by key hash                   |
 | `DiffCache::set()`                | Store response atomically                 |
 | `DiffCache::enforce_size_limit()` | LRU cleanup if exceeded max size          |
-| `DiffCache::ensure_gitignored()`  | Adds `.rs-guard/cache/` to `.gitignore` (returns `Result`, controlled by `auto_gitignore`) |
+| `DiffCache::ensure_gitignored()`  | Appends `.rs-guard/cache/` to the repo `.gitignore` (returns `Result`; opt-in via `auto_gitignore = true`, default off) |
 
 ### `retry`
 

@@ -20,6 +20,7 @@ Complete reference for running rs-guard in all modes.
 - [GitHub Actions Integration](#github-actions-integration)
 - [GitLab CI and other forges](#gitlab-ci-and-other-forges)
 - [Local Pre-commit Setup](#local-pre-commit-setup)
+- [Global gitignore](#global-gitignore)
 - [Configuration File](#configuration-file)
 - [Customizing the Review Prompt](#customizing-the-review-prompt)
 - [Project Rules Injection](#project-rules-injection)
@@ -660,6 +661,34 @@ exit 0
 ```bash
 git commit -m "docs: fix typo" --no-verify
 ```
+
+---
+
+## Global gitignore
+
+rs-guard writes two artifacts when you run it locally:
+
+- `.rs-guard/cache/` — the LLM response cache
+- `rs-guard-metrics.json` — per-run metrics artifact
+
+By default (`auto_gitignore = false`), rs-guard **does not** modify your
+repository's `.gitignore`. Instead, add one global entry to your
+[core.excludesFile](https://git-scm.com/docs/gitignore) so every local
+project is covered at once:
+
+```bash
+git config --global core.excludesFile ~/.gitignore_global
+
+cat >> ~/.gitignore_global <<'EOF'
+# rs-guard local review artifacts
+.rs-guard/
+rs-guard-metrics.json
+EOF
+```
+
+`.rs-guard/` also covers the cache directory, so one entry suffices. Opt
+back into per-repo `.gitignore` management with `auto_gitignore = true` in
+`.reviewer.toml` (see [Configuration File](#configuration-file)).
 
 ---
 
