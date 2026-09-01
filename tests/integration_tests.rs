@@ -50,6 +50,7 @@ const NEGATIVE_RESPONSE: &str = "Found issues.\n\n[RS_GUARD_VERDICT_METADATA]\nV
 const IMPORTANT_ISSUES_RESPONSE: &str = "Review complete.\n\n[RS_GUARD_VERDICT_METADATA]\nVerdict: POSITIVE\nCriticalIssues: 0\nSecurityIssues: 0\nImportantIssues: 2\nSuggestions: 1";
 
 #[tokio::test]
+#[serial_test::serial]
 async fn test_full_pipeline_ci_approve() {
     let github = MockServer::start().await;
     let llm = MockServer::start().await;
@@ -84,6 +85,7 @@ async fn test_full_pipeline_ci_approve() {
 }
 
 #[tokio::test]
+#[serial_test::serial]
 async fn test_full_pipeline_ci_request_changes() {
     let github = MockServer::start().await;
     let llm = MockServer::start().await;
@@ -119,6 +121,7 @@ async fn test_full_pipeline_ci_request_changes() {
 }
 
 #[tokio::test]
+#[serial_test::serial]
 async fn test_full_pipeline_ci_dismisses_previous_reviews() {
     let github = MockServer::start().await;
     let llm = MockServer::start().await;
@@ -174,6 +177,7 @@ async fn test_full_pipeline_ci_dismisses_previous_reviews() {
 }
 
 #[tokio::test]
+#[serial_test::serial]
 async fn test_full_pipeline_local_approve() {
     let llm = MockServer::start().await;
 
@@ -198,6 +202,7 @@ async fn test_full_pipeline_local_approve() {
 }
 
 #[tokio::test]
+#[serial_test::serial]
 async fn test_full_pipeline_json_format_success() {
     // Exercises the JSON pipeline branch end-to-end (mock LLM + dry-run).
     // stdout capture is harness-shared, so we assert pipeline success and that
@@ -260,6 +265,7 @@ async fn test_full_pipeline_json_format_success() {
 }
 
 #[tokio::test]
+#[serial_test::serial]
 async fn test_full_pipeline_empty_diff() {
     let github = MockServer::start().await;
 
@@ -287,6 +293,7 @@ fn oversized_diff_body() -> String {
 }
 
 #[tokio::test]
+#[serial_test::serial]
 async fn test_full_pipeline_ci_diff_too_large_submits_comment() {
     let github = MockServer::start().await;
 
@@ -317,6 +324,7 @@ async fn test_full_pipeline_ci_diff_too_large_submits_comment() {
 }
 
 #[tokio::test]
+#[serial_test::serial]
 async fn test_full_pipeline_empty_diff_file() {
     let dir = tempfile::tempdir().unwrap();
     let diff_path = dir.path().join("empty.diff");
@@ -328,6 +336,7 @@ async fn test_full_pipeline_empty_diff_file() {
 }
 
 #[tokio::test]
+#[serial_test::serial]
 async fn test_full_pipeline_with_variant_deepseek_pro() {
     let github = MockServer::start().await;
     let llm = MockServer::start().await;
@@ -427,6 +436,7 @@ async fn test_full_pipeline_cache_hit() {
 }
 
 #[tokio::test]
+#[serial_test::serial]
 async fn test_full_pipeline_chunked_diff() {
     let github = MockServer::start().await;
     let llm = MockServer::start().await;
@@ -537,6 +547,7 @@ async fn test_full_pipeline_metrics_file_created() {
 }
 
 #[tokio::test]
+#[serial_test::serial]
 async fn test_full_pipeline_local_blocked() {
     let llm = MockServer::start().await;
 
@@ -561,6 +572,7 @@ async fn test_full_pipeline_local_blocked() {
 }
 
 #[tokio::test]
+#[serial_test::serial]
 async fn test_full_pipeline_llm_retries_exhausted() {
     let github = MockServer::start().await;
     let llm = MockServer::start().await;
@@ -589,6 +601,7 @@ async fn test_full_pipeline_llm_retries_exhausted() {
 }
 
 #[tokio::test]
+#[serial_test::serial]
 async fn test_full_pipeline_ci_important_issues_yield_comment_not_blocked() {
     // Arrange: LLM returns 2 important issues (below the 3-issue REQUEST_CHANGES threshold).
     // The pipeline should succeed (COMMENT state is not a ReviewBlocked result).
@@ -650,6 +663,7 @@ async fn test_full_pipeline_ci_important_issues_yield_comment_not_blocked() {
 // end-to-end through the full pipeline, not just at the factory level.
 
 #[tokio::test]
+#[serial_test::serial]
 async fn test_full_pipeline_grok_approve() {
     let github = MockServer::start().await;
     let llm = MockServer::start().await;
@@ -684,6 +698,7 @@ async fn test_full_pipeline_grok_approve() {
 }
 
 #[tokio::test]
+#[serial_test::serial]
 async fn test_full_pipeline_empty_content_retried_then_succeeds() {
     let github = MockServer::start().await;
     let llm = MockServer::start().await;
@@ -739,6 +754,7 @@ async fn test_full_pipeline_empty_content_retried_then_succeeds() {
 }
 
 #[tokio::test]
+#[serial_test::serial]
 async fn test_full_pipeline_empty_content_escalates_max_tokens() {
     let github = MockServer::start().await;
     let llm = MockServer::start().await;
@@ -872,6 +888,7 @@ async fn test_full_pipeline_empty_content_not_cached_on_failure() {
 }
 
 #[tokio::test]
+#[serial_test::serial]
 async fn test_full_pipeline_glm_approve() {
     let github = MockServer::start().await;
     let llm = MockServer::start().await;
@@ -914,6 +931,7 @@ const MULTI_FILE_DIFF: &str = "diff --git a/src/main.rs b/src/main.rs\n--- a/src
 const THREE_FILE_DIFF: &str = "diff --git a/a.rs b/a.rs\n--- a/a.rs\n+++ b/a.rs\n@@ -1 +1,2 @@\n+x\ndiff --git a/b.rs b/b.rs\n--- a/b.rs\n+++ b/b.rs\n@@ -1 +1,2 @@\n+y\ndiff --git a/c.rs b/c.rs\n--- a/c.rs\n+++ b/c.rs\n@@ -1 +1,2 @@\n+z\n";
 
 #[tokio::test]
+#[serial_test::serial]
 async fn test_multi_pass_two_chunks_both_positive() {
     let github = MockServer::start().await;
     let llm = MockServer::start().await;
@@ -951,6 +969,7 @@ async fn test_multi_pass_two_chunks_both_positive() {
 }
 
 #[tokio::test]
+#[serial_test::serial]
 async fn test_multi_pass_one_chunk_negative_blocks() {
     let github = MockServer::start().await;
     let llm = MockServer::start().await;
@@ -987,6 +1006,7 @@ async fn test_multi_pass_one_chunk_negative_blocks() {
 }
 
 #[tokio::test]
+#[serial_test::serial]
 async fn test_multi_pass_single_file_diff_one_chunk() {
     let github = MockServer::start().await;
     let llm = MockServer::start().await;
@@ -1023,6 +1043,7 @@ async fn test_multi_pass_single_file_diff_one_chunk() {
 }
 
 #[tokio::test]
+#[serial_test::serial]
 async fn test_multi_pass_max_chunks_merges_three_files_into_two() {
     let github = MockServer::start().await;
     let llm = MockServer::start().await;
@@ -1063,6 +1084,7 @@ async fn test_multi_pass_max_chunks_merges_three_files_into_two() {
 }
 
 #[tokio::test]
+#[serial_test::serial]
 async fn test_multi_pass_local_mode_no_submission() {
     let llm = MockServer::start().await;
 
@@ -1089,6 +1111,7 @@ async fn test_multi_pass_local_mode_no_submission() {
 }
 
 #[tokio::test]
+#[serial_test::serial]
 async fn test_multi_pass_partial_failure_forces_comment_not_approve() {
     let github = MockServer::start().await;
     let llm = MockServer::start().await;
@@ -1140,6 +1163,7 @@ async fn test_multi_pass_partial_failure_forces_comment_not_approve() {
 }
 
 #[tokio::test]
+#[serial_test::serial]
 async fn test_multi_pass_all_chunks_failed_returns_error() {
     let github = MockServer::start().await;
     let llm = MockServer::start().await;
@@ -1170,6 +1194,7 @@ async fn test_multi_pass_all_chunks_failed_returns_error() {
 }
 
 #[tokio::test]
+#[serial_test::serial]
 async fn test_multi_pass_cost_guard_aborts_before_llm_calls() {
     let github = MockServer::start().await;
     // Deliberately do NOT mount any LLM mock — if the cost guard fails to
@@ -1208,6 +1233,11 @@ const MALFORMED_BLOCKING_RESPONSE: &str = "Found issues.\n\n[RS_GUARD_VERDICT_ME
 
 const INVALID_VERDICT_RESPONSE: &str = "Unclear.\n\n[RS_GUARD_VERDICT_METADATA]\nVerdict: MAYBE\nCriticalIssues: 0\nSecurityIssues: 0\nImportantIssues: 0\nSuggestions: 0";
 
+/// Redirects `persist_metrics` via `RS_GUARD_METRICS_PATH`.
+///
+/// That env var is process-global, so every `run_pipeline` test in this file
+/// is `#[serial_test::serial]` to stop a parallel persist from overwriting
+/// another test's metrics file.
 struct MetricsPathGuard {
     file: tempfile::NamedTempFile,
 }
