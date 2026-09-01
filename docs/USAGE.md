@@ -486,7 +486,7 @@ jobs:
       - name: Cache cargo build
         uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c
       - name: Install rs-guard
-        run: cargo install rs-guard --locked --version "1.8.2"
+        run: cargo install rs-guard --locked --version "1.8.3"
 
       - name: AI Code Review
         run: rs-guard --llm-timeout 240
@@ -527,7 +527,7 @@ jobs:
       - name: Cache cargo build
         uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c
       - name: Install rs-guard
-        run: cargo install rs-guard --locked --version "1.8.2"
+        run: cargo install rs-guard --locked --version "1.8.3"
 
       - name: AI Code Review
         run: rs-guard --config .reviewer.toml
@@ -577,7 +577,7 @@ jobs:
       - name: Cache cargo build
         uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c
       - name: Install rs-guard
-        run: cargo install rs-guard --locked --version "1.8.2"
+        run: cargo install rs-guard --locked --version "1.8.3"
       - name: AI Code Review
         run: rs-guard --check-run --llm-timeout 240
         env:
@@ -607,7 +607,7 @@ review:
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
   script:
-    - cargo install rs-guard --locked --version "1.8.2"
+    - cargo install rs-guard --locked --version "1.8.3"
     - git diff "$CI_MERGE_REQUEST_DIFF_BASE_SHA...$CI_MERGE_REQUEST_SOURCE_BRANCH_SHA" > /tmp/mr.diff
     - rs-guard --provider deepseek --diff-file /tmp/mr.diff --llm-timeout 240
   artifacts:
@@ -942,7 +942,7 @@ jobs:
       - name: Cache cargo build
         uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c
       - name: Install rs-guard
-        run: cargo install rs-guard --locked --version "1.8.2"
+        run: cargo install rs-guard --locked --version "1.8.3"
 
       - name: AI Code Review
         run: rs-guard
@@ -963,7 +963,7 @@ Then add your API key in **Settings → Secrets and variables → Actions → `D
 Install rs-guard:
 
 ```bash
-cargo install rs-guard --locked --version "1.8.2"
+cargo install rs-guard --locked --version "1.8.3"
 ```
 
 Create `.git/hooks/pre-commit`:

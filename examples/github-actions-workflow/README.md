@@ -58,7 +58,7 @@ The example workflows use the following security defaults:
   the default `write-all` token scope.
 - **Concurrency groups** — Prevents stale reviews and resource waste.
 - **Reproducible install** — The `Install rs-guard` step runs
-  `cargo install rs-guard --locked --version "1.8.2"`, which builds the binary from source
+  `cargo install rs-guard --locked --version "1.8.3"`, which builds the binary from source
   using the published `Cargo.lock` and places it on `PATH` for subsequent steps.
 - **Locked dependencies** — The `--locked` flag ensures the build uses the
   exact dependency versions from the published `Cargo.lock`, giving you a
