@@ -239,6 +239,7 @@ permissions:
 jobs:
   review:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     if: ${{ !github.event.pull_request.head.repo.fork }}
 
     steps:
@@ -256,7 +257,7 @@ jobs:
         run: cargo install rs-guard --locked --version "1.8.2"
 
       - name: AI Code Review
-        run: rs-guard
+        run: rs-guard --llm-timeout 240
         env:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

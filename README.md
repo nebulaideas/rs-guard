@@ -104,7 +104,7 @@ See [docs/INSTALLATION.md](docs/INSTALLATION.md) for detailed instructions.
 
 ### CI Mode (GitHub Actions)
 
-Auto-detected when `GITHUB_ACTIONS=true`. Fetches the PR diff from the GitHub API, sends it to the LLM, and submits an `APPROVE`, `REQUEST_CHANGES`, or `COMMENT` review.
+Auto-detected when `GITHUB_ACTIONS=true`. Fetches the PR diff from the GitHub API, sends it to the LLM, and submits an `APPROVE`, `REQUEST_CHANGES`, or `COMMENT` review. GitLab and other forges are not CI-mode targets — see [GitLab CI and other forges](docs/USAGE.md#gitlab-ci-and-other-forges).
 
 ```bash
 rs-guard --provider deepseek --model deepseek-v4-flash

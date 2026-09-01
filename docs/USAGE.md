@@ -18,6 +18,7 @@ Complete reference for running rs-guard in all modes.
 - [Exit Codes](#exit-codes)
 - [Review State Logic](#review-state-logic)
 - [GitHub Actions Integration](#github-actions-integration)
+- [GitLab CI and other forges](#gitlab-ci-and-other-forges)
 - [Local Pre-commit Setup](#local-pre-commit-setup)
 - [Configuration File](#configuration-file)
 - [Customizing the Review Prompt](#customizing-the-review-prompt)
@@ -45,7 +46,7 @@ rs-guard [OPTIONS]
 | `--variant`     |       | (none)                     | Provider-specific model variant (e.g. `flash`/`pro` for deepseek). See PROVIDERS.md and CONFIGURATION.md. |
 | `--config`      | `-c`  | `.reviewer.toml`           | Path to the configuration TOML file.                                               |
 | `--max-tokens`  |       | `4096`                     | Maximum tokens for LLM completions.                                                |
-| `--llm-timeout` |       | `120`                      | Total timeout in seconds for LLM API requests. Raise for thinking models.          |
+| `--llm-timeout` |       | `120` (`240` deepseek/kimi) | Total timeout in seconds for LLM API requests. Auto-raised to 240s for thinking providers when unset. |
 | `--important-threshold` | | `3`                    | Number of `[Important]` issues required to `REQUEST_CHANGES`.                      |
 | `--diff-file`   | —     | _(none)_                   | Review a pre-existing diff file instead of fetching from GitHub API.               |
 | `--no-project-rules` | — | Off                    | Disable project rules auto-detection.                                            |
@@ -472,6 +473,7 @@ permissions:
 jobs:
   review:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     if: ${{ !github.event.pull_request.head.repo.fork }}
     steps:
       # Pinned from actions/checkout@v5 (93cb6efe) to avoid Node.js 20 deprecation.
@@ -486,7 +488,7 @@ jobs:
         run: cargo install rs-guard --locked --version "1.8.2"
 
       - name: AI Code Review
-        run: rs-guard
+        run: rs-guard --llm-timeout 240
         env:
           # Set the env var for your chosen provider:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
@@ -512,6 +514,7 @@ permissions:
 jobs:
   review:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     if: ${{ !github.event.pull_request.head.repo.fork }}
     steps:
       # Pinned from actions/checkout@v5 (93cb6efe) to avoid Node.js 20 deprecation.
@@ -548,6 +551,7 @@ jobs:
 - **Fork safety:** `if: !github.event.pull_request.head.repo.fork` prevents running on forks where secrets are not available.
 - **Token scope:** `GITHUB_TOKEN` has `pull-requests: write` scope by default. Request explicitly if needed.
 - **Artifacts:** `review-result.txt` and `rs-guard-metrics.json` are written by rs-guard and can be uploaded as workflow artifacts.
+- **Job timeout:** set `timeout-minutes: 15` on the review job. DeepSeek/Kimi thinking can take up to 240s (v1.8.3 auto-floor); full HTTP timeouts are not retried.
 
 ### GitHub Check Runs (branch protection)
 
@@ -562,6 +566,7 @@ permissions:
 jobs:
   review:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     if: ${{ !github.event.pull_request.head.repo.fork }}
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
@@ -573,7 +578,7 @@ jobs:
       - name: Install rs-guard
         run: cargo install rs-guard --locked --version "1.8.2"
       - name: AI Code Review
-        run: rs-guard --check-run
+        run: rs-guard --check-run --llm-timeout 240
         env:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -586,6 +591,33 @@ The Check Run conclusion is derived from the verdict: `APPROVE`→`success`, `RE
 The head SHA is resolved automatically from `GITHUB_EVENT_PATH` (`pull_request.head.sha`) for PR events — you do not need to pass it explicitly. Use `--check-run-sha` (or `RS_GUARD_CHECK_RUN_SHA`) only for non-GitHub-Actions CI. Customize the name with `--check-run-name` (default `rs-guard`).
 
 > **Caveat:** because Check Run creation is non-fatal, a required branch-protection check may silently fail to be created, leaving PRs blocked or without the expected status. Alert on the `Failed to create Check Run` log line if you depend on it.
+
+---
+
+## GitLab CI and other forges
+
+CI mode is **GitHub-only**. It is detected via `GITHUB_ACTIONS=true` and talks to the GitHub API (fetch PR diff, post a review / Check Run). There is no GitLab Merge Request client.
+
+On GitLab CI you can still fail the pipeline on a blocking verdict using **diff-file / local** mode (exit code `2` = `REQUEST_CHANGES`). This does **not** post a comment on the MR:
+
+```yaml
+review:
+  stage: test
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+  script:
+    - cargo install rs-guard --locked --version "1.8.2"
+    - git fetch origin $CI_MERGE_REQUEST_TARGET_BRANCH_NAME
+    - git diff origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME...HEAD > /tmp/mr.diff
+    - rs-guard --diff-file /tmp/mr.diff --llm-timeout 240
+  artifacts:
+    when: always
+    paths:
+      - rs-guard-metrics.json
+      - review-result.txt
+```
+
+Set the provider API key as a GitLab CI/CD variable (e.g. `DEEPSEEK_API_KEY`). Do not set `GITHUB_ACTIONS`.
 
 ---
 
@@ -1012,7 +1044,7 @@ You will see a warning in logs containing the length of `reasoning_content` and 
 
 ### LLM request timing out
 
-Increase `--llm-timeout` / `RS_GUARD_LLM_TIMEOUT` (seconds). The default is 120s as of v1.2.3 (up from 60s) specifically to help thinking models.
+Increase `--llm-timeout` / `RS_GUARD_LLM_TIMEOUT` (seconds). The default is 120s; **deepseek** and **kimi** auto-raise to **240s** when unset (v1.8.3). Also set the GitHub Actions job `timeout-minutes` above that (15 is enough). Logs distinguish `Request timed out` from `Failed to decode LLM response body (not a timeout)`.
 
 ### Review posted as `COMMENT` instead of `APPROVE`/`REQUEST_CHANGES`
 

@@ -73,6 +73,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Two-tier `DiffLimits` rustdoc (`raw_fetch` vs user limits) with a lockfile
   example (issue #157). Cross-links between isolated doc concepts and code
   symbols, plus remaining thin communities (issues #164, #162).
+- GitHub Actions snippets and `generate-workflow` use `timeout-minutes: 15`.
+  GitLab CI is documented as diff-file / local mode only (no MR review API).
 
 ## [1.8.2] - 2026-08-26
 

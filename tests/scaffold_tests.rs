@@ -49,6 +49,7 @@ fn test_init_creates_scaffold_files() {
 
     let workflow = fs::read_to_string(&workflow_path).unwrap();
     assert!(workflow.contains("rs-guard --provider kimi"));
+    assert!(workflow.contains("timeout-minutes: 15"));
     assert!(workflow.contains("KIMI_API_KEY"));
     assert!(workflow.contains(&format!("v{}", env!("CARGO_PKG_VERSION"))));
 

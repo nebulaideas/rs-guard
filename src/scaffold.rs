@@ -41,6 +41,9 @@ jobs:
     # Skip draft PRs to avoid wasting tokens on work-in-progress.
     if: github.event.pull_request.draft == false{{FORK_GUARD}}
     runs-on: ubuntu-latest
+    # DeepSeek/Kimi thinking can take up to 240s (v1.8.3 floor). Timeouts are
+    # not retried; 15m leaves headroom for budget escalation.
+    timeout-minutes: 15
     permissions:
       contents: read
       pull-requests: write
@@ -529,7 +532,7 @@ fn generate_workflow(args: &GenerateWorkflowArgs) -> Result<String, Box<dyn std:
         ("pull_request", "types: [opened, synchronize, reopened]", "")
     };
 
-    let mut run_line = format!("./rs-guard --provider {}", provider);
+    let mut run_line = format!("rs-guard --provider {}", provider);
     if let Some(m) = &model {
         run_line.push_str(&format!(" --model {}", m));
     }
@@ -558,6 +561,7 @@ provider = "{provider}"
 # model = "{default_model}"
 temperature = 0.1
 # important_issues_threshold = 3
+# llm_timeout_secs is optional (default 120; auto 240 for deepseek/kimi).
 
 # Project rules injection (v1.5.0)
 # Auto-detects AGENTS.md, CLAUDE.md, .github/copilot-instructions.md,
@@ -744,6 +748,7 @@ mod tests {
         assert!(workflow.contains("rs-guard --provider kimi --model kimi-k2.5"));
         assert!(workflow.contains("KIMI_API_KEY"));
         assert!(!workflow.contains("DEEPSEEK_API_KEY"));
+        assert!(workflow.contains("timeout-minutes: 15"));
         assert!(workflow.contains(&format!("v{}", env!("CARGO_PKG_VERSION"))));
     }
 

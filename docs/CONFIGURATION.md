@@ -36,7 +36,7 @@ model = "deepseek-v4-flash"     # Model identifier (provider-specific)
 variant = "flash"               # Provider-specific model variant (e.g. "flash", "pro" for deepseek). Optional.
 temperature = 0.1               # Sampling temperature (0.0 to 2.0)
 max_tokens = 8192               # Maximum tokens for LLM completion
-llm_timeout_secs = 180          # Total timeout for LLM HTTP calls in seconds (default 120)
+# llm_timeout_secs = 240        # Optional. Default 120s; auto-raised to 240s for deepseek/kimi when unset.
 
 # GitHub-native UX (v1.7)
 # check_run = true               # Publish a GitHub Check Run (requires checks: write)
@@ -46,7 +46,7 @@ llm_timeout_secs = 180          # Total timeout for LLM HTTP calls in seconds (d
 # Example for deepseek-v4-pro (complex reasoning)
 # variant = "pro"
 # max_tokens = 16384
-# llm_timeout_secs = 180
+# llm_timeout_secs = 240
 
 # Per-provider configuration
 [providers.deepseek]
