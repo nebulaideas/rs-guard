@@ -3,7 +3,7 @@
 //! Provides functions for writing structured review artifacts and printing
 //! color-coded summaries to the terminal for local mode.
 
-use crate::verdict::{ReviewState, Verdict};
+use crate::verdict::{ReviewState, Verdict, VerdictParseError};
 use colored::Colorize;
 use serde::Serialize;
 use std::io::Write;
@@ -55,6 +55,19 @@ pub struct ReviewMetrics {
     /// Number of chunks that failed during multi-pass (0 for single-pass or
     /// full success).
     pub multi_pass_failed_chunks: u32,
+    /// Verdict parse issues recorded this run (empty on a clean parse).
+    pub verdict_parse_errors: Vec<VerdictParseError>,
+    /// Times `max_tokens` was doubled because a thinking model exhausted
+    /// the output budget on chain-of-thought.
+    pub budget_escalations: u32,
+    /// LLM response cache hits this run.
+    pub cache_hits: u32,
+    /// LLM response cache misses this run.
+    pub cache_misses: u32,
+    /// Whether the diff was head/tail-chunked to fit the context window.
+    pub diff_chunked: bool,
+    /// Middle lines omitted when [`Self::diff_chunked`] is `true`.
+    pub diff_removed_lines: usize,
 }
 
 /// Machine-readable review result for `--format json`.
@@ -363,6 +376,12 @@ mod tests {
             secrets_redacted_count: 0,
             multi_pass_chunk_count: 1,
             multi_pass_failed_chunks: 0,
+            verdict_parse_errors: Vec::new(),
+            budget_escalations: 0,
+            cache_hits: 0,
+            cache_misses: 1,
+            diff_chunked: false,
+            diff_removed_lines: 0,
         };
 
         write_metrics(&metrics, path_str).unwrap();
@@ -372,6 +391,86 @@ mod tests {
         assert!(content.contains("4230"));
         assert!(content.contains("APPROVE"));
         assert!(content.contains("3"));
+        assert!(content.contains("\"verdict_parse_errors\""));
+        assert!(content.contains("\"budget_escalations\""));
+        assert!(content.contains("\"cache_hits\""));
+        assert!(content.contains("\"cache_misses\""));
+        assert!(content.contains("\"diff_chunked\""));
+        assert!(content.contains("\"diff_removed_lines\""));
+    }
+
+    fn sample_metrics() -> ReviewMetrics {
+        ReviewMetrics {
+            provider: "deepseek".to_string(),
+            model: "deepseek-v4-flash".to_string(),
+            variant: None,
+            estimated_tokens_in: 100,
+            estimated_tokens_out: 20,
+            token_source: "estimate".to_string(),
+            latency_secs: 1.0,
+            estimated_cost_cents: Some(1.0),
+            diff_lines: 10,
+            verdict: "NEGATIVE".to_string(),
+            state: "REQUEST_CHANGES".to_string(),
+            project_rules_file: None,
+            secrets_redacted_count: 0,
+            multi_pass_chunk_count: 1,
+            multi_pass_failed_chunks: 0,
+            verdict_parse_errors: Vec::new(),
+            budget_escalations: 0,
+            cache_hits: 0,
+            cache_misses: 0,
+            diff_chunked: false,
+            diff_removed_lines: 0,
+        }
+    }
+
+    #[test]
+    fn test_write_metrics_serializes_each_error_path() {
+        use crate::verdict::{
+            PARSE_ERROR_EMPTY_RESPONSE, PARSE_ERROR_INVALID_VERDICT, PARSE_ERROR_MALFORMED_FINDINGS,
+        };
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("metrics.json");
+        let path_str = path.to_str().unwrap();
+
+        let mut metrics = sample_metrics();
+        metrics.verdict_parse_errors = vec![
+            VerdictParseError {
+                error_type: PARSE_ERROR_MALFORMED_FINDINGS.to_string(),
+                preliminary_blocking: true,
+            },
+            VerdictParseError {
+                error_type: PARSE_ERROR_EMPTY_RESPONSE.to_string(),
+                preliminary_blocking: false,
+            },
+            VerdictParseError {
+                error_type: PARSE_ERROR_INVALID_VERDICT.to_string(),
+                preliminary_blocking: false,
+            },
+        ];
+        metrics.budget_escalations = 2;
+        metrics.cache_hits = 1;
+        metrics.cache_misses = 3;
+        metrics.diff_chunked = true;
+        metrics.diff_removed_lines = 42;
+
+        write_metrics(&metrics, path_str).unwrap();
+
+        let parsed: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(path_str).unwrap()).unwrap();
+        let errors = parsed["verdict_parse_errors"].as_array().unwrap();
+        assert_eq!(errors.len(), 3);
+        assert_eq!(errors[0]["error_type"], "malformed_findings");
+        assert_eq!(errors[0]["preliminary_blocking"], true);
+        assert_eq!(errors[1]["error_type"], "empty_response");
+        assert_eq!(errors[2]["error_type"], "invalid_verdict");
+        assert_eq!(parsed["budget_escalations"], 2);
+        assert_eq!(parsed["cache_hits"], 1);
+        assert_eq!(parsed["cache_misses"], 3);
+        assert_eq!(parsed["diff_chunked"], true);
+        assert_eq!(parsed["diff_removed_lines"], 42);
     }
 
     #[test]

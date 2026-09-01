@@ -26,6 +26,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Error-path counters in `rs-guard-metrics.json`** (issue #159) —
+  `ReviewMetrics` now records `verdict_parse_errors` (`malformed_findings`,
+  `empty_response`, `invalid_verdict`), `budget_escalations`, `cache_hits`,
+  `cache_misses`, `diff_chunked`, and `diff_removed_lines`. Malformed findings
+  with a blocking preliminary still complete the review and emit a parse-error
+  record; fatal parse failures write metrics (verdict/state `PARSE_ERROR`)
+  before returning the error.
+
 - **DeepSeek CI timeouts vs payload errors** (issue #163) —
   Generic-client JSON parse and empty-`choices` failures now map to HTTP
   status 400 with the prefix `Failed to decode LLM response body (not a timeout)`,
