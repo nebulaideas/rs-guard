@@ -1550,7 +1550,7 @@ dependencies = [
 
 [[package]]
 name = "rs-guard"
-version = "1.8.2"
+version = "1.8.3"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1562,6 +1562,7 @@ dependencies = [
  "hex",
  "llm-kernel",
  "log",
+ "parking_lot",
  "proptest",
  "rand 0.8.6",
  "regex",

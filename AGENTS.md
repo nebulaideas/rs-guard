@@ -8,7 +8,7 @@
 
 **rs-guard** is a Rust-based AI code review CLI tool. It fetches Pull Request diffs from GitHub, sends them to an LLM provider for review, parses a structured verdict from the response, and submits the review state (`APPROVE`, `REQUEST_CHANGES`, or `COMMENT`) back to GitHub — all in a single execution.
 
-**Current Status:** Phases 1–7 complete; v1.8.2 released. Multi-pass review, .rs-guardignore, language-aware prompts, llm-kernel hybrid architecture, per-variant temperature override. DeepSeek V4 uses the generic OpenAI client until llm-kernel can parse `"tool_calls": null` (issue #152). Released via crates.io only (`cargo install rs-guard --locked`); pre-built multi-arch binaries unblocked by the ring TLS switch in 1.8.1.
+**Current Status:** Phases 1–7 complete; v1.8.3 released. Multi-pass review, .rs-guardignore, language-aware prompts, llm-kernel hybrid architecture (`ClientStrategy`), `Config` sub-structs, error-path metrics, per-variant temperature override. DeepSeek V4 stays on the generic OpenAI client (llm-kernel still cannot parse `"tool_calls": null`). Released via crates.io only (`cargo install rs-guard --locked`); pre-built multi-arch binaries unblocked by the ring TLS switch in 1.8.1.
 
 **Project Rules Injection (v1.5.0):** rs-guard auto-detects AI-agent instruction files (`AGENTS.md`, `CLAUDE.md`, `.github/copilot-instructions.md`, `.gemini/styleguide.md`, `.cursor/rules/*.md`, `.windsurfrules`) and layers them into the review prompt as a "Project Conventions" section. Users can opt out with `--no-project-rules`, override with `--rules-file`, or select interactively in local mode when multiple files exist.
 
@@ -21,7 +21,7 @@
 **Dynamic `result_format` (v1.3, issue #77):** `ChatRequest.result_format` and `ProviderMeta.result_format` moved to `Option<Cow<'static, str>>` to keep the zero-cost static path while supporting per-provider TOML overrides. DRY diff-fetch error handling and expanded config/redact/verdict test coverage.
 
 - **Repository:** `git@github.com:nebulaideas/rs-guard.git`
-- **Current Branch:** `main` (v1.8.2 released)
+- **Current Branch:** `main` (v1.8.3 released)
 - **License:** MIT License (Copyright 2026 Nebula Ideas)
 - **Language:** Rust (edition 2021, MSRV 1.92)
 - **Crate:** [rs-guard on crates.io](https://crates.io/crates/rs-guard) | [docs.rs](https://docs.rs/rs-guard)
@@ -315,9 +315,9 @@ cargo audit
 - **`Config::empty()`** is a `#[doc(hidden)]` constructor for tests — not for production use.
 - **New modules** added since the original plan: `pipeline.rs`, `http.rs`, `redact.rs`, `cache.rs`, `llm/providers.rs`, `llm/generic_client.rs` (v1.2).
 - **Decision Log** in Appendix F of the plan tracks all architectural decisions.
-- **Cache directory** (`.rs-guard/cache/`) is auto-gitignored on first use — do not commit it.
+- **Cache directory** (`.rs-guard/cache/`) — `auto_gitignore` now defaults to `false`; rs-guard no longer rewrites the repo `.gitignore` on local runs. Recommend a global gitignore (see docs/USAGE.md §Global gitignore); opt in per-repo with `auto_gitignore = true`.
 - **`--no-cache` flag** bypasses the LLM response cache for a fresh API call.
-- **v1.2 client extraction** — the 5 per-provider clients were removed; all providers now use `GenericOpenAiCompatibleClient`. Adding a provider = a `ProviderMeta` entry in `llm/providers.rs` + docs + tests.
+- **v1.2 client extraction** — the 5 duplicated per-provider clients were replaced by `GenericOpenAiCompatibleClient`; since v1.8 the factory routes between it and `KernelBackedClient` via `ClientStrategy` on `ProviderMeta`. Adding a provider = a `ProviderMeta` entry in `llm/providers.rs` + docs + tests.
 
 ---
 

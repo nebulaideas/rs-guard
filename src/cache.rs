@@ -64,7 +64,9 @@ pub struct CacheConfig {
     pub enabled: bool,
     /// Maximum total size of cache in bytes.
     pub max_size_bytes: u64,
-    /// Whether to automatically add the cache directory to `.gitignore`.
+    /// Whether to append the cache directory to the **repository** `.gitignore`.
+    ///
+    /// Default is `false`. Opt in with `auto_gitignore = true` in `.reviewer.toml`.
     pub auto_gitignore: bool,
 }
 
@@ -75,7 +77,7 @@ impl Default for CacheConfig {
             ttl: Duration::from_secs(DEFAULT_TTL_SECS),
             enabled: true,
             max_size_bytes: DEFAULT_MAX_SIZE_BYTES,
-            auto_gitignore: true,
+            auto_gitignore: false,
         }
     }
 }
@@ -1263,6 +1265,14 @@ mod tests {
             with_rules_a.as_string(),
             with_rules_b.as_string(),
             "different project rules content must produce different cache keys"
+        );
+    }
+
+    #[test]
+    fn test_cache_config_default_does_not_auto_gitignore() {
+        assert!(
+            !CacheConfig::default().auto_gitignore,
+            "local runs must not rewrite the repo .gitignore by default"
         );
     }
 

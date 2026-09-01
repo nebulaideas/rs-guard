@@ -1,6 +1,6 @@
 [package]
 name = "rs-guard"
-version = "1.8.2"
+version = "1.8.3"
 edition = "2021"
 authors = ["Nebula Ideas <hello@nebulaideas.dev>"]
 license = "MIT"
@@ -47,6 +47,7 @@ llm-kernel = { version = "0.28", default-features = false, features = ["provider
 
 [dev-dependencies]
 proptest = "1.11.0"
+parking_lot = "0.12"
 serial_test = "3.5.0"
 tempfile = "3.14"
 wiremock = "0.6"

@@ -239,6 +239,7 @@ permissions:
 jobs:
   review:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     if: ${{ !github.event.pull_request.head.repo.fork }}
 
     steps:
@@ -253,10 +254,10 @@ jobs:
         uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c
 
       - name: Install rs-guard
-        run: cargo install rs-guard --locked --version "1.8.2"
+        run: cargo install rs-guard --locked --version "1.8.3"
 
       - name: AI Code Review
-        run: rs-guard
+        run: rs-guard --llm-timeout 240
         env:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

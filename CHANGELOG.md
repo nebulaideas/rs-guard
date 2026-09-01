@@ -7,7 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.8.3] - 2026-09-01
+
 ### Changed
+
+- **`auto_gitignore` now defaults to `false`** — local runs no longer append
+  `.rs-guard/cache/` to the repository `.gitignore` on every run. Put
+  `.rs-guard/` and `rs-guard-metrics.json` in a global gitignore
+  (`core.excludesFile`) instead — see the new "Global gitignore" section in
+  docs/USAGE.md. Opt back in per-repo with `auto_gitignore = true`.
 
 - **`Config` split into focused sub-structs** (issue #158) — `Config` is now a
   composition of `DiffConfig`, `LlmConfig`, `GithubConfig`, `CacheConfig`,
@@ -61,6 +69,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Findings can escalate counts and force `NEGATIVE`, never drop below the
   preliminary counts or silently approve. The 9 handwritten invariant tests
   remain as regression examples.
+
+### Documentation
+
+- Two-tier `DiffLimits` rustdoc (`raw_fetch` vs user limits) with a lockfile
+  example (issue #157). Cross-links between isolated doc concepts and code
+  symbols, plus remaining thin communities (issues #164, #162).
+- GitHub Actions snippets and `generate-workflow` use `timeout-minutes: 15`.
+  Generated workflows run `rs-guard` from PATH (not `./rs-guard`).
+  GitLab CI is documented as diff-file / local mode only (no MR review API).
 
 ## [1.8.2] - 2026-08-26
 

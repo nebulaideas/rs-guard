@@ -1344,24 +1344,17 @@ impl Default for GithubConfig {
 /// Distinct from [`crate::cache::CacheConfig`], which is the runtime cache
 /// engine (TTL, size limit, resolved directory). The pipeline converts this
 /// into the engine config when building [`crate::cache::DiffCache`].
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct CacheConfig {
     /// Bypass the response cache, forcing an LLM API call.
     pub no_cache: bool,
     /// Custom cache directory path.
     pub cache_dir: Option<String>,
-    /// Whether to automatically add the cache directory to `.gitignore`.
+    /// Whether to append the cache directory to the **repository** `.gitignore`.
+    ///
+    /// Default is `false`. Prefer a [global excludes file](https://git-scm.com/docs/gitignore)
+    /// so local reviews do not rewrite every project's `.gitignore`.
     pub auto_gitignore: bool,
-}
-
-impl Default for CacheConfig {
-    fn default() -> Self {
-        Self {
-            no_cache: false,
-            cache_dir: None,
-            auto_gitignore: true,
-        }
-    }
 }
 
 /// Terminal output format, verdict threshold, findings, and dry-run.
@@ -1593,7 +1586,10 @@ impl Config {
         let cache_dir = toml.as_ref().and_then(|t| t.cache_dir.clone());
         let circuit_breaker = resolve_circuit_breaker(toml.as_ref());
         let pricing = toml.as_ref().and_then(|t| t.pricing.clone());
-        let auto_gitignore = toml.as_ref().and_then(|t| t.auto_gitignore).unwrap_or(true);
+        let auto_gitignore = toml
+            .as_ref()
+            .and_then(|t| t.auto_gitignore)
+            .unwrap_or(false);
         let rules_file = resolve_rules_file_from_env_and_toml(toml.as_ref());
         let output_format = resolve_output_format(toml.as_ref())?;
         let diff_base = resolve_diff_base_from_toml(toml.as_ref());
@@ -2131,7 +2127,7 @@ impl Config {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Mutex;
+    use parking_lot::Mutex;
 
     /// Serializes tests that mutate process-global environment variables.
     /// Rust tests run in parallel threads by default; without this guard, tests
@@ -2174,7 +2170,7 @@ mod tests {
 
     #[test]
     fn test_resolve_api_key_ollama_missing_key_returns_empty() {
-        let _guard = ENV_MUTEX.lock().unwrap();
+        let _guard = ENV_MUTEX.lock();
         std::env::remove_var("OLLAMA_API_KEY");
         // Ollama does not require an API key — missing env var should return
         // an empty string, not an error.
@@ -2189,7 +2185,7 @@ mod tests {
 
     #[test]
     fn test_resolve_api_key_gemini_missing_key_returns_error() {
-        let _guard = ENV_MUTEX.lock().unwrap();
+        let _guard = ENV_MUTEX.lock();
         std::env::remove_var("GEMINI_API_KEY");
         // Gemini requires an API key — missing env var should error.
         let result = resolve_api_key("gemini", None);
@@ -2204,7 +2200,7 @@ mod tests {
 
     #[test]
     fn test_resolve_api_key_ollama_with_key_returns_key() {
-        let _guard = ENV_MUTEX.lock().unwrap();
+        let _guard = ENV_MUTEX.lock();
         std::env::set_var("OLLAMA_API_KEY", "test-ollama-key");
         let result = resolve_api_key("ollama", None);
         assert!(result.is_ok());
@@ -2214,7 +2210,7 @@ mod tests {
 
     #[test]
     fn test_resolve_api_key_gemini_empty_key_returns_error() {
-        let _guard = ENV_MUTEX.lock().unwrap();
+        let _guard = ENV_MUTEX.lock();
         std::env::set_var("GEMINI_API_KEY", "");
         // Gemini requires a non-empty API key — empty string should error.
         let result = resolve_api_key("gemini", None);
@@ -2290,7 +2286,7 @@ mod tests {
             ..Default::default()
         };
 
-        let _guard = ENV_MUTEX.lock().unwrap();
+        let _guard = ENV_MUTEX.lock();
         std::env::set_var("DASHSCOPE_API_KEY", "test-key");
         let config = Config::from_env(Some(toml)).unwrap();
         std::env::remove_var("DASHSCOPE_API_KEY");
@@ -2320,7 +2316,7 @@ mod tests {
             ..Default::default()
         };
 
-        let _guard = ENV_MUTEX.lock().unwrap();
+        let _guard = ENV_MUTEX.lock();
         std::env::set_var("DASHSCOPE_API_KEY", "test-key");
         let config = Config::from_env(Some(toml)).unwrap();
         std::env::remove_var("DASHSCOPE_API_KEY");
@@ -2594,15 +2590,47 @@ mod tests {
 
     #[test]
     fn test_config_from_env_fills_sub_structs() {
-        let _guard = ENV_MUTEX.lock().unwrap();
+        let _guard = ENV_MUTEX.lock();
         std::env::set_var("DEEPSEEK_API_KEY", "test-key");
         let config = Config::from_env(None).unwrap();
         assert_eq!(config.llm.provider, "deepseek");
         assert_eq!(config.llm.api_key, "test-key");
-        assert!(config.cache.auto_gitignore);
+        assert!(!config.cache.auto_gitignore);
         assert_eq!(config.output.important_threshold, 3);
         assert!(config.diff.include_paths.is_empty());
         std::env::remove_var("DEEPSEEK_API_KEY");
+    }
+
+    #[test]
+    fn test_cache_config_default_disables_auto_gitignore() {
+        // Pins the config-layer default independently of Config::from_env:
+        // local runs must not rewrite the repository .gitignore (issue: CR on
+        // the auto_gitignore default flip).
+        assert!(
+            !crate::config::CacheConfig::default().auto_gitignore,
+            "config-level CacheConfig default must not auto-gitignore"
+        );
+    }
+
+    #[test]
+    fn test_auto_gitignore_toml_true_propagates() {
+        // Explicit TOML opt-in must override the new `false` default.
+        // Note: `auto_gitignore` is TOML-only — there is no RS_GUARD_* env
+        // fallback (resolved in from_env), so no env var needs clearing here.
+        let toml = TomlConfig {
+            auto_gitignore: Some(true),
+            ..Default::default()
+        };
+
+        let _guard = ENV_MUTEX.lock();
+        std::env::set_var("DEEPSEEK_API_KEY", "test-key");
+        let config = Config::from_env(Some(toml)).unwrap();
+        std::env::remove_var("DEEPSEEK_API_KEY");
+
+        assert!(
+            config.cache.auto_gitignore,
+            "explicit auto_gitignore = true in TOML must propagate to the resolved config"
+        );
     }
 
     #[test]
@@ -2779,7 +2807,7 @@ mod tests {
 
     #[test]
     fn test_repo_full_name_with_multiple_slashes() {
-        let _guard = ENV_MUTEX.lock().unwrap();
+        let _guard = ENV_MUTEX.lock();
         std::env::set_var("DEEPSEEK_API_KEY", "test-key");
         std::env::set_var("REPO_FULL_NAME", "owner/repo/subpath");
         let result = Config::from_env(None);
@@ -2794,7 +2822,7 @@ mod tests {
 
     #[test]
     fn test_repo_full_name_empty_owner() {
-        let _guard = ENV_MUTEX.lock().unwrap();
+        let _guard = ENV_MUTEX.lock();
         std::env::set_var("DEEPSEEK_API_KEY", "test-key");
         std::env::set_var("REPO_FULL_NAME", "/repo");
         let result = Config::from_env(None);
@@ -2806,7 +2834,7 @@ mod tests {
 
     #[test]
     fn test_repo_full_name_empty_repo() {
-        let _guard = ENV_MUTEX.lock().unwrap();
+        let _guard = ENV_MUTEX.lock();
         std::env::set_var("DEEPSEEK_API_KEY", "test-key");
         std::env::set_var("REPO_FULL_NAME", "owner/");
         let result = Config::from_env(None);
@@ -2818,7 +2846,7 @@ mod tests {
 
     #[test]
     fn test_repo_full_name_valid_format() {
-        let _guard = ENV_MUTEX.lock().unwrap();
+        let _guard = ENV_MUTEX.lock();
         std::env::set_var("DEEPSEEK_API_KEY", "test-key");
         std::env::set_var("REPO_FULL_NAME", "owner/repo");
         let result = Config::from_env(None);
@@ -2832,7 +2860,7 @@ mod tests {
 
     #[test]
     fn test_invalid_temperature_env_var_errors() {
-        let _guard = ENV_MUTEX.lock().unwrap();
+        let _guard = ENV_MUTEX.lock();
         std::env::set_var("DEEPSEEK_API_KEY", "test-key");
         std::env::set_var("RS_GUARD_TEMPERATURE", "not-a-number");
         let result = Config::from_env(None);
@@ -2847,7 +2875,7 @@ mod tests {
 
     #[test]
     fn test_temperature_out_of_range_errors() {
-        let _guard = ENV_MUTEX.lock().unwrap();
+        let _guard = ENV_MUTEX.lock();
         std::env::set_var("DEEPSEEK_API_KEY", "test-key");
         std::env::set_var("RS_GUARD_TEMPERATURE", "3.0");
         let result = Config::from_env(None);
@@ -2863,7 +2891,7 @@ mod tests {
     #[test]
     fn test_thinking_model_max_tokens_floor() {
         // When no explicit max_tokens is set, DeepSeek/Kimi get a raised floor.
-        let _guard = ENV_MUTEX.lock().unwrap();
+        let _guard = ENV_MUTEX.lock();
         std::env::set_var("DEEPSEEK_API_KEY", "test-key");
         let result = Config::from_env(None).unwrap();
         std::env::remove_var("DEEPSEEK_API_KEY");
@@ -2875,7 +2903,7 @@ mod tests {
 
     #[test]
     fn test_explicit_max_tokens_overrides_thinking_floor() {
-        let _guard = ENV_MUTEX.lock().unwrap();
+        let _guard = ENV_MUTEX.lock();
         std::env::set_var("DEEPSEEK_API_KEY", "test-key");
         std::env::set_var("RS_GUARD_MAX_TOKENS", "1024");
         let result = Config::from_env(None).unwrap();
@@ -2922,7 +2950,7 @@ mod tests {
     fn test_apply_args_switches_provider_and_re_resolves_variant() {
         use clap::Parser;
 
-        let _guard = ENV_MUTEX.lock().unwrap();
+        let _guard = ENV_MUTEX.lock();
         std::env::set_var("DEEPSEEK_API_KEY", "ds-key");
         std::env::set_var("KIMI_API_KEY", "kimi-key");
 
@@ -2977,7 +3005,7 @@ mod tests {
 
     #[test]
     fn test_pricing_override_from_toml() {
-        let _guard = ENV_MUTEX.lock().unwrap();
+        let _guard = ENV_MUTEX.lock();
         std::env::set_var("DEEPSEEK_API_KEY", "test-key");
 
         let toml = TomlConfig {
@@ -3045,7 +3073,7 @@ mod tests {
     #[test]
     fn test_apply_args_format_overrides_toml() {
         use crate::cli::OutputFormat;
-        let _guard = ENV_MUTEX.lock().unwrap();
+        let _guard = ENV_MUTEX.lock();
         std::env::set_var("DEEPSEEK_API_KEY", "test-key");
         let toml = TomlConfig {
             output_format: Some("text".into()),
@@ -3074,7 +3102,7 @@ mod tests {
 
     #[test]
     fn test_apply_args_empty_base_unsets_diff_base() {
-        let _guard = ENV_MUTEX.lock().unwrap();
+        let _guard = ENV_MUTEX.lock();
         std::env::set_var("DEEPSEEK_API_KEY", "test-key");
         let mut config = Config::from_env(None).unwrap();
         config.diff.diff_base = Some("main".into());
@@ -3106,7 +3134,7 @@ mod tests {
 
     #[test]
     fn test_config_from_env_check_run_defaults() {
-        let _guard = ENV_MUTEX.lock().unwrap();
+        let _guard = ENV_MUTEX.lock();
         std::env::set_var("DEEPSEEK_API_KEY", "test-key");
         std::env::remove_var("RS_GUARD_CHECK_RUN");
         std::env::remove_var("RS_GUARD_CHECK_RUN_NAME");
@@ -3119,7 +3147,7 @@ mod tests {
 
     #[test]
     fn test_config_from_env_check_run_toml_override() {
-        let _guard = ENV_MUTEX.lock().unwrap();
+        let _guard = ENV_MUTEX.lock();
         std::env::set_var("DEEPSEEK_API_KEY", "test-key");
         std::env::remove_var("RS_GUARD_CHECK_RUN");
         std::env::remove_var("RS_GUARD_CHECK_RUN_NAME");
@@ -3139,7 +3167,7 @@ mod tests {
 
     #[test]
     fn test_config_apply_args_check_run_cli_flag() {
-        let _guard = ENV_MUTEX.lock().unwrap();
+        let _guard = ENV_MUTEX.lock();
         std::env::set_var("DEEPSEEK_API_KEY", "test-key");
         std::env::remove_var("RS_GUARD_CHECK_RUN");
         let mut config = Config::from_env(None).unwrap();
@@ -3156,7 +3184,7 @@ mod tests {
 
     #[test]
     fn test_config_apply_args_check_run_name_cli_flag() {
-        let _guard = ENV_MUTEX.lock().unwrap();
+        let _guard = ENV_MUTEX.lock();
         std::env::set_var("DEEPSEEK_API_KEY", "test-key");
         let mut config = Config::from_env(None).unwrap();
         assert_eq!(config.github.check_run_name, "rs-guard");
@@ -3169,7 +3197,7 @@ mod tests {
 
     #[test]
     fn test_config_apply_args_check_run_name_none_preserves_toml() {
-        let _guard = ENV_MUTEX.lock().unwrap();
+        let _guard = ENV_MUTEX.lock();
         std::env::set_var("DEEPSEEK_API_KEY", "test-key");
         std::env::remove_var("RS_GUARD_CHECK_RUN_NAME");
         let toml = TomlConfig {
@@ -3190,7 +3218,7 @@ mod tests {
 
     #[test]
     fn test_config_apply_args_check_run_sha_cli_flag() {
-        let _guard = ENV_MUTEX.lock().unwrap();
+        let _guard = ENV_MUTEX.lock();
         std::env::set_var("DEEPSEEK_API_KEY", "test-key");
         std::env::remove_var("RS_GUARD_CHECK_RUN_SHA");
         let mut config = Config::from_env(None).unwrap();
@@ -3204,7 +3232,7 @@ mod tests {
 
     #[test]
     fn test_config_apply_args_env_false_overrides_toml_true() {
-        let _guard = ENV_MUTEX.lock().unwrap();
+        let _guard = ENV_MUTEX.lock();
         std::env::set_var("DEEPSEEK_API_KEY", "test-key");
         std::env::set_var("RS_GUARD_CHECK_RUN", "false");
         let toml = TomlConfig {
@@ -3229,7 +3257,7 @@ mod tests {
 
     #[test]
     fn test_config_apply_args_env_true_enables() {
-        let _guard = ENV_MUTEX.lock().unwrap();
+        let _guard = ENV_MUTEX.lock();
         std::env::set_var("DEEPSEEK_API_KEY", "test-key");
         std::env::set_var("RS_GUARD_CHECK_RUN", "true");
         let mut config = Config::from_env(None).unwrap();
@@ -3249,7 +3277,7 @@ mod tests {
     fn test_config_apply_args_env_invalid_bool_rejected_by_clap() {
         // clap validates the env var at parse time, so an invalid bool never
         // reaches apply_args. This test documents that contract.
-        let _guard = ENV_MUTEX.lock().unwrap();
+        let _guard = ENV_MUTEX.lock();
         std::env::set_var("DEEPSEEK_API_KEY", "test-key");
         std::env::set_var("RS_GUARD_CHECK_RUN", "yes");
         use clap::Parser;
@@ -3288,7 +3316,7 @@ mod tests {
 
     #[test]
     fn test_config_from_env_rejects_empty_check_run_name() {
-        let _guard = ENV_MUTEX.lock().unwrap();
+        let _guard = ENV_MUTEX.lock();
         std::env::set_var("DEEPSEEK_API_KEY", "test-key");
         let toml = TomlConfig {
             check_run_name: Some("   ".to_string()),

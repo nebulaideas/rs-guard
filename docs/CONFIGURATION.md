@@ -36,7 +36,7 @@ model = "deepseek-v4-flash"     # Model identifier (provider-specific)
 variant = "flash"               # Provider-specific model variant (e.g. "flash", "pro" for deepseek). Optional.
 temperature = 0.1               # Sampling temperature (0.0 to 2.0)
 max_tokens = 8192               # Maximum tokens for LLM completion
-llm_timeout_secs = 180          # Total timeout for LLM HTTP calls in seconds (default 120)
+# llm_timeout_secs = 240        # Optional. Default 120s; auto-raised to 240s for deepseek/kimi when unset.
 
 # GitHub-native UX (v1.7)
 # check_run = true               # Publish a GitHub Check Run (requires checks: write)
@@ -46,7 +46,7 @@ llm_timeout_secs = 180          # Total timeout for LLM HTTP calls in seconds (d
 # Example for deepseek-v4-pro (complex reasoning)
 # variant = "pro"
 # max_tokens = 16384
-# llm_timeout_secs = 180
+# llm_timeout_secs = 240
 
 # Per-provider configuration
 [providers.deepseek]
@@ -110,7 +110,7 @@ base_url = "https://generativelanguage.googleapis.com/v1beta/openai"
 | `chunk_head_lines`  | integer | `400`             | Lines preserved from the **start** of the diff when chunking. Increase for providers with large context windows (e.g. 128K).      |
 | `chunk_tail_lines`  | integer | `400`             | Lines preserved from the **end** of the diff when chunking. Combined default of 800 covers most PRs without truncation.           |
 | `cache_dir`         | string  | `.rs-guard/cache` | Custom cache directory path. Defaults to git-root (or CWD) relative `.rs-guard/cache`.                                           |
-| `auto_gitignore`    | boolean | `true`            | Whether to automatically add the cache directory to `.gitignore`.                                                                |
+| `auto_gitignore`    | boolean | `false`           | If `true`, append the cache directory to the **repository** `.gitignore` on local runs. Default is off — put `.rs-guard/` in your [global gitignore](USAGE.md#global-gitignore) instead. |
 | `important_issues_threshold` | integer | `3`      | Number of `[Important]` issues required to trigger `REQUEST_CHANGES`. `0` disables blocking on important issues (they still surface as `COMMENT`). |
 | `project_rules_enabled` | boolean | `true` | Whether to scan for and load project rules files. Set to `false` to disable auto-detection. Can also be disabled via `--no-project-rules` CLI flag or `RS_GUARD_NO_PROJECT_RULES` env var (any non-empty value disables). |
 | `rules_file` | string | (none) | Path to an explicit project rules file. Overrides auto-detection. Mutually exclusive with `--no-project-rules` / `RS_GUARD_NO_PROJECT_RULES`. Can also be set via `--rules-file` CLI flag or `RS_GUARD_RULES_FILE` env var. |
